@@ -1,18 +1,37 @@
+import { runMigrations } from '@fma/db/migrate'
+import { pool } from './db'
 import { buildApp } from './app'
 
 const host = process.env.HOST ?? '0.0.0.0'
 const port = Number.parseInt(process.env.PORT ?? '3001', 10)
 
-const app = buildApp()
+async function main(): Promise<void> {
+  const app = buildApp()
 
-app.listen({ host, port }).catch((err) => {
-  app.log.error(err)
+  // Migrations run automatically on startup (ADR-0007), before accepting
+  // traffic. Idempotent: already-applied migrations are skipped.
+  const applied = await runMigrations(pool)
+  if (applied.length > 0) {
+    app.log.info({ applied }, 'migrations applied')
+  }
+
+  await app.listen({ host, port })
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      app.log.info({ signal }, 'shutting down')
+      app
+        .close()
+        .catch((err) => app.log.error(err))
+        .finally(() => {
+          pool.end().catch(() => {})
+          process.exit(0)
+        })
+    })
+  }
+}
+
+main().catch((err) => {
+  console.error(err)
   process.exit(1)
 })
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    app.log.info({ signal }, 'shutting down')
-    app.close().finally(() => process.exit(0))
-  })
-}

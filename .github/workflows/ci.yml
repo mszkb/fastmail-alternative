@@ -13,6 +13,22 @@ jobs:
   quality:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mail
+          POSTGRES_PASSWORD: mail
+          POSTGRES_DB: mail_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mail"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://mail:mail@localhost:5432/mail_test
     steps:
       - uses: actions/checkout@v4
 

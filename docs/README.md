@@ -10,5 +10,6 @@
 | [adr/](adr/README.md)                                                | Architecture Decision Records                                   |
 | [process/definition-of-done.md](process/definition-of-done.md)       | Definition of Done                                              |
 | [process/external-dependencies.md](process/external-dependencies.md) | Externe Abhängigkeiten und Risiken                              |
+| [process/key-rotation.md](process/key-rotation.md)                   | Master-Key-Rotation und Crypto-Shredding                        |
 
 Die Phasen- und Aufgabenplanung steht in [`../ROADMAP.md`](../ROADMAP.md).

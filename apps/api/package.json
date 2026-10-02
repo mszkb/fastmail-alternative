@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fma/crypto": "workspace:*",
+    "@fma/db": "workspace:*",
     "@fma/shared": "workspace:*",
     "fastify": "^5.12.5"
   },
