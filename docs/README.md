@@ -4,6 +4,7 @@
 | --- | --- |
 | [product/vision.md](product/vision.md) | Produktziel, Zielgruppen, Prinzipien, MVP-Scope und Nicht-Ziele |
 | [architecture/overview.md](architecture/overview.md) | Komponenten, Datenfluss, Deployment |
+| [architecture/data-model.md](architecture/data-model.md) | Datenmodell-Entwurf mit ER-Diagramm |
 | [architecture/security.md](architecture/security.md) | Daten- und Sicherheitsmodell |
 | [architecture/push.md](architecture/push.md) | Push-Strategie (Web Push, Relay, später APNs) |
 | [adr/](adr/README.md) | Architecture Decision Records |

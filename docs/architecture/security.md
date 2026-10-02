@@ -16,7 +16,7 @@
 
 ## Serverseitige Mailkopie
 
-Explizit konfigurierbarer Modus: **Proxy**, **Index** oder **Cache** (ADR-0001). Der Modus und seine Datenschutzfolgen müssen in der Betreiber-Doku klar beschrieben sein.
+Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in der DB und alle Dateien im Volume `mail-data` sind mit einem Data Key pro Konto verschlüsselt (siehe [data-model.md](data-model.md#verschlüsselung)). Ohne `MASTER_KEY` sind DB-Dump und Volume unlesbar. Die Betreiber-Doku muss das Sichern des Keys getrennt vom Backup klar beschreiben.
 
 ## Schutzmaßnahmen
 

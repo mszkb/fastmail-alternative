@@ -4,11 +4,11 @@ Leitfaden für Claude Code (und andere Agents) in diesem Repository.
 
 ## Projekt in einem Satz
 
-Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in einer schnellen, gut aussehenden Unified Inbox – zuerst als PWA mit Web Push (inkl. iOS), langfristig mit nativer iOS-App.
+Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in einer schnellen, gut aussehenden Oberfläche mit getrennten Konten und Kontowechsel (Unified Inbox nur optional) – zuerst als PWA mit Web Push (inkl. iOS), langfristig mit nativer iOS-App.
 
 ## Status
 
-Phase 0 (Discovery). Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
+Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
 
 ## Wo steht was
 
@@ -17,6 +17,7 @@ Phase 0 (Discovery). Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROA
 | Phasen, Milestones, Epics | `ROADMAP.md` |
 | Vision, Zielgruppen, Scope | `docs/product/vision.md` |
 | Architektur | `docs/architecture/overview.md` |
+| Datenmodell (ER) | `docs/architecture/data-model.md` |
 | Daten- & Sicherheitsmodell | `docs/architecture/security.md` |
 | Push-Strategie | `docs/architecture/push.md` |
 | Architekturentscheidungen | `docs/adr/` |
@@ -31,9 +32,11 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 2. **Keine künstliche Paywall** für PWA, Export, Grundfunktionen oder eigene Instanz.
 3. **Push ist nur ein Hinweis.** Push ist nie die Quelle der Wahrheit. Die App synchronisiert beim Start und bei Fokuswechsel.
 4. **Keine Mailinhalte in Push-Payloads.** Nur Ereignistyp, Installations-ID, Badge-Zahl. Keine Betreffzeilen, Absender oder Bodies.
-5. **Secrets nie im Klartext.** IMAP-/SMTP-Passwörter und OAuth-Tokens verschlüsselt at rest. Der Master-Key kommt ausschließlich aus Secret-Management/Umgebung – niemals ins Repo, in die DB oder in Logs.
+5. **Secrets und Inhalte nie im Klartext.** IMAP-/SMTP-Passwörter, OAuth-Tokens und alle lesbaren Mailinhalte (Betreff, Adressen, Snippet, Body, Dateinamen) verschlüsselt at rest (siehe `docs/architecture/data-model.md`). Der Master-Key kommt ausschließlich aus Secret-Management/Umgebung – niemals ins Repo, in die DB oder in Logs.
 6. **Keine sensiblen Daten in Logs**, Fehlermeldungen, Push-Payloads oder Support-Exports (Zugangsdaten, Mailinhalte, Betreffzeilen).
 7. **Fehlerisolierung pro Konto.** Ein Konto mit ungültigen Zugangsdaten oder ausgefallenem Provider darf andere Konten nicht blockieren.
+8. **Konten bleiben getrennt.** Standard ist der Kontowechsel; eine Unified Inbox ist optional und standardmäßig aus.
+9. **So einfach wie möglich.** Erst die einfachste funktionierende Lösung (z. B. eine Job-Tabelle statt Queue-Service, IMAP `SEARCH` statt eigenem Suchindex).
 
 ## Konventionen
 
@@ -43,17 +46,18 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - **Scope:** Was in `docs/product/vision.md` unter „Bewusst nicht im MVP" steht, nicht ohne Rücksprache einbauen.
 - **Definition of Done** (`docs/process/definition-of-done.md`) gilt für jeden PR.
 
-## Geplanter Tech-Stack (vorläufig, siehe ADRs)
+## Tech-Stack (entschieden, siehe ADRs)
 
-- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache
-- Backend: Fastify (Node/TypeScript) **oder** .NET – offen, ADR-0008
-- Datenbank: PostgreSQL
-- Queue: Redis/Valkey oder PostgreSQL-basiert – offen, ADR-0003
-- Object Storage: S3-kompatibel (optional)
-- Worker: IMAP-Sync, SMTP-Versand, Indexierung, Cleanup als getrennte Prozesse
-- Deployment: Docker Compose
-
-Solange die ADRs auf „Proposed" stehen, keine Annahmen über Frameworks hart in Code gießen.
+- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache, offline-first (ADR-0008, ADR-0010)
+- Backend: Fastify (Node/TypeScript) für API und Worker (ADR-0008)
+- API-Vertrag: OpenAPI, Basis für spätere native Clients (ADR-0010)
+- Datenbank: PostgreSQL (ADR-0002)
+- Queue: eigene `job`-Tabelle in PostgreSQL mit `SKIP LOCKED` (ADR-0003)
+- Mail-Speicher: Server speichert alle Mails, verschlüsselt im Docker-Volume `mail-data` (ADR-0001)
+- Suche: IMAP `SEARCH` beim Provider (ADR-0006)
+- Auth: Single-User, Passwort, serverseitige Sessions (ADR-0004); Mailanbieter per Passwort oder OAuth2 (ADR-0011)
+- Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
+- Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007)
 
 ## Befehle
 

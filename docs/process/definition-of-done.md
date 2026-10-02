@@ -21,7 +21,7 @@ Ein Issue/PR gilt als erledigt, wenn alle zutreffenden Punkte erfüllt sind.
 - [ ] Keine Zugangsdaten, Mailinhalte oder Betreffzeilen in Logs, Fehlermeldungen oder Push-Payloads
 - [ ] Eingaben validiert; Ausgaben (insbesondere HTML-Mails) sanitisiert
 - [ ] Neue Endpunkte: Auth, Autorisierung, Rate Limit und CSRF geprüft
-- [ ] Neue Abhängigkeiten auf bekannte Schwachstellen und Lizenz geprüft
+- [ ] Neue Abhängigkeiten auf bekannte Schwachstellen und Lizenz geprüft (bevorzugt MIT/ISC/BSD/Apache-2.0, siehe ADR-0009)
 
 ## Dokumentation
 
