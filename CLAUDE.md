@@ -73,3 +73,5 @@ Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
 | `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                       |
 
 Struktur: `apps/web` (Nuxt-PWA), `apps/api` (Fastify, Port 3001), `apps/worker` (Jobs), `packages/shared` (geteilte Typen/Domänenlogik, Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert).
+
+Deployment (ADR-0007): `docker compose` mit caddy/web/api/worker/postgres. Erstes Setup: `node scripts/setup-env.mjs` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.

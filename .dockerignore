@@ -1,0 +1,17 @@
+# Secrets and build contexts stay small: nothing below belongs into an image.
+node_modules
+**/node_modules
+dist
+**/dist
+.nuxt
+**/.nuxt
+.output
+**/.output
+coverage
+.git
+.github
+.env
+.env.*
+*.log
+docs
+*.md

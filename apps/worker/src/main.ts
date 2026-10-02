@@ -1,14 +1,13 @@
 /**
  * Worker entrypoint. The real jobs (IMAP sync, SMTP send, push, cleanup) are
- * added in later phases; this skeleton keeps the process alive, reacts to
- * shutdown signals and proves that the runtime works.
+ * added in later phases. The heartbeat keeps the process alive and shows
+ * that the runtime works; shutdown signals stop it cleanly.
  */
 const HEARTBEAT_MS = 60_000
 
 const heartbeat = setInterval(() => {
   console.log(`[worker] alive at ${new Date().toISOString()}`)
 }, HEARTBEAT_MS)
-heartbeat.unref()
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
