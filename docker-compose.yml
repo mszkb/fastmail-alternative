@@ -1,11 +1,22 @@
 # Deployment per ADR-0007. Configuration via .env (see .env.example and
 # scripts/setup-env.mjs). Operators who bring their own reverse proxy can
 # remove the caddy service; everything else keeps working.
+#
+# Resource policy (lean self-hosting): every service has a memory limit so
+# the stack cannot exhaust a small VPS/Raspberry Pi, and logs are rotated.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
 
 services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 64m
     ports:
       - '80:80'
       - '443:443'
@@ -32,28 +43,24 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
-    environment:
-      NODE_ENV: production
+    logging: *default-logging
+    mem_limit: 64m
     expose:
       - '3000'
     healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1']
       interval: 15s
       timeout: 5s
       retries: 6
-      start_period: 20s
+      start_period: 10s
 
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 192m
     environment:
       NODE_ENV: production
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
@@ -86,6 +93,9 @@ services:
       context: .
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    # Headroom for IMAP initial sync + encryption peaks.
+    mem_limit: 256m
     environment:
       NODE_ENV: production
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
@@ -102,6 +112,16 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 256m
+    # Single-user tuning: small buffers, few connections.
+    command:
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - max_connections=20
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

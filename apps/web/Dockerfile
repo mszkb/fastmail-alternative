@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-# Build the Nuxt PWA. Build context: repository root.
+# Build the Nuxt PWA as static files (SPA, no SSR runtime).
+# Build context: repository root.
 FROM node:24-alpine AS build
 WORKDIR /repo
 
@@ -8,15 +9,14 @@ RUN corepack enable
 COPY . .
 
 RUN pnpm install --frozen-lockfile --filter @fma/web...
-RUN pnpm --filter @fma/web build
+RUN pnpm --filter @fma/web generate
 
-FROM node:24-alpine
-WORKDIR /app
-ENV NODE_ENV=production
+# Static files need no node runtime: nginx serves them (~10 MB RSS instead
+# of ~80 MB for a node server).
+FROM nginx:alpine
 
-COPY --from=build /repo/LICENSE ./LICENSE
-COPY --from=build /repo/apps/web/.output ./.output
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /repo/LICENSE /LICENSE
+COPY --from=build /repo/apps/web/.output/public /usr/share/nginx/html
 
-USER node
 EXPOSE 3000
-CMD ["node", ".output/server/index.mjs"]
