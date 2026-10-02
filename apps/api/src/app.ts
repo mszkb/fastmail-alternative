@@ -3,6 +3,7 @@ import type { HealthStatus } from '@fma/shared'
 import { registerAuth } from './auth/routes'
 import { pool } from './db'
 import { buildLoggerOptions } from './logging'
+import { accountRoutes } from './mail/accounts'
 import { Metrics } from './metrics'
 
 export interface AppOptions {
@@ -70,6 +71,7 @@ export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
   })
 
   registerAuth(app, pool)
+  app.register(accountRoutes)
 
   return app
 }

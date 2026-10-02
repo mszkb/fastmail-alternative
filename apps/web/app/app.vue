@@ -1,10 +1,19 @@
 <script setup lang="ts">
-// Auth UI (roadmap 1.6): first-start setup, login, logout and device
-// management. The real mail UI replaces the "app" view in later phases.
+// Auth UI (roadmap 1.6) + account management (roadmap 2.1). The real mail
+// UI replaces the "app" view in later phases.
 interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email?: string
+}
+
+interface Account {
+  id: string
+  displayName: string
+  emailAddress: string
+  imap: { host: string; port: number }
+  smtp: { host: string; port: number }
+  status: string
 }
 
 interface DeviceInfo {
@@ -24,6 +33,19 @@ const error = ref('')
 const info = ref('')
 const currentEmail = ref('')
 const devices = ref<DeviceInfo[]>([])
+const accounts = ref<Account[]>([])
+
+async function loadAccounts(): Promise<void> {
+  try {
+    const res = await fetch('/api/accounts')
+    if (res.ok) {
+      const body = (await res.json()) as { accounts: Account[] }
+      accounts.value = body.accounts
+    }
+  } catch {
+    accounts.value = []
+  }
+}
 
 function guessPlatform(): string {
   const ua = navigator.userAgent
@@ -59,6 +81,7 @@ async function loadStatus(): Promise<void> {
       currentEmail.value = status.email ?? ''
       view.value = 'app'
       await loadDevices()
+      await loadAccounts()
     } else {
       view.value = 'login'
     }
@@ -88,6 +111,7 @@ async function submit(): Promise<void> {
     password.value = ''
     view.value = 'app'
     await loadDevices()
+    await loadAccounts()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unbekannter Fehler'
   } finally {
@@ -177,6 +201,9 @@ onMounted(loadStatus)
         </p>
         <button type="button" :disabled="busy" @click="logout">Abmelden</button>
       </div>
+
+      <AccountList :accounts="accounts" @deleted="loadAccounts" />
+      <AccountForm @created="loadAccounts" />
 
       <div class="card">
         <h2>Geräte</h2>
