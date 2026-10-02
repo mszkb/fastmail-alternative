@@ -226,12 +226,12 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
 Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt nur, was Sync, Threading und Sortierung technisch brauchen.**
 
-| Klartext | Verschlüsselt |
-| --- | --- |
-| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet |
-| `Message-ID`, `In-Reply-To`, `References` | Body, Anhang-Dateinamen, Anhang-Inhalte |
-| Kontoserver (Host/Port), Kontostatus | Zugangsdaten, Outbox-Nachrichten |
-| | TOTP-Secret, Push-Subscription-Keys |
+| Klartext                                     | Verschlüsselt                           |
+| -------------------------------------------- | --------------------------------------- |
+| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet   |
+| `Message-ID`, `In-Reply-To`, `References`    | Body, Anhang-Dateinamen, Anhang-Inhalte |
+| Kontoserver (Host/Port), Kontostatus         | Zugangsdaten, Outbox-Nachrichten        |
+|                                              | TOTP-Secret, Push-Subscription-Keys     |
 
 **Verfahren, einfach gehalten:**
 
@@ -249,12 +249,12 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 
 ## Querschnittsregeln
 
-| Regel | Umsetzung im Modell |
-| --- | --- |
-| Mandantentrennung | Jede Mail-Tabelle ist über `account_id` → `user_id` erreichbar; jede API-Abfrage filtert über `user_id`. |
-| Löschen eines Kontos | `ON DELETE CASCADE` von `mail_account` auf alle abhängigen Tabellen. Der DEK ist damit weg; Dateien im Volume entfernt der Cleanup-Job (Roadmap 3.1, 5.5). |
-| Löschen eines Benutzers | Kaskadiert auf Geräte, Sessions, Subscriptions und Konten. |
-| Dateien im Volume | Gehören zu genau einem Konto (Pfad mit `account_id`), sind mit dessen DEK verschlüsselt und werden beim Löschen des Kontos mit entfernt. |
+| Regel                   | Umsetzung im Modell                                                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mandantentrennung       | Jede Mail-Tabelle ist über `account_id` → `user_id` erreichbar; jede API-Abfrage filtert über `user_id`.                                                   |
+| Löschen eines Kontos    | `ON DELETE CASCADE` von `mail_account` auf alle abhängigen Tabellen. Der DEK ist damit weg; Dateien im Volume entfernt der Cleanup-Job (Roadmap 3.1, 5.5). |
+| Löschen eines Benutzers | Kaskadiert auf Geräte, Sessions, Subscriptions und Konten.                                                                                                 |
+| Dateien im Volume       | Gehören zu genau einem Konto (Pfad mit `account_id`), sind mit dessen DEK verschlüsselt und werden beim Löschen des Kontos mit entfernt.                   |
 
 ## Wichtige Indizes (vorläufig)
 
@@ -268,10 +268,10 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 
 ## Entscheidungen (2026-10-02)
 
-| Frage | Entscheidung |
-| --- | --- |
-| Threads kontoübergreifend? | **Nein, pro Konto.** Standard sind getrennte Konten mit Kontowechsel; die Unified Inbox ist optional und standardmäßig aus. |
-| Flags bei Gmail aggregieren? | **Nein.** Flags bleiben an `message_location`; die Anzeige nimmt die Flags des aktuellen Ordners. Erst nachbessern, wenn es in der Praxis stört. |
-| Betreff/Snippet verschlüsseln? | **Ja**, zusammen mit allen anderen lesbaren Inhalten (siehe [Verschlüsselung](#verschlüsselung)). |
-| Job-Tabelle | **Eine eigene Tabelle** mit `SKIP LOCKED`, keine Bibliothek mit eigenem Schema (ADR-0003). |
-| Suchindex | **Kein eigener Index im MVP.** Suche per IMAP `SEARCH` (ADR-0006). |
+| Frage                          | Entscheidung                                                                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Threads kontoübergreifend?     | **Nein, pro Konto.** Standard sind getrennte Konten mit Kontowechsel; die Unified Inbox ist optional und standardmäßig aus.                      |
+| Flags bei Gmail aggregieren?   | **Nein.** Flags bleiben an `message_location`; die Anzeige nimmt die Flags des aktuellen Ordners. Erst nachbessern, wenn es in der Praxis stört. |
+| Betreff/Snippet verschlüsseln? | **Ja**, zusammen mit allen anderen lesbaren Inhalten (siehe [Verschlüsselung](#verschlüsselung)).                                                |
+| Job-Tabelle                    | **Eine eigene Tabelle** mit `SKIP LOCKED`, keine Bibliothek mit eigenem Schema (ADR-0003).                                                       |
+| Suchindex                      | **Kein eigener Index im MVP.** Suche per IMAP `SEARCH` (ADR-0006).                                                                               |

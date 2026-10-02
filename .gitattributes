@@ -1,0 +1,2 @@
+# Normalize line endings to LF (repo is deployed via Docker/Linux, developed on mixed OSes)
+* text=auto eol=lf

@@ -17,11 +17,11 @@ Der Produktowner nutzt **Gmail, Outlook, Fastmail und einen eigenen IMAP/SMTP-Se
 
 **Option 2. OAuth2 kommt ins MVP** (neue Aufgabe 2.10):
 
-| Anbieter | Anmeldung |
-| --- | --- |
-| Outlook / Microsoft 365 | OAuth2 (Pflicht) |
-| Gmail | OAuth2 **oder** App-Passwort, wählbar beim Anlegen |
-| Fastmail, eigener Server, andere | Passwort / App-Passwort |
+| Anbieter                         | Anmeldung                                          |
+| -------------------------------- | -------------------------------------------------- |
+| Outlook / Microsoft 365          | OAuth2 (Pflicht)                                   |
+| Gmail                            | OAuth2 **oder** App-Passwort, wählbar beim Anlegen |
+| Fastmail, eigener Server, andere | Passwort / App-Passwort                            |
 
 - **Jeder Self-Hoster registriert eine eigene OAuth-App** (Azure App Registration bzw. Google-Cloud-Projekt) und trägt Client-ID und Secret in `.env` ein. Es gibt keine zentrale App des Projekts, damit kein Dienst des Projekts zwischen Instanz und Provider steht (Self-hosted first).
 - Access- und Refresh-Tokens liegen verschlüsselt wie Passwörter vor (`credential_enc`). Der Worker erneuert Tokens automatisch.

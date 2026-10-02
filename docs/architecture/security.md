@@ -20,16 +20,16 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 
 ## Schutzmaßnahmen
 
-| Bedrohung | Maßnahme |
-| --- | --- |
-| Brute Force / Missbrauch | Rate Limits auf Login, Konto-Test, Versand |
-| CSRF | CSRF-Token bzw. SameSite + Origin-Prüfung |
-| Session-Diebstahl | Rotation, Gerätebindung, Widerruf |
+| Bedrohung                      | Maßnahme                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Brute Force / Missbrauch       | Rate Limits auf Login, Konto-Test, Versand                                                                                                                              |
+| CSRF                           | CSRF-Token bzw. SameSite + Origin-Prüfung                                                                                                                               |
+| Session-Diebstahl              | Rotation, Gerätebindung, Widerruf                                                                                                                                       |
 | SSRF über Mailserver-Hostnamen | Auflösung prüfen, private/Loopback/Link-Local-Adressen standardmäßig blockieren (für Self-Hoster mit internem Mailserver konfigurierbar freigebbar), nur erlaubte Ports |
-| Bösartige HTML-Mails | Sanitizing, strikte CSP, Rendering in sandboxed iframe, Remote-Content opt-in |
-| Bösartige Anhänge | Auslieferung mit `Content-Disposition: attachment`, eigener Origin/Sandbox, Größenlimits |
-| Datenabfluss über Logs | Zentrale Redaction, Tests dafür |
-| Datenabfluss über Push | Inhaltsfreie Payloads (siehe [push.md](push.md)) |
+| Bösartige HTML-Mails           | Sanitizing, strikte CSP, Rendering in sandboxed iframe, Remote-Content opt-in                                                                                           |
+| Bösartige Anhänge              | Auslieferung mit `Content-Disposition: attachment`, eigener Origin/Sandbox, Größenlimits                                                                                |
+| Datenabfluss über Logs         | Zentrale Redaction, Tests dafür                                                                                                                                         |
+| Datenabfluss über Push         | Inhaltsfreie Payloads (siehe [push.md](push.md))                                                                                                                        |
 
 ## Backups
 
