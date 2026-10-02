@@ -15,6 +15,7 @@ Self-hosted first: Die Installation muss für technikaffine Einzelpersonen nachv
 3. **Kubernetes/Helm**: für das MVP überdimensioniert.
 
 TLS:
+
 - a. **Caddy im Compose**: automatische Let's-Encrypt-Zertifikate.
 - b. Ein eigener Reverse Proxy des Betreibers.
 
@@ -22,13 +23,13 @@ TLS:
 
 **Docker Compose mit Caddy** auf einer eigenen Domain:
 
-| Service | Aufgabe |
-| --- | --- |
-| `caddy` | TLS (Let's Encrypt), Reverse Proxy für `web` und `api` |
-| `web` | Nuxt-PWA |
-| `api` | Fastify-API, führt beim Start Migrationen aus |
-| `worker` | IMAP-Sync, SMTP-Versand, Push, Cleanup |
-| `postgres` | Datenbank und Job-Queue |
+| Service    | Aufgabe                                                |
+| ---------- | ------------------------------------------------------ |
+| `caddy`    | TLS (Let's Encrypt), Reverse Proxy für `web` und `api` |
+| `web`      | Nuxt-PWA                                               |
+| `api`      | Fastify-API, führt beim Start Migrationen aus          |
+| `worker`   | IMAP-Sync, SMTP-Versand, Push, Cleanup                 |
+| `postgres` | Datenbank und Job-Queue                                |
 
 Volumes: `postgres-data`, `mail-data` (verschlüsselte Bodies und Anhänge), `caddy-data`.
 

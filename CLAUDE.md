@@ -12,17 +12,17 @@ Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktue
 
 ## Wo steht was
 
-| Thema | Datei |
-| --- | --- |
-| Phasen, Milestones, Epics | `ROADMAP.md` |
-| Vision, Zielgruppen, Scope | `docs/product/vision.md` |
-| Architektur | `docs/architecture/overview.md` |
-| Datenmodell (ER) | `docs/architecture/data-model.md` |
-| Daten- & Sicherheitsmodell | `docs/architecture/security.md` |
-| Push-Strategie | `docs/architecture/push.md` |
-| Architekturentscheidungen | `docs/adr/` |
-| Definition of Done | `docs/process/definition-of-done.md` |
-| Externe Abhängigkeiten | `docs/process/external-dependencies.md` |
+| Thema                      | Datei                                   |
+| -------------------------- | --------------------------------------- |
+| Phasen, Milestones, Epics  | `ROADMAP.md`                            |
+| Vision, Zielgruppen, Scope | `docs/product/vision.md`                |
+| Architektur                | `docs/architecture/overview.md`         |
+| Datenmodell (ER)           | `docs/architecture/data-model.md`       |
+| Daten- & Sicherheitsmodell | `docs/architecture/security.md`         |
+| Push-Strategie             | `docs/architecture/push.md`             |
+| Architekturentscheidungen  | `docs/adr/`                             |
+| Definition of Done         | `docs/process/definition-of-done.md`    |
+| Externe Abhängigkeiten     | `docs/process/external-dependencies.md` |
 
 ## Nicht verhandelbare Prinzipien
 
@@ -61,4 +61,14 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
 ## Befehle
 
-Noch keine. Sobald Phase 1 (Foundation) steht, hier Build-, Test-, Lint- und Dev-Befehle eintragen.
+Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
+
+| Befehl                                    | Wirkung                                             |
+| ----------------------------------------- | --------------------------------------------------- |
+| `pnpm install`                            | Abhängigkeiten installieren                         |
+| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`) |
+| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc) |
+| `pnpm build`                              | Alle Apps bauen (web, api, worker)                  |
+| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                       |
+
+Struktur: `apps/web` (Nuxt-PWA), `apps/api` (Fastify, Port 3001), `apps/worker` (Jobs), `packages/shared` (geteilte Typen/Domänenlogik, Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert).

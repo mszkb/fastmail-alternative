@@ -31,14 +31,14 @@
                          └────────────────────────────────────────┘
 ```
 
-| Komponente | Verantwortung |
-| --- | --- |
-| **caddy** | TLS über Let's Encrypt, Reverse Proxy (ADR-0007) |
-| **web** | Nuxt/Vue-PWA: Service Worker, IndexedDB-Cache, Offline-Queue. Dünner Client ohne eigene Geschäftslogik (ADR-0010) |
-| **api** | Fastify, REST/JSON mit OpenAPI-Vertrag (später ggf. SSE für Live-Updates). Keine IMAP-Verbindungen direkt aus Requests: Alles Langlaufende läuft über Jobs. Ausnahme ist die Suche über IMAP `SEARCH` (ADR-0006). |
-| **worker** | IMAP-Sync (IDLE-Verbindungen pro Konto), SMTP-Versand, Push, Cleanup |
-| **postgres** | Benutzer, Geräte, Konten, Ordner, Nachrichtenmetadaten (lesbare Felder verschlüsselt), Threads, Jobs, Push-Subscriptions |
-| **mail-data** | Docker-Volume mit allen Mails und Anhängen, verschlüsselt pro Konto (ADR-0001) |
+| Komponente    | Verantwortung                                                                                                                                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **caddy**     | TLS über Let's Encrypt, Reverse Proxy (ADR-0007)                                                                                                                                                                  |
+| **web**       | Nuxt/Vue-PWA: Service Worker, IndexedDB-Cache, Offline-Queue. Dünner Client ohne eigene Geschäftslogik (ADR-0010)                                                                                                 |
+| **api**       | Fastify, REST/JSON mit OpenAPI-Vertrag (später ggf. SSE für Live-Updates). Keine IMAP-Verbindungen direkt aus Requests: Alles Langlaufende läuft über Jobs. Ausnahme ist die Suche über IMAP `SEARCH` (ADR-0006). |
+| **worker**    | IMAP-Sync (IDLE-Verbindungen pro Konto), SMTP-Versand, Push, Cleanup                                                                                                                                              |
+| **postgres**  | Benutzer, Geräte, Konten, Ordner, Nachrichtenmetadaten (lesbare Felder verschlüsselt), Threads, Jobs, Push-Subscriptions                                                                                          |
+| **mail-data** | Docker-Volume mit allen Mails und Anhängen, verschlüsselt pro Konto (ADR-0001)                                                                                                                                    |
 
 ## Kernabläufe
 
