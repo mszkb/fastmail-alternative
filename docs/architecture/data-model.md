@@ -1,14 +1,14 @@
 # Datenmodell (Entwurf)
 
-> Status: Entwurf zu Roadmap-Aufgabe **0.4**. Grundlage für ADR-0001 bis ADR-0006 und das Bedrohungsmodell (0.3). Typen sind PostgreSQL-orientiert (ADR-0002, Proposed), aber framework-neutral formuliert.
+> Status: Ergebnis von Roadmap-Aufgabe **0.4**, abgestimmt mit den ADRs 0001–0011. Grundlage für das Bedrohungsmodell (0.3) und Phase 1. Typen sind PostgreSQL (ADR-0002).
 >
 > Leitlinie: **so einfach wie möglich.** Was erst später gebraucht wird, kommt erst später ins Modell.
 
 ## Ziele
 
-1. **Getrennte Konten** – jede Mail-Entität hängt an genau einem `mail_account`, jeder Account an genau einem `user`. Die Standardansicht ist ein Konto (Thunderbird-artiger Kontowechsel), nicht eine Sammel-Inbox.
+1. **Single-User, getrennte Konten**: Eine Instanz hat einen Benutzer (ADR-0004), das Modell bleibt aber mehrbenutzerfähig. Jede Mail-Entität hängt an genau einem `mail_account`, jeder Account an genau einem `user`. Die Standardansicht ist ein Konto (Thunderbird-artiger Kontowechsel), nicht eine Sammel-Inbox.
 2. **IMAP-treu** – Identität einer Nachricht auf dem Server ist `(folder, UIDVALIDITY, UID)`; das Modell bildet das direkt ab.
-3. **Bodies sind optional** – im Proxy-Modus (ADR-0001) existieren keine Bodies auf dem Server. Bodies und Anhänge liegen daher in eigenen Tabellen.
+3. **Der Server speichert alles** (ADR-0001): Bodies und Anhänge werden beim Sync geladen und als verschlüsselte Dateien im Volume `mail-data` abgelegt. In der DB stehen nur Verweise darauf.
 4. **Fehlerisolierung pro Konto** – Sync-Zustand, Fehlerzähler und Backoff liegen am Konto bzw. Ordner, nie global.
 5. **Inhalte und Secrets nur verschlüsselt** – Zugangsdaten **und alles, was ein Mensch liest** (Betreff, Adressen, Snippet, Body, Dateinamen), liegen verschlüsselt in der DB (siehe [Verschlüsselung](#verschlüsselung)).
 6. **Nativer Client später ohne Umbau** – Geräte, Sessions und Push-Subscriptions sind getrennt; Push kennt einen `transport`.
@@ -30,7 +30,7 @@ erDiagram
     THREAD ||--o{ MESSAGE : "umfasst"
     MESSAGE ||--o{ MESSAGE_LOCATION : "liegt in"
     FOLDER ||--o{ MESSAGE_LOCATION : "enthält"
-    MESSAGE ||--o| MESSAGE_BODY : "hat (modusabhängig)"
+    MESSAGE ||--|| MESSAGE_BODY : "hat"
     MESSAGE ||--o{ ATTACHMENT : "hat"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
@@ -81,6 +81,8 @@ erDiagram
         bytea wrapped_dek "Data Key des Kontos"
         text key_id "Master-Key-Version"
         text credential_kind "password | oauth2"
+        text oauth_provider "microsoft | google | null"
+        timestamptz sync_since "Initial-Sync-Grenze, null = alles"
         bytea credential_enc
         text status "ok | auth_error | unreachable | disabled"
         int error_count
@@ -123,7 +125,7 @@ erDiagram
         bytea subject_enc
         bytea from_enc
         bytea recipients_enc "To + Cc"
-        bytea snippet_enc "nur Cache-Modus"
+        bytea snippet_enc
         timestamptz sent_at
         timestamptz received_at
         int size_bytes
@@ -139,8 +141,9 @@ erDiagram
     }
     MESSAGE_BODY {
         uuid message_id PK
-        bytea content_enc "text + sanitisiertes HTML"
-        text storage_ref "S3-Key, falls ausgelagert (ebenfalls verschlüsselt)"
+        text storage_ref "Datei im Volume: verschlüsselte Rohmail"
+        bytea html_sanitized_enc "aufbereitet für die Anzeige"
+        bytea text_plain_enc
         timestamptz fetched_at
     }
     ATTACHMENT {
@@ -150,7 +153,7 @@ erDiagram
         text content_type
         int size_bytes
         text imap_part "BODYSTRUCTURE-Part"
-        text storage_ref "null = on demand"
+        text storage_ref "Datei im Volume, verschlüsselt"
     }
     OUTBOX_MESSAGE {
         uuid id PK
@@ -177,14 +180,14 @@ erDiagram
 
 ### Benutzer, Geräte, Sessions
 
-- **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Passwort-Hash (Argon2id), optional TOTP (verschlüsselt). `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
+- **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Im MVP gibt es genau einen Benutzer, angelegt beim ersten Start. Passwort-Hash (Argon2id); `totp_secret_enc` bleibt bis zu späterer 2FA leer. `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
 - **`device`**: gemeinsame Basis für Sessions und Push (ADR-0004). `installation_id` ist die einzige gerätebezogene Kennung im Push-Payload ([push.md](push.md)). Widerruf eines Geräts (`revoked_at`) beendet alle Sessions und deaktiviert alle Subscriptions.
 - **`session`**: nur der **Hash** des Tokens wird gespeichert. Ein späterer nativer Client nutzt dieselbe Tabelle mit einem gerätegebundenen Token.
 - **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). Bei HTTP 404/410 wird `disabled_at` gesetzt; der Cleanup-Job löscht später.
 
 ### Konten
 
-- **`mail_account`**: Verbindungsdaten, verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
+- **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Initial-Sync-Grenze (`sync_since`, pro Konto wählbar), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
   - Die API darf `credential_enc` nie in Listen- oder Detail-Antworten ausliefern. Dafür ist **ein explizites Spalten-Select** in der Konto-Abfrage Pflicht (kein `SELECT *`).
 - **`identity`**: Absenderadressen pro Konto (Roadmap 3.6). Beim Anlegen wird eine Identität aus `email_address` erzeugt.
 
@@ -199,8 +202,9 @@ Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server
 
 - **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs).
 - **`message_location`**: `(folder_id, uidvalidity, uid)`, eindeutig. Eine Nachricht kann in mehreren Ordnern liegen (Gmail-Labels, Kopien). **Flags liegen hier**, so wie IMAP sie pro Mailbox führt. Kein zusätzliches aggregiertes Feld; die Ansicht zeigt die Flags des Ordners, in dem man gerade ist.
-- **`message_body`**: nur im Cache-Modus. Im Proxy-Modus bleibt die Tabelle leer, und die API lädt den Body on demand über den Worker.
-- **`attachment`**: Metadaten immer (aus `BODYSTRUCTURE`), Inhalt nur bei gesetztem `storage_ref`.
+- **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Sanitisiertes HTML und Plaintext für die Anzeige liegen verschlüsselt in der DB, damit das Öffnen schnell ist.
+- **`attachment`**: Metadaten aus `BODYSTRUCTURE`, Inhalt als verschlüsselte Datei im Volume.
+- **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 
 Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
@@ -225,7 +229,7 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 | Klartext | Verschlüsselt |
 | --- | --- |
 | IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet |
-| `Message-ID`, `In-Reply-To`, `References` | Body, Anhang-Dateinamen, Anhang-Inhalte im Cache |
+| `Message-ID`, `In-Reply-To`, `References` | Body, Anhang-Dateinamen, Anhang-Inhalte |
 | Kontoserver (Host/Port), Kontostatus | Zugangsdaten, Outbox-Nachrichten |
 | | TOTP-Secret, Push-Subscription-Keys |
 
@@ -242,16 +246,15 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 - **Keine Suche in der Datenbank** über Betreff, Absender oder Inhalt. Im MVP läuft die Suche über **IMAP `SEARCH` beim Provider** (ADR-0006). Einen eigenen Suchindex gibt es zunächst nicht.
 - Sortieren nach Absender oder Betreff ist in SQL nicht möglich. Listen sortieren nach Datum, und das reicht.
 - Die API entschlüsselt beim Ausliefern der Listen. Bei Seitengrößen von etwa 50 Einträgen ist das unkritisch.
-- Der Index-Modus aus ADR-0001 verliert ohne Klartext-Index seinen Zweck und wird dort neu bewertet.
 
 ## Querschnittsregeln
 
 | Regel | Umsetzung im Modell |
 | --- | --- |
 | Mandantentrennung | Jede Mail-Tabelle ist über `account_id` → `user_id` erreichbar; jede API-Abfrage filtert über `user_id`. |
-| Löschen eines Kontos | `ON DELETE CASCADE` von `mail_account` auf alle abhängigen Tabellen. Der DEK ist damit weg; Objekte in S3 entfernt der Cleanup-Job (Roadmap 3.1, 5.5). |
+| Löschen eines Kontos | `ON DELETE CASCADE` von `mail_account` auf alle abhängigen Tabellen. Der DEK ist damit weg; Dateien im Volume entfernt der Cleanup-Job (Roadmap 3.1, 5.5). |
 | Löschen eines Benutzers | Kaskadiert auf Geräte, Sessions, Subscriptions und Konten. |
-| Cache-Modus | Metadaten-Tabellen sind modusunabhängig; nur `message_body`, `attachment.storage_ref` und `message.snippet_enc` hängen vom Modus ab. |
+| Dateien im Volume | Gehören zu genau einem Konto (Pfad mit `account_id`), sind mit dessen DEK verschlüsselt und werden beim Löschen des Kontos mit entfernt. |
 
 ## Wichtige Indizes (vorläufig)
 

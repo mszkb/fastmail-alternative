@@ -1,27 +1,27 @@
-# ADR-0006: Suchindex
+# ADR-0006: Suche
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 5.1, 5.2
 
 ## Kontext
 
-Metadaten- und Volltextsuche. Abhängig vom Cache-Modus (ADR-0001).
-
-**Neu (2026-10-02):** Betreff, Adressen, Snippet und Bodies werden in der DB verschlüsselt gespeichert (siehe [`../architecture/data-model.md`](../architecture/data-model.md#verschlüsselung)). Ein Klartext-Index in PostgreSQL oder einem Suchdienst würde diese Verschlüsselung unterlaufen.
+Suche nach Absender, Betreff, Text und Datum. Betreff, Adressen und Bodies liegen verschlüsselt auf dem Server (siehe [`../architecture/data-model.md`](../architecture/data-model.md#verschlüsselung)). Ein Klartext-Index würde diese Verschlüsselung unterlaufen.
 
 ## Optionen
 
-1. **PostgreSQL Full-Text Search** (`tsvector`, ggf. `pg_trgm`) – kein zusätzlicher Service.
-2. **Meilisearch / Typesense** – sehr gute Relevanz und Geschwindigkeit, zusätzlicher Service.
-3. **IMAP `SEARCH` serverseitig beim Provider** – kein Index nötig, aber langsam und uneinheitlich.
+1. **PostgreSQL Full-Text Search**: kein zusätzlicher Service, braucht aber Klartext in der DB.
+2. **Meilisearch / Typesense**: sehr gute Relevanz, aber ein zusätzlicher Service, ebenfalls mit Klartext-Index.
+3. **IMAP `SEARCH` beim Provider**: kein Index nötig, aber langsamer und je nach Provider uneinheitlich.
 
 ## Entscheidung
 
-Offen. Vorschlag: **IMAP `SEARCH` beim Provider für das MVP**, pro Konto, Suchzugriff hinter einer Schnittstelle. Kein eigener Index. Ein eigener Index (Option 1 oder 2) wird erst erwogen, wenn IMAP `SEARCH` in der Praxis nicht reicht, und muss dann mit verschlüsselten Inhalten verträglich sein.
+**IMAP `SEARCH` beim Provider im MVP**, pro Konto, hinter einer Such-Schnittstelle. Es gibt keinen eigenen Index.
+
+Ein eigener Index wird erst erwogen, wenn IMAP `SEARCH` in der Praxis nicht reicht, und muss dann mit verschlüsselten Inhalten verträglich sein (z. B. ein verschlüsselter Index oder eine Suche über den Offline-Cache auf dem Gerät).
 
 ## Konsequenzen
 
-- Kein Indexierungs-Worker, kein zusätzlicher Speicher im MVP.
-- Suchqualität und -geschwindigkeit hängen vom Provider ab; Unterschiede in der Kompatibilitätsmatrix (0.5) erfassen.
-- Suche funktioniert nur online und nicht kontoübergreifend in einem Schritt (passt zu getrennten Konten).
+- Im MVP gibt es keinen Indexierungs-Worker und keinen zusätzlichen Speicher.
+- Suchqualität und -geschwindigkeit hängen vom Provider ab. Die Unterschiede werden in der Kompatibilitätsmatrix (0.5) erfasst.
+- Die Suche funktioniert nur online und jeweils in einem Konto. Das passt zu den getrennten Konten.

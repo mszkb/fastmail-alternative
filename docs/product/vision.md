@@ -22,7 +22,7 @@ Daraus folgen die Qualitätsziele: **Geschwindigkeit, gutes UI, konfigurierbare 
 
 ## Zielgruppen
 
-- Technik-affine Einzelanwender mit mehreren bestehenden Mailkonten.
+- Technik-affine Einzelanwender mit mehreren bestehenden Mailkonten (primär; eine Instanz = ein Benutzer).
 - Self-Hoster, die **keinen** vollständigen öffentlichen Mailserver betreiben wollen.
 - Kleine Teams mit Bedarf an einer zentralen, datensparsamen Mailoberfläche.
 
@@ -41,7 +41,9 @@ Daraus folgen die Qualitätsziele: **Geschwindigkeit, gutes UI, konfigurierbare 
 ## MVP-Funktionsumfang
 
 - Benutzerkonto und Geräteverwaltung
-- Mehrere IMAP-Konten anlegen, testen, bearbeiten, entfernen
+- Mehrere IMAP-Konten anlegen, testen, bearbeiten, entfernen – inkl. OAuth2 für Outlook und Gmail
+- Server speichert alle Mails vollständig und verschlüsselt (Initial-Sync-Zeitraum pro Konto wählbar)
+- Offline-first: gelesene Mails und Aktionen funktionieren ohne Verbindung
 - SMTP-Versand je Konto
 - Getrennte Konten mit Kontowechsel (Standard, keine erzwungene Sammel-Inbox)
 - Ordner, Flags, gelesen/ungelesen, Archivieren, Löschen, Verschieben
@@ -55,6 +57,10 @@ Daraus folgen die Qualitätsziele: **Geschwindigkeit, gutes UI, konfigurierbare 
 - Docker-Compose-Deployment mit Healthcheck und Datenbankmigrationen
 
 ## Bewusst nicht im MVP
+
+- Mehrere Benutzer pro Instanz (Single-User; Datenmodell bleibt vorbereitet)
+- 2FA (TOTP/Passkeys) für den Instanz-Login
+- Eigener Suchindex (Suche über IMAP `SEARCH`)
 
 - Eigener Mailserver, SMTP-Relay für Fremddomains, Zustellbarkeitsmanagement
 - Komplexe Kalender- und Kontakteverwaltung

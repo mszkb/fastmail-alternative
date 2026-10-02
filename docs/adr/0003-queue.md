@@ -1,27 +1,27 @@
 # ADR-0003: Job-Queue
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 2.2, 2.7
 
 ## Kontext
 
-Worker für IMAP-Sync, SMTP-Versand, Indexierung, Cleanup und Push brauchen eine zuverlässige Queue mit Retries, Backoff und Fehlerisolierung pro Konto.
+Die Worker für IMAP-Sync, SMTP-Versand, Cleanup und Push brauchen eine zuverlässige Queue mit Retries, Backoff und Fehlerisolierung pro Konto.
 
 ## Optionen
 
-1. **PostgreSQL-basiert** (z. B. pg-boss / graphile-worker bzw. Hangfire/Quartz bei .NET) – ein Service weniger, transaktional mit Daten, ausreichend für Einzelserver.
-2. **Redis/Valkey** (z. B. BullMQ) – höherer Durchsatz, Pub/Sub für Live-Updates, aber zusätzlicher Service und Backup-Thema.
+1. **PostgreSQL-basiert mit eigener Tabelle**: kein zusätzlicher Service, transaktional mit den übrigen Daten.
+2. **PostgreSQL-Bibliothek** (pg-boss, graphile-worker): fertige Features, aber ein eigenes Schema mit mehreren Tabellen.
+3. **Redis/Valkey** (BullMQ): höherer Durchsatz, aber ein zusätzlicher Service und ein zusätzliches Backup-Thema.
 
 ## Entscheidung
 
-Offen. Vorschlag: **PostgreSQL-basiert für das MVP, als eine eigene, einfache `job`-Tabelle** (Abholung per `SELECT … FOR UPDATE SKIP LOCKED`, Retry mit `run_at`/`attempts`), keine Queue-Bibliothek mit eigenem Schema. Queue-Zugriff hinter einer kleinen Abstraktion, damit Redis/Valkey später möglich bleibt. Schema: [`../architecture/data-model.md`](../architecture/data-model.md).
+**Eine eigene, einfache `job`-Tabelle in PostgreSQL.** Worker holen Jobs mit `SELECT … FOR UPDATE SKIP LOCKED`; Retries laufen über `run_at` und `attempts`. Der Zugriff liegt hinter einer kleinen Abstraktion, damit Redis/Valkey später möglich bleibt. Schema: [`../architecture/data-model.md`](../architecture/data-model.md).
 
-Begründung: so einfach wie möglich (Entscheidung Produktowner, 2026-10-02) – kein zusätzlicher Service, keine fremden Tabellen, transaktional mit den übrigen Daten.
+Begründung: so einfach wie möglich (Entscheidung Produktowner, 2026-10-02).
 
 ## Konsequenzen
 
-- Retry, Backoff und Aufräumen alter Jobs müssen selbst implementiert werden (überschaubar, siehe 5.5).
+- Lang laufende IMAP-IDLE-Verbindungen sind keine Queue-Jobs, sondern vom Worker verwaltete Verbindungen. Nur Ereignisse daraus werden zu Jobs.
+- Retry, Backoff und das Aufräumen alter Jobs müssen selbst implementiert werden (überschaubar, siehe 5.5).
 - Job-Payloads enthalten nur IDs; Fehlertexte werden vor dem Speichern redacted.
-
-- Lang laufende IMAP-IDLE-Verbindungen sind keine Queue-Jobs, sondern vom Worker verwaltete Verbindungen; nur Ereignisse daraus werden zu Jobs.

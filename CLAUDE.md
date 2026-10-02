@@ -8,7 +8,7 @@ Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in 
 
 ## Status
 
-Phase 0 (Discovery). Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
+Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
 
 ## Wo steht was
 
@@ -46,17 +46,18 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - **Scope:** Was in `docs/product/vision.md` unter „Bewusst nicht im MVP" steht, nicht ohne Rücksprache einbauen.
 - **Definition of Done** (`docs/process/definition-of-done.md`) gilt für jeden PR.
 
-## Geplanter Tech-Stack (vorläufig, siehe ADRs)
+## Tech-Stack (entschieden, siehe ADRs)
 
-- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache
-- Backend: Fastify (Node/TypeScript) **oder** .NET – offen, ADR-0008
-- Datenbank: PostgreSQL
-- Queue: Redis/Valkey oder PostgreSQL-basiert – offen, ADR-0003
-- Object Storage: S3-kompatibel (optional)
-- Worker: IMAP-Sync, SMTP-Versand, Indexierung, Cleanup als getrennte Prozesse
-- Deployment: Docker Compose
-
-Solange die ADRs auf „Proposed" stehen, keine Annahmen über Frameworks hart in Code gießen.
+- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache, offline-first (ADR-0008, ADR-0010)
+- Backend: Fastify (Node/TypeScript) für API und Worker (ADR-0008)
+- API-Vertrag: OpenAPI, Basis für spätere native Clients (ADR-0010)
+- Datenbank: PostgreSQL (ADR-0002)
+- Queue: eigene `job`-Tabelle in PostgreSQL mit `SKIP LOCKED` (ADR-0003)
+- Mail-Speicher: Server speichert alle Mails, verschlüsselt im Docker-Volume `mail-data` (ADR-0001)
+- Suche: IMAP `SEARCH` beim Provider (ADR-0006)
+- Auth: Single-User, Passwort, serverseitige Sessions (ADR-0004); Mailanbieter per Passwort oder OAuth2 (ADR-0011)
+- Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
+- Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007)
 
 ## Befehle
 
