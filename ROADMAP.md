@@ -37,9 +37,9 @@ Ziel: Entscheidungsgrundlage schaffen, bevor Code entsteht.
 | 0.1 | Lizenz festlegen (AGPL vs. MIT/Apache; Auswirkung auf Paid Services) | P0 | S | – | Lizenzdatei im Repo, Begründung als ADR |
 | 0.2 | ADRs 0001–0008 entscheiden | P0 | M | 0.4 | Alle ADRs „Accepted" oder bewusst vertagt |
 | 0.3 | Bedrohungsmodell (STRIDE-light) | P0 | M | 0.4 | `docs/architecture/threat-model.md` existiert |
-| 0.4 | 🟨 Datenmodell-Entwurf (User, Device, Account, Folder, Message, Thread, Job, PushSubscription) | P0 | M | – | ER-Diagramm in `docs/architecture/` → [Entwurf](docs/architecture/data-model.md) |
+| 0.4 | ✅ Datenmodell-Entwurf (User, Device, Account, Folder, Message, Thread, Job, PushSubscription) | P0 | M | – | ER-Diagramm in `docs/architecture/` → [Entwurf](docs/architecture/data-model.md) |
 | 0.5 | Liste unterstützter Mailanbieter + Kompatibilitätsmatrix 🔗 | P1 | S | – | Matrix mit IMAP-Extensions (IDLE, CONDSTORE, QRESYNC, MOVE) je Provider |
-| 0.6 | UX-Flows: Onboarding, Konto hinzufügen, Unified Inbox, Compose, Push-Opt-in | P1 | M | – | Wireframes/Flows dokumentiert |
+| 0.6 | UX-Flows: Onboarding, Konto hinzufügen, Kontowechsel, Compose, Push-Opt-in | P1 | M | – | Wireframes/Flows dokumentiert |
 
 **Risiken:** Lizenzwahl beeinflusst Geschäftsmodell in Phase 8; Provider-Eigenheiten (Gmail-Labels, Exchange-IMAP) werden unterschätzt.
 
@@ -78,7 +78,8 @@ Ziel: Ein IMAP-/SMTP-Konto vollständig nutzbar.
 | # | Epic / Aufgabe | Prio | Aufwand | Abhängigkeiten | Akzeptanz |
 | --- | --- | --- | --- | --- | --- |
 | 3.1 | Kontoverwaltung (anlegen, bearbeiten, entfernen inkl. Datenlöschung) | P0 | M | Phase 2 | Entfernen löscht Credentials und Metadaten |
-| 3.2 | Unified Inbox (kontoübergreifend, Konto-Kennzeichnung) | P0 | M | 3.1 | Sortierung, Filter nach Konto |
+| 3.2 | Kontowechsel (getrennte Postfächer je Konto, Thunderbird-artig, Ungelesen-Zähler pro Konto) | P0 | M | 3.1 | Wechsel ohne Reload; Ansicht zeigt nur Daten des aktiven Kontos |
+| 3.7 | Optionale Unified Inbox (opt-in in den Einstellungen, standardmäßig aus) | P2 | S | 3.2 | Abschaltbar; Konto-Kennzeichnung je Nachricht |
 | 3.3 | Konto-spezifische Ordner + Ordner-Mapping (Sent/Trash/Archive/Drafts via SPECIAL-USE) | P0 | M | 3.1 | Aktionen landen im richtigen Ordner je Konto |
 | 3.4 | Fehlerisolierung: Sync pro Konto isoliert, Circuit Breaker, Statusanzeige | P0 | M | 2.2 | Kaputtes Konto blockiert andere nicht (Test) |
 | 3.5 | Quoten & Limits (Verbindungen pro Provider, Sync-Rate, Speicher) | P1 | S | 3.4 | Konfigurierbar, Provider-Limits respektiert |
@@ -100,8 +101,8 @@ Ziel: Ein IMAP-/SMTP-Konto vollständig nutzbar.
 
 | # | Epic / Aufgabe | Prio | Aufwand | Abhängigkeiten | Akzeptanz |
 | --- | --- | --- | --- | --- | --- |
-| 5.1 | Metadatensuche (Absender, Betreff, Datum, Konto, Flags) | P0 | M | Phase 3 | Ergebnisse < 500 ms bei 100k Mails |
-| 5.2 | Volltextsuche + Indexierungs-Worker | P1 | L | ADR-0006 | Neue Mails nach Sync auffindbar |
+| 5.1 | Suche über IMAP `SEARCH` beim Provider (Absender, Betreff, Text, Datum) pro Konto | P0 | M | Phase 3 | Ergebnisse ohne Klartext-Index in der DB |
+| 5.2 | Eigener Suchindex (nur falls IMAP `SEARCH` nicht reicht; verträglich mit verschlüsselten Inhalten) | P2 | L | ADR-0006 | Entscheidung dokumentiert |
 | 5.3 | Attachments: anzeigen, herunterladen, versenden; Sandboxing | P0 | M | 2.6 | Kein Inline-Ausführen aktiver Inhalte; Größenlimits |
 | 5.4 | Cache-Modi Proxy / Index / Cache umsetzen | P1 | L | ADR-0001 | Modus pro Instanz konfigurierbar, dokumentiert |
 | 5.5 | Cleanup-Jobs (Cache-Eviction, verwaiste Anhänge, alte Jobs) | P1 | S | 5.4 | Speicher wächst nicht unbegrenzt |

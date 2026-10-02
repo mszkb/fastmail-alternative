@@ -4,7 +4,7 @@ Leitfaden für Claude Code (und andere Agents) in diesem Repository.
 
 ## Projekt in einem Satz
 
-Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in einer schnellen, gut aussehenden Unified Inbox – zuerst als PWA mit Web Push (inkl. iOS), langfristig mit nativer iOS-App.
+Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in einer schnellen, gut aussehenden Oberfläche mit getrennten Konten und Kontowechsel (Unified Inbox nur optional) – zuerst als PWA mit Web Push (inkl. iOS), langfristig mit nativer iOS-App.
 
 ## Status
 
@@ -32,9 +32,11 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 2. **Keine künstliche Paywall** für PWA, Export, Grundfunktionen oder eigene Instanz.
 3. **Push ist nur ein Hinweis.** Push ist nie die Quelle der Wahrheit. Die App synchronisiert beim Start und bei Fokuswechsel.
 4. **Keine Mailinhalte in Push-Payloads.** Nur Ereignistyp, Installations-ID, Badge-Zahl. Keine Betreffzeilen, Absender oder Bodies.
-5. **Secrets nie im Klartext.** IMAP-/SMTP-Passwörter und OAuth-Tokens verschlüsselt at rest. Der Master-Key kommt ausschließlich aus Secret-Management/Umgebung – niemals ins Repo, in die DB oder in Logs.
+5. **Secrets und Inhalte nie im Klartext.** IMAP-/SMTP-Passwörter, OAuth-Tokens und alle lesbaren Mailinhalte (Betreff, Adressen, Snippet, Body, Dateinamen) verschlüsselt at rest (siehe `docs/architecture/data-model.md`). Der Master-Key kommt ausschließlich aus Secret-Management/Umgebung – niemals ins Repo, in die DB oder in Logs.
 6. **Keine sensiblen Daten in Logs**, Fehlermeldungen, Push-Payloads oder Support-Exports (Zugangsdaten, Mailinhalte, Betreffzeilen).
 7. **Fehlerisolierung pro Konto.** Ein Konto mit ungültigen Zugangsdaten oder ausgefallenem Provider darf andere Konten nicht blockieren.
+8. **Konten bleiben getrennt.** Standard ist der Kontowechsel; eine Unified Inbox ist optional und standardmäßig aus.
+9. **So einfach wie möglich.** Erst die einfachste funktionierende Lösung (z. B. eine Job-Tabelle statt Queue-Service, IMAP `SEARCH` statt eigenem Suchindex).
 
 ## Konventionen
 

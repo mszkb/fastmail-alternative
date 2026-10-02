@@ -6,7 +6,9 @@
 
 ## Kontext
 
-Metadaten- und Volltextsuche über alle Konten. Abhängig vom Cache-Modus (ADR-0001).
+Metadaten- und Volltextsuche. Abhängig vom Cache-Modus (ADR-0001).
+
+**Neu (2026-10-02):** Betreff, Adressen, Snippet und Bodies werden in der DB verschlüsselt gespeichert (siehe [`../architecture/data-model.md`](../architecture/data-model.md#verschlüsselung)). Ein Klartext-Index in PostgreSQL oder einem Suchdienst würde diese Verschlüsselung unterlaufen.
 
 ## Optionen
 
@@ -16,9 +18,10 @@ Metadaten- und Volltextsuche über alle Konten. Abhängig vom Cache-Modus (ADR-0
 
 ## Entscheidung
 
-Offen. Vorschlag: **PostgreSQL FTS für das MVP**, Suchzugriff hinter einer Schnittstelle; IMAP `SEARCH` als Fallback im Proxy-Modus.
+Offen. Vorschlag: **IMAP `SEARCH` beim Provider für das MVP**, pro Konto, Suchzugriff hinter einer Schnittstelle. Kein eigener Index. Ein eigener Index (Option 1 oder 2) wird erst erwogen, wenn IMAP `SEARCH` in der Praxis nicht reicht, und muss dann mit verschlüsselten Inhalten verträglich sein.
 
 ## Konsequenzen
 
-- Mehrsprachigkeit (Deutsch/Englisch) bei Stemming beachten.
-- Index-Größe in Lasttests (6.6) messen.
+- Kein Indexierungs-Worker, kein zusätzlicher Speicher im MVP.
+- Suchqualität und -geschwindigkeit hängen vom Provider ab; Unterschiede in der Kompatibilitätsmatrix (0.5) erfassen.
+- Suche funktioniert nur online und nicht kontoübergreifend in einem Schritt (passt zu getrennten Konten).

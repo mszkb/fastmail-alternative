@@ -18,6 +18,8 @@ Wie viel Mailinhalt speichert der Server? Das bestimmt Geschwindigkeit, Offline-
 
 Offen. Vorschlag: alle drei Modi als Instanz-Einstellung, **Default „Index"**, Cache mit Größen-/Altersgrenzen. Das Datenmodell muss so gebaut sein, dass Bodies optional sind.
 
+**Hinweis (2026-10-02):** Da lesbare Inhalte in der DB verschlüsselt werden und im MVP kein eigener Suchindex vorgesehen ist (ADR-0006), verliert der Modus „Index“ vorerst seinen Zweck. Der Default ist bei der Entscheidung (0.2) neu zu bewerten – naheliegend: **Proxy** als einfachster Startpunkt, **Cache** (verschlüsselt) für Offline/Geschwindigkeit.
+
 ## Konsequenzen
 
 - Cleanup-Jobs (5.5) und Betreiber-Doku zu Datenschutzfolgen je Modus nötig.
