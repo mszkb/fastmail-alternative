@@ -63,6 +63,7 @@ services:
     mem_limit: 192m
     environment:
       NODE_ENV: production
+      DOMAIN: ${DOMAIN:-:80}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -78,7 +79,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 15s
       timeout: 5s
