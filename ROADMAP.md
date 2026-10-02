@@ -34,7 +34,7 @@ Ziel: Entscheidungsgrundlage schaffen, bevor Code entsteht.
 
 | # | Epic / Aufgabe | Prio | Aufwand | Abhängigkeiten | Akzeptanz |
 | --- | --- | --- | --- | --- | --- |
-| 0.1 | Lizenz festlegen (AGPL vs. MIT/Apache; Auswirkung auf Paid Services) | P0 | S | – | Lizenzdatei im Repo, Begründung als ADR |
+| 0.1 | ✅ Lizenz festlegen → **ISC** ([ADR-0009](docs/adr/0009-license.md)) | P0 | S | – | Lizenzdatei im Repo, Begründung als ADR |
 | 0.2 | ADRs 0001–0008 entscheiden | P0 | M | 0.4 | Alle ADRs „Accepted" oder bewusst vertagt |
 | 0.3 | Bedrohungsmodell (STRIDE-light) | P0 | M | 0.4 | `docs/architecture/threat-model.md` existiert |
 | 0.4 | ✅ Datenmodell-Entwurf (User, Device, Account, Folder, Message, Thread, Job, PushSubscription) | P0 | M | – | ER-Diagramm in `docs/architecture/` → [Entwurf](docs/architecture/data-model.md) |

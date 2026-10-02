@@ -12,3 +12,4 @@ Neue ADR: `0000-template.md` kopieren, fortlaufend nummerieren, Status zunächst
 | [0006](0006-search-index.md) | Suchindex | Proposed |
 | [0007](0007-deployment.md) | Deployment | Proposed |
 | [0008](0008-backend-framework.md) | Backend-Framework (Fastify vs. .NET) | Proposed |
+| [0009](0009-license.md) | Lizenz (ISC) | Accepted |
