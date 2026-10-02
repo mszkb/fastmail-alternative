@@ -205,6 +205,9 @@ importers:
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
     devDependencies:
       '@types/node':
         specifier: ^24.19.1
@@ -242,6 +245,13 @@ importers:
         version: 3.3.12(typescript@5.9.3)
 
   apps/worker:
+    dependencies:
+      '@fma/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
     devDependencies:
       '@types/node':
         specifier: ^24.19.1
@@ -289,6 +299,9 @@ importers:
 
   packages/shared:
     devDependencies:
+      '@types/node':
+        specifier: ^24.19.1
+        version: 24.19.1
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
