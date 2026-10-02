@@ -28,7 +28,7 @@ P0 Discovery ─► P1 Foundation ─► P2 Single account ─► P3 Multi-accou
 
 ---
 
-## Phase 0 – Discovery ⬜
+## Phase 0 – Discovery 🟨
 
 Ziel: Entscheidungsgrundlage schaffen, bevor Code entsteht.
 
@@ -37,7 +37,7 @@ Ziel: Entscheidungsgrundlage schaffen, bevor Code entsteht.
 | 0.1 | Lizenz festlegen (AGPL vs. MIT/Apache; Auswirkung auf Paid Services) | P0 | S | – | Lizenzdatei im Repo, Begründung als ADR |
 | 0.2 | ADRs 0001–0008 entscheiden | P0 | M | 0.4 | Alle ADRs „Accepted" oder bewusst vertagt |
 | 0.3 | Bedrohungsmodell (STRIDE-light) | P0 | M | 0.4 | `docs/architecture/threat-model.md` existiert |
-| 0.4 | Datenmodell-Entwurf (User, Device, Account, Folder, Message, Thread, Job, PushSubscription) | P0 | M | – | ER-Diagramm in `docs/architecture/` |
+| 0.4 | 🟨 Datenmodell-Entwurf (User, Device, Account, Folder, Message, Thread, Job, PushSubscription) | P0 | M | – | ER-Diagramm in `docs/architecture/` → [Entwurf](docs/architecture/data-model.md) |
 | 0.5 | Liste unterstützter Mailanbieter + Kompatibilitätsmatrix 🔗 | P1 | S | – | Matrix mit IMAP-Extensions (IDLE, CONDSTORE, QRESYNC, MOVE) je Provider |
 | 0.6 | UX-Flows: Onboarding, Konto hinzufügen, Unified Inbox, Compose, Push-Opt-in | P1 | M | – | Wireframes/Flows dokumentiert |
 

@@ -17,6 +17,7 @@ Phase 0 (Discovery). Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROA
 | Phasen, Milestones, Epics | `ROADMAP.md` |
 | Vision, Zielgruppen, Scope | `docs/product/vision.md` |
 | Architektur | `docs/architecture/overview.md` |
+| Datenmodell (ER) | `docs/architecture/data-model.md` |
 | Daten- & Sicherheitsmodell | `docs/architecture/security.md` |
 | Push-Strategie | `docs/architecture/push.md` |
 | Architekturentscheidungen | `docs/adr/` |
