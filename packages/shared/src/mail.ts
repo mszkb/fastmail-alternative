@@ -316,6 +316,8 @@ export type AccountErrorCode =
   | 'TLS_ERROR'
   | 'BLOCKED_HOST'
   | 'JOB_TIMEOUT'
+  /** Imported account (roadmap 4.7): the export never contains passwords. */
+  | 'CREDENTIALS_REQUIRED'
 
 export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   AUTH_FAILED: 'Der Mailserver hat die Zugangsdaten abgelehnt.',
@@ -326,6 +328,7 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   TLS_ERROR: 'TLS-Fehler – das Zertifikat des Mailservers konnte nicht verifiziert werden.',
   BLOCKED_HOST: 'Interner Host ist blockiert (SSRF-Schutz).',
   JOB_TIMEOUT: 'Der Mailserver hat zu lange gebraucht; der Abgleich wurde abgebrochen.',
+  CREDENTIALS_REQUIRED: 'Das Konto wurde importiert – das Passwort muss neu eingegeben werden.',
 }
 
 export interface AccountStatusInfo {
@@ -345,7 +348,10 @@ export function accountStatusInfo(
   switch (account.status) {
     case 'auth_error':
       return {
-        label: 'Anmeldung fehlgeschlagen',
+        label:
+          account.lastErrorCode === 'CREDENTIALS_REQUIRED'
+            ? 'Passwort fehlt'
+            : 'Anmeldung fehlgeschlagen',
         description:
           `${reason || ACCOUNT_ERROR_MESSAGES.AUTH_FAILED} Der Abgleich dieses Kontos ist ` +
           'angehalten, bis die Zugangsdaten aktualisiert sind. Andere Konten sind nicht betroffen.',

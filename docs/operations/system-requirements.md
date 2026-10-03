@@ -50,4 +50,4 @@ Die Limits in der `docker-compose.yml` setzen einen Memory-Cgroup-Controller vor
 
 ## Backup (Vorblick)
 
-Der `MASTER_KEY` aus der `.env` muss **getrennt vom Datenbank-Backup** gesichert werden – geht er verloren, sind alle verschlüsselten Mails und Zugangsdaten unlesbar. Details: [Key-Rotation](../process/key-rotation.md). Vollständiges Backup-/Restore-Konzept: Roadmap 6.2.
+Der `MASTER_KEY` aus der `.env` muss **getrennt vom Datenbank-Backup** gesichert werden – geht er verloren, sind alle verschlüsselten Mails und Zugangsdaten unlesbar. Details: [Key-Rotation](../process/key-rotation.md). Umzug auf einen neuen Server (Backup/Restore bzw. Konfigurations-Export): [Migration](migration.md). Vollständiges Backup-/Restore-Konzept: Roadmap 6.2.

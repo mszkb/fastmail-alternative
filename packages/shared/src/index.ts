@@ -7,6 +7,7 @@
 
 export * from './badge'
 export * from './compose'
+export * from './config-export'
 export * from './folders'
 export * from './foreground-sync'
 export * from './install'

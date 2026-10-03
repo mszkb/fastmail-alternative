@@ -347,6 +347,7 @@ onBeforeUnmount(() => {
           @changed="loadAccounts"
         />
         <AccountForm @created="loadAccounts" />
+        <ConfigTransfer @imported="loadAccounts" />
 
         <div class="card">
           <h2>Geräte</h2>

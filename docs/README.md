@@ -12,5 +12,6 @@
 | [process/external-dependencies.md](process/external-dependencies.md)   | Externe Abhängigkeiten und Risiken                              |
 | [process/key-rotation.md](process/key-rotation.md)                     | Master-Key-Rotation und Crypto-Shredding                        |
 | [operations/system-requirements.md](operations/system-requirements.md) | Systemanforderungen und gemessener Ressourcenverbrauch          |
+| [operations/migration.md](operations/migration.md)                     | Umzug auf einen neuen Server, Konfigurations-Export/-Import     |
 
 Die Phasen- und Aufgabenplanung steht in [`../ROADMAP.md`](../ROADMAP.md).

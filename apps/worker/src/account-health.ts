@@ -66,7 +66,7 @@ const NETWORK_CODES: Record<string, AccountErrorCode> = {
 const KNOWN_CODES = new Set<string>(Object.keys(ACCOUNT_ERROR_MESSAGES))
 
 function kindOf(code: AccountErrorCode): AccountErrorKind {
-  return code === 'AUTH_FAILED' ? 'auth' : 'unreachable'
+  return code === 'AUTH_FAILED' || code === 'CREDENTIALS_REQUIRED' ? 'auth' : 'unreachable'
 }
 
 /**
