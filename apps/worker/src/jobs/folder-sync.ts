@@ -8,7 +8,7 @@
  */
 import { ImapFlow } from 'imapflow'
 import type { Pool } from '@fma/db'
-import { loadImapCredentials } from '../accounts'
+import { loadAccountContext } from '../accounts'
 import { mailTestMode } from '../ports'
 
 const KNOWN_SPECIAL_USE = new Set(['inbox', 'sent', 'drafts', 'trash', 'archive', 'junk'])
@@ -30,7 +30,11 @@ interface ListedMailbox {
 }
 
 export async function runFolderSync(pool: Pool, accountId: string): Promise<void> {
-  const credentials = await loadImapCredentials(pool, accountId, process.env.MASTER_KEY ?? '')
+  const { imap: credentials } = await loadAccountContext(
+    pool,
+    accountId,
+    process.env.MASTER_KEY ?? '',
+  )
 
   const client = new ImapFlow({
     host: credentials.host,

@@ -11,8 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.9.0",
     "@types/node": "^24.19.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "nodemailer": "^10.0.13",
     "pg": "^8.23.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
@@ -24,6 +27,7 @@
     "@fma/db": "workspace:*",
     "@fma/shared": "workspace:*",
     "imapflow": "^2.2.1",
+    "mailparser": "^3.9.33",
     "pino": "^10.3.1"
   }
 }

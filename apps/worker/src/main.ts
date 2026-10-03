@@ -9,18 +9,12 @@
  * (roadmap 1.7).
  */
 import { setTimeout as sleep } from 'node:timers/promises'
-import pino from 'pino'
-import { claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
+import { claimNextJob, completeJob, enqueueJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
 import { createPool, type Pool } from '@fma/db'
-import { REDACT_LOG_PATHS } from '@fma/shared'
 import { runFolderSync } from './jobs/folder-sync'
-
-const log = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-  redact: { paths: REDACT_LOG_PATHS, censor: '[REDACTED]' },
-  base: { service: 'worker' },
-})
+import { runMessageSync } from './jobs/message-sync'
+import { log } from './log'
 
 const POLL_INTERVAL_MS = 2_000
 /** Job types this worker instance processes. */
@@ -30,21 +24,46 @@ let shuttingDown = false
 
 async function processJob(
   pool: Pool,
-  jobId: string,
-  type: string,
-  accountId: string | null,
+  job: {
+    id: string
+    type: string
+    accountId: string | null
+    payload: Record<string, unknown>
+    attempts: number
+  },
 ): Promise<void> {
+  const jobId = job.id
+  const type = job.type
+  const accountId = job.accountId
   switch (type) {
-    case 'folder_sync':
+    case 'folder_sync': {
       if (!accountId) throw new Error('folder_sync job without account_id')
       await runFolderSync(pool, accountId)
+      // Chain: one message_sync job per synced folder.
+      const { rows } = await pool.query<{ id: string }>(
+        'SELECT id FROM folder WHERE account_id = $1',
+        [accountId],
+      )
+      for (const row of rows) {
+        await enqueueJob(pool, {
+          type: 'message_sync',
+          accountId,
+          payload: { folderId: String(row.id) },
+        })
+      }
       await completeJob(pool, jobId)
       log.info({ jobId, accountId }, 'folder_sync done')
       break
-    case 'message_sync':
-      // Message sync is implemented in step 2; fail fast so the queue
-      // machinery (retries, backoff) is exercised from the start.
-      throw new Error('message_sync not implemented yet')
+    }
+    case 'message_sync': {
+      if (!accountId) throw new Error('message_sync job without account_id')
+      const folderId = typeof job.payload.folderId === 'string' ? job.payload.folderId : null
+      if (!folderId) throw new Error('message_sync job without folder_id')
+      await runMessageSync(pool, accountId, folderId)
+      await completeJob(pool, jobId)
+      log.info({ jobId, accountId, folderId }, 'message_sync done')
+      break
+    }
     default:
       // Unknown type: complete it, otherwise it would retry forever.
       log.warn({ jobId, type }, 'unknown job type, marking done')
@@ -98,13 +117,24 @@ async function main(): Promise<void> {
       'job started',
     )
     try {
-      await processJob(pool, job.id, job.type, job.accountId)
+      await processJob(pool, job)
     } catch (err) {
-      const message = (err as Error).message ?? String(err)
+      const error = err as Error & { response?: string; code?: string }
+      const message = error.message ?? String(err)
       await failJob(pool, job.id, job.attempts, message).catch((dbErr) => {
         log.error({ err: dbErr.message }, 'failJob failed')
       })
-      log.warn({ jobId: job.id, type: job.type, err: message }, 'job failed')
+      log.warn(
+        {
+          jobId: job.id,
+          type: job.type,
+          err: message,
+          imapResponse: error.response,
+          imapCode: error.code,
+          stack: error.stack,
+        },
+        'job failed',
+      )
     }
   }
 
