@@ -281,6 +281,11 @@ export interface AccountSummary {
    * the account switcher, computed like the folder counts.
    */
   unreadCount: number
+  /**
+   * A folder/message sync of the account is queued (and eligible) or
+   * running; clients poll briefly until it is done (roadmap 4.5).
+   */
+  syncing: boolean
 }
 
 /** `GET /api/accounts` */
@@ -356,4 +361,22 @@ export function accountStatusInfo(
     default:
       return null
   }
+}
+
+/**
+ * Why a sync request (roadmap 4.5) did not enqueue a job: the account is
+ * disabled or needs new credentials, its circuit breaker is open, a sync is
+ * already queued/running, or the last one was requested too recently.
+ */
+export type SyncSkipReason = 'disabled' | 'auth_error' | 'backoff' | 'pending' | 'rate_limited'
+
+export interface SyncRequestResult {
+  accountId: string
+  queued: boolean
+  reason: SyncSkipReason | null
+}
+
+/** `POST /api/sync` (all accounts) */
+export interface SyncAllResponse {
+  accounts: SyncRequestResult[]
 }

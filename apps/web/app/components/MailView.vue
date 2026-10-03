@@ -20,9 +20,21 @@
 // @fma/shared), so the view never mixes data of two accounts.
 // Account health (3.4): broken accounts get a badge in the switcher and a
 // banner with a German explanation and a link to the account settings.
-import { RequestScope, accountStatusInfo, createDraft, isStaleResponse } from '@fma/shared'
+// Sync on start/focus (4.5): when the account list shows that the active
+// account has new data (sync finished, unread count changed), folders and
+// the first list page are reloaded in place - loaded pages, scroll position,
+// selection and the open message stay (mergeFirstPage from @fma/shared).
+import {
+  RequestScope,
+  accountDataChanged,
+  accountStatusInfo,
+  createDraft,
+  isStaleResponse,
+  mergeFirstPage,
+} from '@fma/shared'
 import type {
   AccountSummary,
+  AccountSyncState,
   ComposeDraft,
   ComposeIdentity,
   ComposeMode,
@@ -41,7 +53,12 @@ import type {
 import type OutboxPanel from './OutboxPanel.vue'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
-  Partial<Pick<AccountSummary, 'unreadCount' | 'status' | 'lastErrorCode' | 'nextRetryAt'>>
+  Partial<
+    Pick<
+      AccountSummary,
+      'unreadCount' | 'status' | 'lastErrorCode' | 'nextRetryAt' | 'lastSyncAt' | 'syncing'
+    >
+  >
 
 const props = defineProps<{ accounts: AccountOption[] }>()
 const emit = defineEmits<{ editAccount: [id: string] }>()
@@ -84,6 +101,14 @@ const outbox = ref<InstanceType<typeof OutboxPanel> | null>(null)
 // Guards against stale responses when the user switches folders quickly.
 let listRequest = 0
 let detailRequest = 0
+// Background refresh (4.5) vs. optimistic actions: no refresh while an
+// action request is in flight (it is run afterwards instead), and a refresh
+// response is dropped when an action started meanwhile.
+let pendingActions = 0
+let actionEpoch = 0
+let refreshDeferred = false
+// Last seen sync state per account, to detect new server data.
+const seenSyncState = new Map<string, AccountSyncState>()
 let observer: IntersectionObserver | null = null
 // Account scope: reset on every account switch. Reads of the previous
 // account are aborted, and responses arriving late are dropped (getJson
@@ -92,6 +117,15 @@ const accountScope = new RequestScope()
 
 const activeAccount = computed(() => props.accounts.find((a) => a.id === accountId.value) ?? null)
 const activeStatus = computed(() => (activeAccount.value ? statusInfo(activeAccount.value) : null))
+
+function syncState(account: AccountOption): AccountSyncState {
+  return {
+    id: account.id,
+    lastSyncAt: account.lastSyncAt ?? null,
+    syncing: account.syncing ?? false,
+    unreadCount: account.unreadCount ?? 0,
+  }
+}
 
 function statusInfo(account: AccountOption) {
   return accountStatusInfo({
@@ -302,12 +336,17 @@ async function loadMessages(): Promise<void> {
     if (request !== listRequest) return
     messages.value = cursor ? [...messages.value, ...res.messages] : res.messages
     nextCursor.value = res.nextCursor
+    // A fresh first page makes a deferred background refresh unnecessary.
+    if (!cursor) refreshDeferred = false
   } catch (err) {
     if (request === listRequest && !isStaleResponse(err)) {
       error.value = err instanceof Error ? err.message : 'Nachrichten konnten nicht geladen werden.'
     }
   } finally {
-    if (request === listRequest) listLoading.value = false
+    if (request === listRequest) {
+      listLoading.value = false
+      if (refreshDeferred && pendingActions === 0) void refreshView()
+    }
   }
 }
 
@@ -415,6 +454,7 @@ async function runAction(
   }
 
   const scope = accountScope.token
+  actionEpoch++
   // Snapshot for rollback (plain copies, the list is small).
   const snapshot = {
     folderId: folderId.value,
@@ -428,6 +468,7 @@ async function runAction(
 
   const body: MessageActionRequest = { folderId: snapshot.folderId, messageIds: ids, action }
   if (targetFolderId) body.targetFolderId = targetFolderId
+  pendingActions++
   try {
     const res = await fetch('/api/messages/actions', {
       method: 'POST',
@@ -453,6 +494,52 @@ async function runAction(
       err instanceof Error && err.message
         ? err.message
         : 'Die Aktion konnte nicht ausgeführt werden.'
+  } finally {
+    pendingActions--
+    if (pendingActions === 0 && refreshDeferred) void refreshView()
+  }
+}
+
+/**
+ * Reloads folders (counts) and the first page of the open folder in place
+ * after a sync (roadmap 4.5). Quiet: errors keep the current view.
+ */
+async function refreshView(): Promise<void> {
+  const requestedAccount = accountId.value
+  if (!requestedAccount || !folderId.value) return
+  if (pendingActions > 0 || listLoading.value) {
+    refreshDeferred = true
+    return
+  }
+  refreshDeferred = false
+  const epoch = actionEpoch
+  const request = ++listRequest
+  const folder = folderId.value
+  try {
+    const [folderRes, page] = await Promise.all([
+      getJson<FolderListResponse>(`/api/accounts/${requestedAccount}/folders`),
+      getJson<MessageListResponse>(`/api/folders/${folder}/messages`),
+    ])
+    if (requestedAccount !== accountId.value || folder !== folderId.value) return
+    if (epoch !== actionEpoch) {
+      // An action changed the list meanwhile: retry once it is through.
+      refreshDeferred = true
+      if (pendingActions === 0) void refreshView()
+      return
+    }
+    folders.value = folderRes.folders
+    if (!folderRes.folders.some((f) => f.id === folder)) {
+      // The open folder is gone (deleted/renamed at the provider).
+      const inbox = folderRes.folders.find((f) => f.specialUse === 'inbox') ?? folderRes.folders[0]
+      if (inbox) await selectFolder(inbox.id)
+      return
+    }
+    if (request !== listRequest) return
+    const merged = mergeFirstPage({ messages: messages.value, nextCursor: nextCursor.value }, page)
+    messages.value = merged.messages
+    nextCursor.value = merged.nextCursor
+  } catch {
+    // Offline or account switched: keep what is shown.
   }
 }
 
@@ -539,11 +626,19 @@ watch(accountId, (id) => {
 })
 
 // Pick a valid account whenever the account list changes (e.g. after adding
-// or removing one in the settings).
+// or removing one in the settings), and reload the view when the active
+// account has new data on the server (4.5).
 watch(
   () => props.accounts,
   (accounts) => {
-    if (accounts.some((a) => a.id === accountId.value)) return
+    const active = accounts.find((a) => a.id === accountId.value)
+    const changed = !!active && accountDataChanged(seenSyncState.get(active.id), syncState(active))
+    seenSyncState.clear()
+    for (const account of accounts) seenSyncState.set(account.id, syncState(account))
+    if (active) {
+      if (changed) void refreshView()
+      return
+    }
     const stored = readStoredAccount()
     accountId.value = accounts.find((a) => a.id === stored)?.id ?? accounts[0]?.id ?? ''
   },

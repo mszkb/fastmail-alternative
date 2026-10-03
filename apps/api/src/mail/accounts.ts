@@ -35,6 +35,7 @@ import {
   wrapDataKey,
 } from '@fma/crypto'
 import { requireAuth } from '../auth/routes'
+import { SYNCING_COLUMN } from './sync'
 import { testImap, testSmtp, type HostConfig, type TestResult } from '../mail/connection-test'
 
 interface MailAccountRow {
@@ -53,6 +54,7 @@ interface MailAccountRow {
   last_sync_at: string | null
   /** Only selected by the list query. */
   unread_count?: number
+  syncing?: boolean
 }
 
 interface CreateAccountBody {
@@ -152,6 +154,7 @@ function toPublicAccount(row: MailAccountRow): AccountSummary {
     sortOrder: row.sort_order,
     lastSyncAt: row.last_sync_at,
     unreadCount: row.unread_count ?? 0,
+    syncing: row.syncing ?? false,
   }
 }
 
@@ -255,12 +258,14 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/accounts', { preHandler: requireAuth }, async (request, reply) => {
     // Unread count per account: INBOX only, computed from the synced
     // locations like the folder counts (optimistic read/unread included).
+    // `syncing` lets clients poll briefly after a sync request (4.5).
     const { rows } = await pool.query<MailAccountRow>(
       `SELECT ${PUBLIC_COLUMNS},
          (SELECT count(*)::int FROM folder f
           JOIN message_location ml ON ml.folder_id = f.id
           WHERE f.account_id = mail_account.id AND f.special_use = 'inbox'
-            AND NOT ('\\Seen' = ANY(ml.flags))) AS unread_count
+            AND NOT ('\\Seen' = ANY(ml.flags))) AS unread_count,
+         ${SYNCING_COLUMN}
        FROM mail_account WHERE user_id = $1
        ORDER BY sort_order, created_at`,
       [request.auth!.userId],

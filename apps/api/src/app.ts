@@ -9,6 +9,7 @@ import { messageActionRoutes } from './mail/message-actions'
 import { messageHtmlRoutes } from './mail/message-html'
 import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
+import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
 
 export interface AppOptions {
@@ -82,6 +83,7 @@ export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
   app.register(messageHtmlRoutes)
   app.register(outboxRoutes)
   app.register(identityRoutes)
+  app.register(syncRoutes)
 
   return app
 }

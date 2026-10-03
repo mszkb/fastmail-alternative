@@ -2,6 +2,12 @@
 // Auth UI (roadmap 1.6), mail view (roadmap 2.3) and settings with account
 // management (roadmap 2.1/3.1) and devices. The account list (with unread
 // counts for the switcher, 3.2) is refreshed periodically and on focus.
+// Sync on start and focus (4.5, push-independent): on start, when the app
+// becomes visible/focused again and when it comes back online, it asks the
+// server to sync all accounts (POST /api/sync) and then polls the account
+// list every few seconds while a sync runs (ForegroundSyncPolicy from
+// @fma/shared); MailView reloads its data when the active account changed.
+import { ForegroundSyncPolicy } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 
 interface AuthStatus {
@@ -34,6 +40,8 @@ const editAccountId = ref('')
 
 const ACCOUNT_REFRESH_MS = 60_000
 let accountTimer: ReturnType<typeof setInterval> | undefined
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+const syncPolicy = new ForegroundSyncPolicy()
 
 async function loadAccounts(): Promise<void> {
   try {
@@ -41,10 +49,48 @@ async function loadAccounts(): Promise<void> {
     if (res.ok) {
       const body = (await res.json()) as AccountListResponse
       accounts.value = body.accounts
+      schedulePoll(body.accounts.some((a) => a.syncing))
     }
   } catch {
     // Offline: keep the last known list (and counts).
   }
+}
+
+/** Fast follow-up refresh while a triggered sync is still running. */
+function schedulePoll(anySyncing: boolean): void {
+  clearTimeout(pollTimer)
+  const delay = syncPolicy.nextPollDelay(anySyncing)
+  if (delay === null || document.visibilityState !== 'visible') return
+  pollTimer = setTimeout(() => {
+    if (view.value === 'app') void loadAccounts()
+  }, delay)
+}
+
+function stopPolling(): void {
+  syncPolicy.stop()
+  clearTimeout(pollTimer)
+}
+
+/**
+ * Asks the server to sync all accounts now and refreshes the list. The
+ * server skips accounts that are syncing, rate-limited or broken; the
+ * request is only a hint, so errors (offline) are ignored.
+ */
+async function syncNow(force = false): Promise<void> {
+  if (view.value !== 'app' || !syncPolicy.trigger(force)) return
+  await fetch('/api/sync', { method: 'POST' }).catch(() => {})
+  await loadAccounts()
+}
+
+/** visibilitychange/focus/online: sync when shown, stop polling when hidden. */
+function onForeground(): void {
+  if (view.value !== 'app') return
+  if (document.visibilityState !== 'visible') {
+    stopPolling()
+    return
+  }
+  if (navigator.onLine === false) return
+  void syncNow()
 }
 
 /** Opens the edit form of an account in the settings (e.g. new credentials). */
@@ -53,7 +99,7 @@ function editAccount(id: string): void {
   section.value = 'settings'
 }
 
-/** Unread counts and status of all accounts; quiet background refresh. */
+/** Unread counts and status of all accounts; quiet periodic refresh. */
 function refreshAccounts(): void {
   if (view.value === 'app' && document.visibilityState === 'visible') void loadAccounts()
 }
@@ -93,6 +139,7 @@ async function loadStatus(): Promise<void> {
       view.value = 'app'
       await loadDevices()
       await loadAccounts()
+      void syncNow(true)
     } else {
       view.value = 'login'
     }
@@ -123,6 +170,7 @@ async function submit(): Promise<void> {
     view.value = 'app'
     await loadDevices()
     await loadAccounts()
+    void syncNow(true)
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unbekannter Fehler'
   } finally {
@@ -154,6 +202,7 @@ async function revokeDevice(device: DeviceInfo): Promise<void> {
 }
 
 async function logout(): Promise<void> {
+  stopPolling()
   await api('/api/auth/session', { method: 'DELETE' }).catch(() => {})
   email.value = ''
   password.value = ''
@@ -167,14 +216,17 @@ async function logout(): Promise<void> {
 onMounted(() => {
   void loadStatus()
   accountTimer = setInterval(refreshAccounts, ACCOUNT_REFRESH_MS)
-  window.addEventListener('focus', refreshAccounts)
-  document.addEventListener('visibilitychange', refreshAccounts)
+  window.addEventListener('focus', onForeground)
+  window.addEventListener('online', onForeground)
+  document.addEventListener('visibilitychange', onForeground)
 })
 
 onBeforeUnmount(() => {
   clearInterval(accountTimer)
-  window.removeEventListener('focus', refreshAccounts)
-  document.removeEventListener('visibilitychange', refreshAccounts)
+  stopPolling()
+  window.removeEventListener('focus', onForeground)
+  window.removeEventListener('online', onForeground)
+  document.removeEventListener('visibilitychange', onForeground)
 })
 </script>
 

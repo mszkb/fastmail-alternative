@@ -6,6 +6,7 @@
  */
 
 export * from './compose'
+export * from './foreground-sync'
 export * from './mail'
 export * from './redact'
 export * from './request-scope'
