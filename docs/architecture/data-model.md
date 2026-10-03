@@ -204,7 +204,7 @@ erDiagram
 
 Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server**:
 
-- **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs).
+- **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs). `metadata_version` gibt an, mit welchem Stand der Sync-Logik die Metadaten abgeleitet wurden; veraltete Zeilen leitet der Sync in begrenzten Batches neu ab (bevorzugt aus der gespeicherten Rohmail, sonst per IMAP).
 - **`message_location`**: `(folder_id, uidvalidity, uid)`, eindeutig. Eine Nachricht kann in mehreren Ordnern liegen (Gmail-Labels, Kopien). **Flags liegen hier**, so wie IMAP sie pro Mailbox führt. Kein zusätzliches aggregiertes Feld; die Ansicht zeigt die Flags des Ordners, in dem man gerade ist.
 - **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Sanitisiertes HTML und Plaintext für die Anzeige liegen verschlüsselt in der DB, damit das Öffnen schnell ist.
 - **`attachment`**: Metadaten aus `BODYSTRUCTURE`, Inhalt als verschlüsselte Datei im Volume.

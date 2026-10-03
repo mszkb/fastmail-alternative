@@ -24,7 +24,7 @@ import {
 } from '@fma/crypto'
 import { loadAccountContext } from '../src/accounts'
 import { runFolderSync } from '../src/jobs/folder-sync'
-import { runMessageSync } from '../src/jobs/message-sync'
+import { MESSAGE_METADATA_VERSION, runMessageSync } from '../src/jobs/message-sync'
 
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
@@ -293,6 +293,122 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     expect(second.inReplyTo).toBe('<parent@example.org>')
     // References come from the raw message (not part of the IMAP envelope).
     expect(second.references).toEqual(['<root@example.org>', '<parent@example.org>'])
+  })
+
+  /** Simulates rows synced before the address fix (metadata_version 1). */
+  async function resetToLegacyMetadata(messageIds: string[]): Promise<void> {
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    for (const id of messageIds) {
+      await pool.query(
+        `UPDATE message SET from_enc = $2, recipients_enc = $3, in_reply_to = NULL,
+           "references" = '{}', metadata_version = 1
+         WHERE id = $1`,
+        [
+          id,
+          Buffer.from(encryptField(ctx.dek, '[]', `message.from:${id}`), 'utf8'),
+          Buffer.from(
+            encryptField(ctx.dek, JSON.stringify({ to: [], cc: [] }), `message.recipients:${id}`),
+            'utf8',
+          ),
+        ],
+      )
+    }
+  }
+
+  async function loadDecoded(): Promise<
+    {
+      id: string
+      subject: string
+      from: unknown
+      recipients: { to: unknown; cc: unknown; replyTo: unknown }
+      inReplyTo: string | null
+      references: string[]
+      metadataVersion: number
+    }[]
+  > {
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const { rows } = await pool.query<{
+      id: string
+      subject_enc: Buffer
+      from_enc: Buffer
+      recipients_enc: Buffer
+      in_reply_to: string | null
+      references: string[]
+      metadata_version: number
+    }>(
+      `SELECT id, subject_enc, from_enc, recipients_enc, in_reply_to, "references",
+              metadata_version
+       FROM message WHERE account_id = $1`,
+      [accountId],
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      subject: decryptField(ctx.dek, row.subject_enc.toString('utf8'), `message.subject:${row.id}`),
+      from: JSON.parse(
+        decryptField(ctx.dek, row.from_enc.toString('utf8'), `message.from:${row.id}`),
+      ) as unknown,
+      recipients: JSON.parse(
+        decryptField(ctx.dek, row.recipients_enc.toString('utf8'), `message.recipients:${row.id}`),
+      ) as { to: unknown; cc: unknown; replyTo: unknown },
+      inReplyTo: row.in_reply_to,
+      references: row.references,
+      metadataVersion: row.metadata_version,
+    }))
+  }
+
+  function expectCurrentMetadata(decoded: Awaited<ReturnType<typeof loadDecoded>>): void {
+    const first = decoded.find((m) => m.subject === 'Erste Testmail')!
+    const second = decoded.find((m) => m.subject === 'Zweite Testmail')!
+    expect(first.metadataVersion).toBe(MESSAGE_METADATA_VERSION)
+    expect(second.metadataVersion).toBe(MESSAGE_METADATA_VERSION)
+    expect(first.from).toEqual([{ name: '', address: 'sender-one@example.com' }])
+    expect(first.recipients.to).toEqual([{ name: '', address: greenmailUser }])
+    expect(first.recipients.replyTo).toEqual([])
+    expect(second.from).toEqual([{ name: 'Sender Two', address: 'sender-two@example.com' }])
+    expect(second.recipients.to).toEqual([{ name: '', address: greenmailUser }])
+    expect(second.recipients.cc).toEqual([{ name: 'Carol', address: 'carol@example.com' }])
+    expect(second.recipients.replyTo).toEqual([{ name: 'Team', address: 'team@example.com' }])
+    expect(second.inReplyTo).toBe('<parent@example.org>')
+    expect(second.references).toEqual(['<root@example.org>', '<parent@example.org>'])
+  }
+
+  it('backfills outdated metadata from the stored raw mail', async () => {
+    const ids = (await loadDecoded()).map((m) => m.id)
+    await resetToLegacyMetadata(ids)
+    const legacy = await loadDecoded()
+    expect(legacy.every((m) => m.metadataVersion === 1)).toBe(true)
+    expect(legacy.every((m) => JSON.stringify(m.from) === '[]')).toBe(true)
+
+    await runMessageSync(pool, accountId, inboxFolderId)
+
+    expectCurrentMetadata(await loadDecoded())
+  })
+
+  it('backfills outdated metadata from IMAP when no raw mail is stored', async () => {
+    const ids = (await loadDecoded()).map((m) => m.id)
+    await resetToLegacyMetadata(ids)
+    // Make the stored raw files unusable for this run (restored afterwards).
+    const { rows: bodies } = await pool.query<{ message_id: string; storage_ref: string }>(
+      'SELECT message_id::text, storage_ref FROM message_body WHERE message_id = ANY($1::uuid[])',
+      [ids],
+    )
+    await pool.query(
+      `UPDATE message_body SET storage_ref = 'missing/raw.eml.enc'
+       WHERE message_id = ANY($1::uuid[])`,
+      [ids],
+    )
+    try {
+      await runMessageSync(pool, accountId, inboxFolderId)
+    } finally {
+      for (const body of bodies) {
+        await pool.query('UPDATE message_body SET storage_ref = $2 WHERE message_id = $1', [
+          body.message_id,
+          body.storage_ref,
+        ])
+      }
+    }
+
+    expectCurrentMetadata(await loadDecoded())
   })
 
   it('stores locations with uidvalidity and flags', async () => {
