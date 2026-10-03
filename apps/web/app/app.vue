@@ -290,6 +290,7 @@ onBeforeUnmount(() => {
 
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-else-if="info" class="message info">{{ info }}</p>
+    <UpdatePrompt />
   </main>
 </template>
 

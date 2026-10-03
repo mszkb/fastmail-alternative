@@ -55,6 +55,14 @@
 2. Die API persistiert die Absicht und erzeugt einen Job.
 3. Der Worker führt das IMAP-Kommando aus. Bei einem Fehler wird der Zustand zurückgesetzt und der Client informiert.
 
+## PWA-Shell und Service Worker (Roadmap 4.1)
+
+- `apps/web/public/manifest.webmanifest` (standalone, `start_url`/`scope` `/`, Icons 192/512 „any“ und „maskable“) plus iOS-Meta-Tags und `apple-touch-icon` (`nuxt.config.ts`). Die Icons erzeugt `apps/web/scripts/generate-icons.mjs` ohne Bildbibliothek; die PNGs sind eingecheckt.
+- Handgeschriebener Service Worker (`apps/web/service-worker/sw.js`) statt `@vite-pwa/nuxt`: wenige Zeilen, keine Workbox-Abhängigkeit, volle Kontrolle darüber, was gecacht wird. Nach `nuxt generate` schreibt `apps/web/scripts/build-sw.mjs` die Precache-Liste (index.html, gehashte Assets, Manifest, Icons) und einen Inhalts-Hash als Cache-Version in `/sw.js`.
+- **Nur die App-Shell wird gecacht.** Navigationen bekommen die gecachte `index.html`, Shell-Dateien kommen cache-first. `/api/*` geht immer ans Netz und landet nie im Cache Storage; die verschlüsselte Offline-Ablage von Maildaten folgt mit 4.6.
+- Updates: Eine neue Version wird im Hintergrund installiert und wartet. Die App zeigt „Neue Version verfügbar – Neu laden“; erst der Klick aktiviert sie (`SKIP_WAITING`) und lädt neu. Damit geht kein offener Entwurf durch einen erzwungenen Reload verloren. Geöffnete PWAs suchen beim Wiederanzeigen (höchstens alle 10 min) nach Updates.
+- nginx: `sw.js`, `manifest.webmanifest` und `index.html` mit `no-cache`, `/_nuxt/` (gehasht) `immutable`.
+
 ## Fehlerisolierung
 
 - Jedes Konto hat einen eigenen Sync-Zustand, eigene Fehlerzähler und eigenen Backoff.
