@@ -41,6 +41,19 @@ Umgesetzt in Roadmap 2.9. Drei unabhängige Schichten, jede für sich soll Scrip
 
 Da der Parent ohne Scripts/Same-Origin die Höhe des iframes nicht messen kann (und Mail-HTML nicht zum Messen ins App-DOM gerendert wird), hat der Rahmen eine feste, vom Nutzer veränderbare Höhe und scrollt intern. `position: fixed` u. ä. bleibt erlaubt, wirkt aber nur innerhalb des iframes. Die API liefert `Cache-Control: no-store` und loggt keine Inhalte.
 
+## Offline-Cache im Client
+
+Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt die PWA Daten auf dem Gerät ab. Regeln:
+
+- **Ablage nur in IndexedDB** (`apps/web/app/utils/offline-store.ts`), nie im Cache Storage des Service Workers: `/api/*` bleibt im Service Worker network-only.
+- **Inhalt:** Kontoliste, Ordner, die ersten Listenseiten je Ordner (bis 150 Nachrichten), vom Benutzer geöffnete Nachrichten (Text), Unterhaltungen, sanitisiertes HTML **ohne** Remote-Content (mit `?remote=1` geladenes HTML wird nie gespeichert), Identitäten und die Offline-Queue (inkl. offline geschriebener Nachrichten). Keine Anhänge, keine Zugangsdaten.
+- **Verschlüsselt:** Jeder Eintrag ist mit AES-256-GCM verschlüsselt (eigener IV, Eintragsschlüssel als AAD). Der Schlüssel ist ein **nicht exportierbarer** WebCrypto-Key, der auf dem Gerät erzeugt und in derselben Datenbank abgelegt wird. Skripte können ihn benutzen, aber nie auslesen.
+- **Grenzen dieser Verschlüsselung (bewusst einfach gehalten):** Der Key liegt im Browserprofil neben den Daten. Gegen jemanden, der das entsperrte Gerät oder das Browserprofil samt Browser nutzt, oder gegen XSS in der App schützt sie nicht – dafür sind Geräte-Sperre/Festplattenverschlüsselung des Betriebssystems und die CSP zuständig. Sie sorgt dafür, dass Inhalte nicht als Klartext in Profil-Kopien oder Datenträger-Resten liegen und dass **Löschen des Keys** alles Übrige unlesbar macht (Crypto-Shredding), auch wenn der Browser die Datenbank verzögert löscht. Ein vom Server abgeleiteter Schlüssel kam nicht infrage, weil der Cache gerade dann lesbar sein muss, wenn der Server nicht erreichbar ist.
+- **Löschen:** Abmelden, eine abgelaufene oder widerrufene Sitzung (jede `401`-Antwort, auch beim Nachreichen der Queue) und eine Anmeldung mit anderem Benutzer löschen Key, Cache und Queue des Geräts vollständig. Danach sind bis zur nächsten Anmeldung keine Zugriffe auf die Datenbank mehr möglich, so dass verspätete Antworten den Cache nicht neu anlegen. Ein gelöschtes Konto entfernt seine Einträge beim nächsten Laden der Kontoliste.
+- **Widerruf eines Geräts**, das offline bleibt: Der Cache bleibt bis zur nächsten Verbindung lesbar (der Server kann ein Gerät nicht aus der Ferne löschen). Ausstehende Aktionen werden in diesem Fall verworfen; die App meldet das bei der neuen Anmeldung.
+- **Größe:** höchstens ca. 50 MB bzw. 3000 Einträge, Einträge über 5 MB werden nicht gespeichert; verdrängt wird nach LRU (`selectEvictions` in `@fma/shared`). Kontoliste, Ordner, Identitäten, Sitzungsmarke und Queue werden nie verdrängt.
+- Ohne IndexedDB oder WebCrypto (privates Fenster, Instanz per `http://` unter einer LAN-Adresse) arbeitet die App ohne Offline-Ablage.
+
 ## Backups
 
 - Backups werden **verschlüsselt**.

@@ -12,8 +12,32 @@
 // Badge (4.4): the unread INBOX total of all accounts goes to the app icon
 // (Badging API) or the title prefix whenever the account list refreshes.
 // Install hints (4.2): banner in a browser tab, guide in the settings.
+// Offline-first (4.6): the account list and the session marker are cached
+// (encrypted IndexedDB, utils/offline-store.ts). Without a server the app
+// starts from that cache ("Offline" badge) and checks the session again as
+// soon as it is back online; queued actions (utils/offline-queue.ts) are
+// replayed first, then the usual sync runs. Logout, an expired or revoked
+// session (401) or another user clear all offline data on this device.
 import { ForegroundSyncPolicy, unreadBadgeCount } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
+import {
+  clearOfflineData,
+  cacheDeleteAccount,
+  cacheGet,
+  cachePut,
+  enableOfflineData,
+} from '~/utils/offline-store'
+import {
+  dismissNotice,
+  isOffline,
+  loadQueue,
+  offlineState,
+  onUnauthorized,
+  pendingCount,
+  pendingText,
+  replayQueue,
+  resetOfflineState,
+} from '~/utils/offline-queue'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -44,6 +68,11 @@ const accounts = ref<AccountSummary[]>([])
 const editAccountId = ref('')
 
 const ACCOUNT_REFRESH_MS = 60_000
+const SESSION_KEY = 'session'
+const ACCOUNTS_KEY = 'accounts'
+// False while the app runs from the cache without having reached the
+// server: the session is checked again before anything else is sent.
+let sessionVerified = false
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
@@ -64,13 +93,36 @@ watch(accounts, (list) => updateAppBadge(unreadBadgeCount(list)))
 async function loadAccounts(): Promise<void> {
   try {
     const res = await fetch('/api/accounts')
+    offlineState.reachable = true
+    if (res.status === 401) {
+      await handleUnauthorized()
+      return
+    }
     if (res.ok) {
       const body = (await res.json()) as AccountListResponse
+      await forgetRemovedAccounts(body.accounts)
       accounts.value = body.accounts
+      void cachePut(ACCOUNTS_KEY, body.accounts, { pinned: true })
       schedulePoll(body.accounts.some((a) => a.syncing))
     }
   } catch {
-    // Offline: keep the last known list (and counts).
+    offlineState.reachable = false
+    // Offline: keep the last known list (and counts), else the cached one.
+    if (accounts.value.length === 0) {
+      accounts.value = (await cacheGet<AccountSummary[]>(ACCOUNTS_KEY)) ?? []
+    }
+  }
+}
+
+/** Deleted accounts (here or on another device): drop their cached data. */
+async function forgetRemovedAccounts(next: AccountSummary[]): Promise<void> {
+  const previous =
+    accounts.value.length > 0
+      ? accounts.value
+      : ((await cacheGet<AccountSummary[]>(ACCOUNTS_KEY)) ?? [])
+  const ids = new Set(next.map((a) => a.id))
+  for (const account of previous) {
+    if (!ids.has(account.id)) await cacheDeleteAccount(account.id)
   }
 }
 
@@ -100,15 +152,27 @@ async function syncNow(force = false): Promise<void> {
   await loadAccounts()
 }
 
-/** visibilitychange/focus/online: sync when shown, stop polling when hidden. */
+/**
+ * visibilitychange/focus/online: replay queued actions and sync when shown,
+ * stop polling when hidden. Started offline: check the session first.
+ */
 function onForeground(): void {
+  offlineState.online = navigator.onLine
   if (view.value !== 'app') return
   if (document.visibilityState !== 'visible') {
     stopPolling()
     return
   }
   if (navigator.onLine === false) return
-  void syncNow()
+  if (!sessionVerified) {
+    void loadStatus()
+    return
+  }
+  void replayQueue().then(() => syncNow())
+}
+
+function onOffline(): void {
+  offlineState.online = false
 }
 
 /** The service worker forwards notification clicks (new mail): sync now. */
@@ -125,7 +189,9 @@ function editAccount(id: string): void {
 
 /** Unread counts and status of all accounts; quiet periodic refresh. */
 function refreshAccounts(): void {
-  if (view.value === 'app' && document.visibilityState === 'visible') void loadAccounts()
+  if (view.value !== 'app' || document.visibilityState !== 'visible') return
+  if (sessionVerified) void loadAccounts()
+  else if (navigator.onLine !== false) void loadStatus()
 }
 
 function guessPlatform(): string {
@@ -154,23 +220,88 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 async function loadStatus(): Promise<void> {
+  let status: AuthStatus
   try {
-    const status = await api<AuthStatus>('/api/auth/status')
-    if (status.needsSetup) {
-      view.value = 'setup'
-    } else if (status.authenticated) {
-      currentEmail.value = status.email ?? ''
-      view.value = 'app'
-      await loadDevices()
-      await loadAccounts()
-      void syncNow(true)
-    } else {
-      view.value = 'login'
-    }
+    status = await api<AuthStatus>('/api/auth/status')
   } catch {
+    // Server unreachable: start with the cached data of the last session.
+    const session = await cacheGet<{ email: string }>(SESSION_KEY)
+    if (session) {
+      await startOffline(session.email)
+      return
+    }
     error.value = 'API nicht erreichbar'
     view.value = 'login'
+    return
   }
+  offlineState.reachable = true
+  if (status.authenticated) {
+    await enterApp(status.email ?? '')
+    return
+  }
+  // No (longer a) session: nothing of a previous one may stay on the device.
+  if (view.value === 'app') await handleUnauthorized()
+  else await clearOffline()
+  view.value = status.needsSetup ? 'setup' : 'login'
+}
+
+/** Confirmed session: (re)enable the offline store, replay, then sync. */
+async function enterApp(userEmail: string): Promise<void> {
+  const session = await cacheGet<{ email: string }>(SESSION_KEY)
+  if (session && session.email !== userEmail) await clearOffline()
+  enableOfflineData()
+  sessionVerified = true
+  void cachePut(SESSION_KEY, { email: userEmail }, { pinned: true })
+  currentEmail.value = userEmail
+  error.value = ''
+  if (accounts.value.length === 0) {
+    accounts.value = (await cacheGet<AccountSummary[]>(ACCOUNTS_KEY)) ?? []
+  }
+  view.value = 'app'
+  await loadQueue()
+  await replayQueue()
+  await loadDevices()
+  await loadAccounts()
+  void syncNow(true)
+}
+
+/** Offline start from the cache; the session is checked once online again. */
+async function startOffline(userEmail: string): Promise<void> {
+  // Actions taken offline must be stored (queue) - the cache belongs to
+  // this session as far as the device knows.
+  enableOfflineData()
+  sessionVerified = false
+  offlineState.reachable = false
+  currentEmail.value = userEmail
+  error.value = ''
+  accounts.value = (await cacheGet<AccountSummary[]>(ACCOUNTS_KEY)) ?? []
+  await loadQueue()
+  view.value = 'app'
+}
+
+async function clearOffline(): Promise<void> {
+  sessionVerified = false
+  await clearOfflineData()
+  resetOfflineState()
+}
+
+/** 401 from any request: session expired or this device was revoked. */
+async function handleUnauthorized(): Promise<void> {
+  if (view.value !== 'app') return
+  stopPolling()
+  const lost = pendingCount.value
+  await clearOffline()
+  devices.value = []
+  accounts.value = []
+  currentEmail.value = ''
+  view.value = 'login'
+  info.value =
+    'Die Sitzung ist abgelaufen. Bitte erneut anmelden.' +
+    (lost === 1
+      ? ' Eine ausstehende Aktion wurde verworfen.'
+      : lost > 1
+        ? ` ${lost} ausstehende Aktionen wurden verworfen.`
+        : '')
 }
 
 async function submit(): Promise<void> {
@@ -189,12 +320,9 @@ async function submit(): Promise<void> {
         platform: guessPlatform(),
       }),
     })
-    currentEmail.value = res.email
     password.value = ''
-    view.value = 'app'
-    await loadDevices()
-    await loadAccounts()
-    void syncNow(true)
+    info.value = ''
+    await enterApp(res.email)
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Unbekannter Fehler'
   } finally {
@@ -228,6 +356,7 @@ async function revokeDevice(device: DeviceInfo): Promise<void> {
 async function logout(): Promise<void> {
   stopPolling()
   await api('/api/auth/session', { method: 'DELETE' }).catch(() => {})
+  await clearOffline()
   email.value = ''
   password.value = ''
   devices.value = []
@@ -238,10 +367,12 @@ async function logout(): Promise<void> {
 }
 
 onMounted(() => {
+  onUnauthorized(() => void handleUnauthorized())
   void loadStatus()
   accountTimer = setInterval(refreshAccounts, ACCOUNT_REFRESH_MS)
   window.addEventListener('focus', onForeground)
   window.addEventListener('online', onForeground)
+  window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onForeground)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onWorkerMessage)
@@ -253,6 +384,7 @@ onBeforeUnmount(() => {
   stopPolling()
   window.removeEventListener('focus', onForeground)
   window.removeEventListener('online', onForeground)
+  window.removeEventListener('offline', onOffline)
   document.removeEventListener('visibilitychange', onForeground)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onWorkerMessage)
@@ -319,8 +451,24 @@ onBeforeUnmount(() => {
             Einstellungen
           </button>
         </span>
-        <span class="user">{{ currentEmail }}</span>
+        <span class="status">
+          <span
+            v-if="isOffline"
+            class="tag offline"
+            role="status"
+            title="Keine Verbindung zum Server – angezeigt werden gespeicherte Daten"
+            >Offline</span
+          >
+          <span v-if="pendingCount > 0" class="tag pending" role="status">{{ pendingText }}</span>
+          <span class="user">{{ currentEmail }}</span>
+        </span>
       </nav>
+      <ul v-if="offlineState.notices.length" class="notices">
+        <li v-for="(notice, index) in offlineState.notices" :key="index" class="message info">
+          <span>{{ notice }}</span>
+          <button type="button" class="link" @click="dismissNotice(index)">OK</button>
+        </li>
+      </ul>
 
       <InstallBanner @guide="showInstallGuide" />
 
@@ -423,6 +571,49 @@ button.tab {
 button.tab.active {
   background: #e4e9ee;
   color: #1f2933;
+  font-weight: 600;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.tag.offline {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.tag.pending {
+  background: #fff3c4;
+  color: #8d2b0b;
+}
+
+.status .tag {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+.notices {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.notices li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+button.link {
+  padding: 0.2rem 0.5rem;
+  background: transparent;
+  color: #046c4e;
   font-weight: 600;
 }
 

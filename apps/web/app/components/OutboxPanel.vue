@@ -3,7 +3,10 @@
 // current account (GET /api/accounts/:id/outbox) plus messages sent from
 // this tab, polled while something is still on its way. Failed messages
 // show the German error text from @fma/shared and can be retried.
+// Offline (4.6): queued sends are counted in the app's pending indicator;
+// after a replay the list is reloaded. No error while offline.
 import type { OutboxListResponse, OutboxMessage, OutboxStatus } from '@fma/shared'
+import { isNetworkError, offlineState } from '~/utils/offline-queue'
 
 const props = defineProps<{ accountId: string }>()
 
@@ -89,8 +92,10 @@ async function refresh(): Promise<void> {
       ...sent,
     ].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     error.value = ''
-  } catch {
-    if (request === loadRequest) error.value = 'Postausgang konnte nicht geladen werden.'
+  } catch (err) {
+    if (request === loadRequest && !isNetworkError(err)) {
+      error.value = 'Postausgang konnte nicht geladen werden.'
+    }
   } finally {
     if (request === loadRequest) schedule()
   }
@@ -141,6 +146,12 @@ watch(
     void refresh()
   },
   { immediate: true },
+)
+
+// Queued sends were submitted (back online): show them.
+watch(
+  () => offlineState.replayedAt,
+  () => void refresh(),
 )
 
 onMounted(() => window.addEventListener('focus', onFocus))

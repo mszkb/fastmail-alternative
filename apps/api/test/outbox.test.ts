@@ -287,4 +287,47 @@ describe.skipIf(!databaseUrl)('outbox api', () => {
     expect(jobs).toEqual([{ type: 'send_message', payload: { outboxId: failed.id } }])
     expect((await request('POST', `/api/outbox/${failed.id}/retry`)).statusCode).toBe(409)
   })
+  it('is idempotent per clientId (offline queue replay sends once)', async () => {
+    const clientId = randomUUID()
+    const first = await request('POST', '/api/outbox', { ...valid(), clientId })
+    expect(first.statusCode).toBe(201)
+    const created = first.json<OutboxMessage>()
+
+    // Replay (sequential and concurrent): same entry, no second job.
+    const again = await request('POST', '/api/outbox', { ...valid(), clientId })
+    expect(again.statusCode).toBe(200)
+    expect(again.json<OutboxMessage>()).toMatchObject({ id: created.id, status: 'queued' })
+    const concurrent = await Promise.all([
+      request('POST', '/api/outbox', { ...valid(), clientId: clientId.toUpperCase() }),
+      request('POST', '/api/outbox', { ...valid(), clientId }),
+    ])
+    expect(concurrent.map((r) => r.statusCode)).toEqual([200, 200])
+    expect(concurrent.every((r) => r.json<OutboxMessage>().id === created.id)).toBe(true)
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM outbox_message`)
+    expect(rows[0].n).toBe(1)
+    const { rows: jobs } = await pool.query(`SELECT count(*)::int AS n FROM job`)
+    expect(jobs[0].n).toBe(1)
+
+    // Concurrent first submissions race on the unique index: one wins.
+    const fresh = randomUUID()
+    const race = await Promise.all([
+      request('POST', '/api/outbox', { ...valid(), clientId: fresh }),
+      request('POST', '/api/outbox', { ...valid(), clientId: fresh }),
+    ])
+    expect(race.map((r) => r.statusCode).sort()).toEqual([200, 201])
+    expect(race[0]!.json<OutboxMessage>().id).toBe(race[1]!.json<OutboxMessage>().id)
+
+    // Without a clientId every request is a new message; invalid ids are refused.
+    expect((await request('POST', '/api/outbox', valid())).statusCode).toBe(201)
+    expect((await request('POST', '/api/outbox', { ...valid(), clientId: 'x' })).statusCode).toBe(
+      400,
+    )
+    // The same clientId on another (foreign) account does not reveal the entry.
+    const foreign = await request('POST', '/api/outbox', {
+      ...valid(),
+      accountId: foreignAccountId,
+      clientId,
+    })
+    expect(foreign.statusCode).toBe(404)
+  })
 })

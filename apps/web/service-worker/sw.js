@@ -6,8 +6,8 @@
  * - Navigations are answered with the cached app shell (index.html), so the
  *   app starts offline; precached files are served cache-first.
  * - /api/* is never touched: no API response (mail content!) lands in the
- *   Cache Storage. Offline storage of mail data is roadmap 4.6 and follows
- *   the security model (docs/architecture/security.md).
+ *   Cache Storage. Offline data (roadmap 4.6) lives encrypted in IndexedDB
+ *   (app/utils/offline-store.ts, docs/architecture/security.md).
  * - A new version waits until the user confirms the update prompt in the
  *   app (message SKIP_WAITING); old shell caches are removed on activate.
  * - Push (docs/architecture/push.md): the payload is only a hint

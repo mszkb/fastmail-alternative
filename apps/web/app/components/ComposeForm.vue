@@ -4,6 +4,9 @@
 // from createDraft in @fma/shared; this component only edits and submits
 // it to POST /api/outbox. Sending itself happens in the worker - the
 // outbox panel in MailView shows the status. Plain text only.
+// Offline (4.6): every form gets a clientId (idempotency key of the
+// outbox). Without a connection the message goes to the offline queue and
+// is submitted with the same clientId later - it is never sent twice.
 import {
   OUTBOX_LIMITS,
   formatAddressList,
@@ -14,6 +17,7 @@ import {
   type OutboxMessage,
   type SendMessageRequest,
 } from '@fma/shared'
+import { addNotice, enqueueSend, isNetworkError, newId } from '~/utils/offline-queue'
 
 const props = defineProps<{
   accountId: string
@@ -42,6 +46,7 @@ const showCcBcc = ref(Boolean(initial.cc || initial.bcc))
 const sending = ref(false)
 const error = ref('')
 const toInput = ref<HTMLInputElement | null>(null)
+const clientId = newId()
 const textInput = ref<HTMLTextAreaElement | null>(null)
 
 const dirty = computed(() =>
@@ -89,19 +94,24 @@ async function send(): Promise<void> {
   }
   if (!form.subject.trim() && !window.confirm('Ohne Betreff senden?')) return
 
-  const body: SendMessageRequest = {
+  const body: SendMessageRequest & { clientId: string } = {
     accountId: props.accountId,
     to,
     cc,
     bcc,
     subject: form.subject,
     text: form.text,
+    clientId,
   }
   if (form.identityId) body.identityId = form.identityId
   if (props.draft.inReplyTo) body.inReplyTo = props.draft.inReplyTo
   if (props.draft.references?.length) body.references = props.draft.references
 
   sending.value = true
+  if (navigator.onLine === false) {
+    await queueOffline(body)
+    return
+  }
   try {
     const res = await fetch('/api/outbox', {
       method: 'POST',
@@ -116,8 +126,23 @@ async function send(): Promise<void> {
     }
     emit('queued', payload)
     emit('close')
-  } catch {
+  } catch (err) {
+    if (isNetworkError(err)) {
+      await queueOffline(body)
+      return
+    }
     error.value = 'API nicht erreichbar - die Nachricht wurde nicht gesendet.'
+  } finally {
+    sending.value = false
+  }
+}
+
+/** No connection: queue the message; it is submitted once online again. */
+async function queueOffline(body: SendMessageRequest & { clientId: string }): Promise<void> {
+  try {
+    await enqueueSend(body)
+    addNotice('Keine Verbindung: Die Nachricht wird gesendet, sobald die App wieder online ist.')
+    emit('close')
   } finally {
     sending.value = false
   }

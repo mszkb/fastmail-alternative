@@ -202,6 +202,12 @@ export interface SendMessageRequest {
   text: string
   inReplyTo?: string
   references?: string[]
+  /**
+   * Client-generated UUID (roadmap 4.6): a repeated request with the same
+   * id (offline queue replay, retry after a timeout) returns the message
+   * queued the first time instead of sending it again.
+   */
+  clientId?: string
 }
 
 /** Stable error codes of a failed send; `message` carries the German text. */

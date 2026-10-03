@@ -24,6 +24,12 @@
 // account has new data (sync finished, unread count changed), folders and
 // the first list page are reloaded in place - loaded pages, scroll position,
 // selection and the open message stay (mergeFirstPage from @fma/shared).
+// Offline-first (4.6): folders, the first list pages (up to
+// CACHED_LIST_MESSAGES), opened messages and threads and the identities are
+// read from the encrypted IndexedDB cache first and then refreshed from the
+// network (stale-while-revalidate). Actions that cannot reach the server -
+// or while older ones are still queued - stay applied locally and go to the
+// offline queue; queued actions are overlaid on lists loaded later.
 import {
   RequestScope,
   accountDataChanged,
@@ -31,6 +37,7 @@ import {
   createDraft,
   isStaleResponse,
   mergeFirstPage,
+  overlayPendingActions,
 } from '@fma/shared'
 import type {
   AccountSummary,
@@ -51,6 +58,13 @@ import type {
   ThreadDetail,
 } from '@fma/shared'
 import type OutboxPanel from './OutboxPanel.vue'
+import { cacheGet, cachePut } from '~/utils/offline-store'
+import {
+  enqueueAction,
+  isNetworkError,
+  notifyUnauthorized,
+  offlineState,
+} from '~/utils/offline-queue'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
   Partial<
@@ -72,6 +86,13 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   trash: 'Papierkorb',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
+/** Messages of a folder list kept offline (three pages of 50). */
+const CACHED_LIST_MESSAGES = 150
+const LIST_CACHE_DELAY_MS = 500
+
+interface CachedList {
+  messages: MessageListItem[]
+}
 
 const accountId = ref('')
 const folders = ref<FolderSummary[]>([])
@@ -110,6 +131,11 @@ let refreshDeferred = false
 // Last seen sync state per account, to detect new server data.
 const seenSyncState = new Map<string, AccountSyncState>()
 let observer: IntersectionObserver | null = null
+// Folder whose list is shown (from cache or network) and may be written
+// back to the cache; '' while switching, so an empty list never overwrites
+// the cached one of the next folder.
+let listCacheFolder = ''
+let listCacheTimer: ReturnType<typeof setTimeout> | undefined
 // Account scope: reset on every account switch. Reads of the previous
 // account are aborted, and responses arriving late are dropped (getJson
 // rejects with StaleResponseError), so they never land in the new view.
@@ -203,7 +229,16 @@ function shortDate(iso: string): string {
 
 function getJson<T>(path: string): Promise<T> {
   return accountScope.run(async (signal) => {
-    const res = await fetch(path, { signal })
+    let res: Response
+    try {
+      res = await fetch(path, { signal })
+    } catch (err) {
+      if (!isNetworkError(err)) throw err
+      offlineState.reachable = false
+      throw new Error('Keine Verbindung zum Server.')
+    }
+    offlineState.reachable = true
+    if (res.status === 401) notifyUnauthorized()
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { message?: string } | null
       throw new Error(body?.message ?? `Fehler ${res.status}`)
@@ -266,10 +301,17 @@ async function loadIdentities(): Promise<ComposeIdentity[]> {
   try {
     const res = await getJson<IdentityListResponse>(`/api/accounts/${requestedAccount}/identities`)
     if (requestedAccount === accountId.value) identities.value = res.identities
+    void cachePut(`identities:${requestedAccount}`, res.identities, {
+      accountId: requestedAccount,
+      pinned: true,
+    })
     return res.identities
-  } catch {
-    // Offline or a previous account's request: the caller falls back.
-    return []
+  } catch (err) {
+    if (isStaleResponse(err)) return []
+    // Offline: the cached identities allow writing (the send is queued).
+    const cached = await cacheGet<ComposeIdentity[]>(`identities:${requestedAccount}`)
+    if (cached && requestedAccount === accountId.value) identities.value = cached
+    return cached ?? []
   }
 }
 
@@ -304,45 +346,88 @@ async function loadFolders(): Promise<void> {
   closeDetail()
   if (!accountId.value) return
   const requestedAccount = accountId.value
+  const scope = accountScope.token
+  const network = getJson<FolderListResponse>(`/api/accounts/${requestedAccount}/folders`)
+  network.catch(() => {}) // handled below, after the cache read
+  // Cached folders first (stale-while-revalidate), the network replaces them.
+  const cached = await cacheGet<FolderSummary[]>(`folders:${requestedAccount}`)
+  if (cached && accountScope.isCurrent(scope) && folders.value.length === 0) {
+    folders.value = cached
+    const inbox = defaultFolder(cached)
+    if (inbox) void selectFolder(inbox.id)
+  }
   try {
-    const res = await getJson<FolderListResponse>(`/api/accounts/${requestedAccount}/folders`)
+    const res = await network
     if (requestedAccount !== accountId.value) return
     folders.value = res.folders
-    const inbox =
-      res.folders.find((f) => f.specialUse === 'inbox') ?? res.folders.find((f) => f.selectable)
-    if (inbox) await selectFolder(inbox.id)
+    void cachePut(`folders:${requestedAccount}`, res.folders, {
+      accountId: requestedAccount,
+      pinned: true,
+    })
+    if (!folderId.value || !res.folders.some((f) => f.id === folderId.value)) {
+      const inbox = defaultFolder(res.folders)
+      if (inbox) await selectFolder(inbox.id)
+    }
   } catch (err) {
-    if (isStaleResponse(err)) return
+    if (isStaleResponse(err) || cached) return
     error.value = err instanceof Error ? err.message : 'Ordner konnten nicht geladen werden.'
   }
+}
+
+function defaultFolder(list: FolderSummary[]): FolderSummary | undefined {
+  return list.find((f) => f.specialUse === 'inbox') ?? list.find((f) => f.selectable)
 }
 
 async function selectFolder(id: string): Promise<void> {
   folderId.value = id
   messages.value = []
   nextCursor.value = null
+  listCacheFolder = ''
   closeDetail()
   await loadMessages()
+}
+
+/** Queued (not yet replayed) actions stay visible on freshly loaded lists. */
+function withPending(list: MessageListItem[], folder: string): MessageListItem[] {
+  return offlineState.queue.length > 0
+    ? overlayPendingActions(list, folder, offlineState.queue)
+    : list
 }
 
 async function loadMessages(): Promise<void> {
   if (!folderId.value) return
   const request = ++listRequest
   const cursor = nextCursor.value
+  const folder = folderId.value
   listLoading.value = true
   error.value = ''
+  let fromCache = false
   try {
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
-    const res = await getJson<MessageListResponse>(
-      `/api/folders/${folderId.value}/messages${query}`,
-    )
+    const network = getJson<MessageListResponse>(`/api/folders/${folder}/messages${query}`)
+    if (!cursor) {
+      network.catch(() => {}) // handled below
+      // First page: show the cached list right away, then revalidate.
+      const cached = await cacheGet<CachedList>(`list:${folder}`)
+      if (cached && request === listRequest && messages.value.length === 0) {
+        messages.value = withPending(cached.messages, folder)
+        listCacheFolder = folder
+        fromCache = true
+      }
+    }
+    const res = await network
     if (request !== listRequest) return
-    messages.value = cursor ? [...messages.value, ...res.messages] : res.messages
+    // The network page replaces the cached list (no cursor for its tail).
+    messages.value = withPending(
+      cursor ? [...messages.value, ...res.messages] : res.messages,
+      folder,
+    )
     nextCursor.value = res.nextCursor
+    listCacheFolder = folder
     // A fresh first page makes a deferred background refresh unnecessary.
     if (!cursor) refreshDeferred = false
   } catch (err) {
-    if (request === listRequest && !isStaleResponse(err)) {
+    if (request === listRequest && !isStaleResponse(err) && !fromCache) {
       error.value = err instanceof Error ? err.message : 'Nachrichten konnten nicht geladen werden.'
     }
   } finally {
@@ -364,16 +449,37 @@ async function openMessage(id: string): Promise<void> {
   detailLoading.value = true
   detail.value = null
   thread.value = null
-  try {
-    const res = await getJson<MessageDetail>(`/api/messages/${id}`)
-    if (request !== detailRequest) return
-    detail.value = res
-    // Opening marks as read (written back to the server by the worker).
-    if (!res.flags.seen) void runAction('read', [id])
+  let markedRead = false
+  let threadLoading = false
+  const show = (message: MessageDetail) => {
+    // Keep local flag changes (queued or just sent) over older data.
     const listed = messages.value.find((m) => m.id === id)
-    if (res.threadId && (listed?.threadCount ?? 2) > 1) void loadThread(res.threadId, request)
+    if (listed) message.flags = { ...message.flags, ...listed.flags }
+    if (markedRead) message.flags.seen = true
+    detail.value = message
+    detailLoading.value = false
+    // Opening marks as read (written back to the server by the worker).
+    if (!message.flags.seen && !markedRead) {
+      markedRead = true
+      void runAction('read', [id])
+    }
+    if (!threadLoading && message.threadId && (listed?.threadCount ?? 2) > 1) {
+      threadLoading = true
+      void loadThread(message.threadId, request)
+    }
+  }
+  const network = getJson<MessageDetail>(`/api/messages/${id}`)
+  network.catch(() => {}) // handled below
+  // Read before: shown immediately and offline (stale-while-revalidate).
+  const cached = await cacheGet<MessageDetail>(`msg:${id}`)
+  if (cached && request === detailRequest && !detail.value) show(cached)
+  try {
+    const res = await network
+    if (request !== detailRequest) return
+    show(res)
+    void cachePut(`msg:${id}`, res, { accountId: res.accountId })
   } catch (err) {
-    if (request === detailRequest && !isStaleResponse(err)) {
+    if (request === detailRequest && !isStaleResponse(err) && !cached) {
       error.value = err instanceof Error ? err.message : 'Nachricht konnte nicht geladen werden.'
     }
   } finally {
@@ -383,14 +489,22 @@ async function openMessage(id: string): Promise<void> {
 
 /** Loads the conversation of the opened message (best effort: single view on errors). */
 async function loadThread(threadId: string, request: number): Promise<void> {
-  try {
-    const res = await getJson<ThreadDetail>(`/api/threads/${threadId}`)
-    if (request !== detailRequest) return
+  const showThread = (res: ThreadDetail) => {
     thread.value = res
     const newest = res.messages[res.messages.length - 1]
     expanded.value = new Set([selectedId.value, ...(newest ? [newest.id] : [])])
+  }
+  const network = getJson<ThreadDetail>(`/api/threads/${threadId}`)
+  network.catch(() => {}) // handled below
+  const cached = await cacheGet<ThreadDetail>(`thread:${threadId}`)
+  if (cached && request === detailRequest && !thread.value) showThread(cached)
+  try {
+    const res = await network
+    if (request !== detailRequest) return
+    showThread(res)
+    void cachePut(`thread:${threadId}`, res, { accountId: res.accountId })
   } catch {
-    // The opened message is shown on its own.
+    // The opened message is shown on its own (or the cached conversation).
   }
 }
 
@@ -471,6 +585,16 @@ async function runAction(
 
   const body: MessageActionRequest = { folderId: snapshot.folderId, messageIds: ids, action }
   if (targetFolderId) body.targetFolderId = targetFolderId
+  const account = accountId.value
+  if (detail.value && ids.includes(detail.value.id)) {
+    void cachePut(`msg:${detail.value.id}`, toRaw(detail.value), { accountId: account })
+  }
+  // Offline, or older actions still queued (order matters): queue it; the
+  // local change stays.
+  if (navigator.onLine === false || offlineState.queue.length > 0) {
+    await enqueueAction(account, body)
+    return
+  }
   pendingActions++
   try {
     const res = await fetch('/api/messages/actions', {
@@ -483,6 +607,12 @@ async function runAction(
       throw new Error(payload?.message ?? `Fehler ${res.status}`)
     }
   } catch (err) {
+    // No connection: keep the local change and replay it later.
+    if (isNetworkError(err)) {
+      offlineState.reachable = false
+      await enqueueAction(account, body)
+      return
+    }
     // Another account is shown by now: nothing of this one to roll back.
     if (!accountScope.isCurrent(scope)) return
     // Roll back only if the user is still looking at the same folder.
@@ -540,7 +670,10 @@ async function refreshView(): Promise<void> {
       return
     }
     if (request !== listRequest) return
-    const merged = mergeFirstPage({ messages: messages.value, nextCursor: nextCursor.value }, page)
+    const merged = mergeFirstPage(
+      { messages: messages.value, nextCursor: nextCursor.value },
+      { ...page, messages: withPending(page.messages, folder) },
+    )
     messages.value = merged.messages
     nextCursor.value = merged.nextCursor
   } catch {
@@ -622,6 +755,7 @@ watch(accountId, (id) => {
   // account; its selection, thread and compose state are dropped.
   accountScope.reset()
   listRequest++
+  listCacheFolder = ''
   listLoading.value = false
   compose.value = null
   storeAccount(id)
@@ -648,6 +782,30 @@ watch(
     accountId.value = accounts.find((a) => a.id === stored)?.id ?? accounts[0]?.id ?? ''
   },
   { immediate: true },
+)
+
+// Keeps the cached list of the open folder current (loads, merges and
+// local actions), debounced; only the first CACHED_LIST_MESSAGES.
+watch(
+  messages,
+  () => {
+    clearTimeout(listCacheTimer)
+    const folder = listCacheFolder
+    if (!folder || folder !== folderId.value) return
+    const account = accountId.value
+    listCacheTimer = setTimeout(() => {
+      if (folder !== listCacheFolder) return
+      const list: CachedList = { messages: toRaw(messages.value).slice(0, CACHED_LIST_MESSAGES) }
+      void cachePut(`list:${folder}`, list, { accountId: account })
+    }, LIST_CACHE_DELAY_MS)
+  },
+  { deep: true },
+)
+
+// Queued actions were replayed (back online): reload with server data.
+watch(
+  () => offlineState.replayedAt,
+  () => void refreshView(),
 )
 
 // Infinite scroll: load the next page when the sentinel becomes visible;

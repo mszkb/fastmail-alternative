@@ -14,7 +14,11 @@
 //   the document, and rendering mail HTML into the app's own DOM to measure
 //   it would forfeit the isolation. The frame therefore has a fixed height
 //   (scrolls inside) and can be resized by the user.
+// Offline (4.6): the sanitized HTML without remote content is cached
+// (encrypted, utils/offline-store.ts) and shown first, then refreshed;
+// HTML with remote images is never cached (it would load them offline).
 import type { MessageDetail, MessageHtmlResponse } from '@fma/shared'
+import { cacheGet, cachePut } from '~/utils/offline-store'
 
 const props = defineProps<{ message: MessageDetail }>()
 
@@ -51,20 +55,37 @@ const srcdoc = computed(() =>
 
 let request = 0
 
+function show(body: MessageHtmlResponse, remote: boolean): void {
+  html.value = body.html
+  remoteBlocked.value = body.remoteContentBlocked
+  remoteAllowed.value = remote
+}
+
 async function load(remote: boolean): Promise<void> {
   const current = ++request
+  const { id, accountId } = props.message
+  const cacheKey = `html:${id}`
   loading.value = true
+  let cached: MessageHtmlResponse | null = null
   try {
-    const res = await fetch(`/api/messages/${props.message.id}/html?remote=${remote ? 1 : 0}`)
+    const network = fetch(`/api/messages/${id}/html?remote=${remote ? 1 : 0}`)
+    network.catch(() => {}) // handled below
+    if (!remote) {
+      cached = await cacheGet<MessageHtmlResponse>(cacheKey)
+      if (cached && current === request) {
+        show(cached, false)
+        loading.value = false
+      }
+    }
+    const res = await network
     if (!res.ok) throw new Error(`Fehler ${res.status}`)
     const body = (await res.json()) as MessageHtmlResponse
     if (current !== request) return
-    html.value = body.html
-    remoteBlocked.value = body.remoteContentBlocked
-    remoteAllowed.value = remote
+    show(body, remote)
+    if (!remote) void cachePut(cacheKey, body, { accountId })
   } catch {
-    // HTML is optional: fall back to the plain text.
-    if (current === request) html.value = null
+    // HTML is optional: fall back to the plain text (or keep the cached HTML).
+    if (current === request && !cached) html.value = null
   } finally {
     if (current === request) loading.value = false
   }
