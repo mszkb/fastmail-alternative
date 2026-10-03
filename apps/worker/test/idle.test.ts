@@ -9,7 +9,7 @@ import pg from 'pg'
 import nodemailer from 'nodemailer'
 import { runMigrations } from '@fma/db/migrate'
 import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
-import { IdleManager, idleBackoffMs } from '../src/idle'
+import { IDLE_STABLE_MS, IdleManager, failuresAfterClose, idleBackoffMs } from '../src/idle'
 
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
@@ -33,6 +33,12 @@ describe('idle backoff', () => {
     expect(idleBackoffMs(1, () => 0)).toBe(2_500)
     expect(idleBackoffMs(3, () => 1)).toBe(20_000)
     expect(idleBackoffMs(50, () => 1)).toBe(30 * 60_000)
+  })
+
+  it('keeps backing off when connections drop right after connecting', () => {
+    expect(failuresAfterClose(3, 2_000)).toBe(4)
+    expect(failuresAfterClose(0, 0)).toBe(1)
+    expect(failuresAfterClose(5, IDLE_STABLE_MS)).toBe(1)
   })
 })
 

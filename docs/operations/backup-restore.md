@@ -6,14 +6,14 @@ Ein Backup ist **eine verschlüsselte Datei** (`fma-backup-JJJJMMTT-HHMMSS.fmabk
 
 ## Format und Sicherheit
 
-| Bestandteil  | Inhalt                                                                                                    |
-| ------------ | --------------------------------------------------------------------------------------------------------- |
-| Kopf         | `fma.bk1` + zufälliges Salt (16 Byte) – sonst nichts im Klartext                                          |
-| Schlüssel    | pro Backup per HKDF-SHA256 aus `MASTER_KEY` und Salt abgeleitet; kein zusätzliches Secret                 |
-| Verschlüss.  | AES-256-GCM in 64-KiB-Blöcken (Zähler als Nonce, letzter Block markiert) – Reihenfolge und Ende geschützt |
-| Inhalt       | Manifest (Formatversion, Zeitstempel, angewandte Migrationen), `pg_dump -Fc`, alle Dateien aus mail-data  |
-| Prüfsummen   | SHA-256 und Größe je Eintrag, am Ende ein Manifest aller Einträge; der Restore prüft beides               |
-| Speicherlast | alles gestreamt, nur wenige Blöcke im RAM (Raspberry Pi)                                                  |
+| Bestandteil  | Inhalt                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kopf         | `fma.bk1` + zufälliges Salt (16 Byte) – sonst nichts im Klartext                                                                                                                |
+| Schlüssel    | pro Backup per HKDF-SHA256 aus `MASTER_KEY` und Salt abgeleitet; kein zusätzliches Secret                                                                                       |
+| Verschlüss.  | AES-256-GCM in 64-KiB-Blöcken (Zähler als Nonce, letzter Block markiert) – Reihenfolge und Ende geschützt                                                                       |
+| Inhalt       | Manifest (Formatversion, Zeitstempel, angewandte Migrationen), `pg_dump -Fc`, alle Dateien aus mail-data                                                                        |
+| Prüfsummen   | SHA-256 und Größe je Eintrag, am Ende ein Manifest aller Einträge (in Blöcken zu je 1000 Einträgen, damit auch sehr viele Dateien restorebar bleiben); der Restore prüft beides |
+| Speicherlast | alles gestreamt, nur wenige Blöcke im RAM (Raspberry Pi)                                                                                                                        |
 
 Mailinhalte und Zugangsdaten sind in der Datenbank ohnehin mit Konto-DEKs verschlüsselt. Die zusätzliche Verschlüsselung schützt die Metadaten, die im Klartext in der DB liegen (Hostnamen, Benutzernamen, Mailadressen, Ordnerstruktur, Zeitstempel). Ein falscher Key, eine veränderte oder abgeschnittene Datei führt zu einem Abbruch mit klarer Meldung; Logs enthalten nur Zähler, Größen und den Dateinamen des Backups.
 
@@ -23,14 +23,14 @@ Mailinhalte und Zugangsdaten sind in der Datenbank ohnehin mit Konto-DEKs versch
 
 Das Backup-Werkzeug steckt im Worker-Image (`dist/backup.js`, inkl. `pg_dump`/`pg_restore` 17) und nutzt dessen Umgebung (`MASTER_KEY`, `POSTGRES_*`, Volume `mail-data`):
 
-| Befehl                                        | Wirkung                                                                          |
-| --------------------------------------------- | -------------------------------------------------------------------------------- |
-| `node dist/backup.js create [datei\|ordner]`  | Backup schreiben (Standard: `/backups/fma-backup-<zeit>.fmabk`, Modus `0600`)    |
-| `node dist/backup.js verify <datei>`          | entschlüsseln und alle Prüfsummen prüfen, ohne etwas zu schreiben                |
-| `node dist/backup.js restore <datei>`         | in leere Datenbank + leeres mail-data wiederherstellen, dann Migrationen         |
-| `node dist/backup.js restore <datei> --force` | bestehende Datenbank und mail-data **ersetzen** (alles Vorhandene wird gelöscht) |
+| Befehl                                        | Wirkung                                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `node dist/backup.js create [datei\|ordner]`  | Backup schreiben (Standard: `/backups/fma-backup-<zeit>.fmabk`, Modus `0600`)                                                        |
+| `node dist/backup.js verify <datei>`          | entschlüsseln und alle Prüfsummen prüfen, ohne etwas zu schreiben                                                                    |
+| `node dist/backup.js restore <datei>`         | in leere Datenbank + leeres mail-data wiederherstellen, dann Migrationen                                                             |
+| `node dist/backup.js restore <datei> --force` | bestehende Datenbank und mail-data **ersetzen** (alles Vorhandene wird gelöscht – erst nachdem das Backup vollständig geprüft wurde) |
 
-Ohne `--force` verweigert `restore` das Einspielen, sobald die Datenbank Tabellen oder das Volume Dateien enthält. Backups einer **neueren** App-Version (unbekannte Migrationen) werden abgelehnt – erst die App aktualisieren. Backups älterer Versionen werden eingespielt und anschließend migriert.
+Ohne `--force` verweigert `restore` das Einspielen, sobald die Datenbank Tabellen oder das Volume Dateien enthält. Backups einer **neueren** App-Version (unbekannte Migrationen) werden abgelehnt – erst die App aktualisieren. Backups älterer Versionen werden eingespielt und anschließend migriert. Mit `--force` auf ein nicht leeres Ziel wird das Backup zuerst komplett geprüft (wie `verify`: Key, Formatversion, Migrationsstand, Prüfsummen, Manifest); erst danach werden Datenbank und mail-data gelöscht. Ein falscher `MASTER_KEY`, eine beschädigte Datei oder ein Backup einer neueren Version lassen die bestehenden Daten also unangetastet (der Restore dauert dafür etwa doppelt so lange).
 
 ## Backup erstellen
 
@@ -96,11 +96,11 @@ Die Dateien sind verschlüsselt und dürfen auf fremdem Speicher liegen – **di
 
 4. Alles starten: `docker compose up -d`. Anmeldung mit dem bisherigen Benutzer; Konten und Mails sind sofort da, der Worker holt Neues vom Anbieter nach.
 
-Lief die Instanz schon (z. B. API einmal gestartet), ist die Datenbank nicht mehr leer: dann `restore … --force` verwenden – das löscht die vorhandene Datenbank und den Inhalt von `mail-data` vollständig. Bricht ein Restore ab (falscher Key, beschädigte Datei), ist die Instanz eventuell halb befüllt; nach Behebung der Ursache mit `--force` wiederholen.
+Lief die Instanz schon (z. B. API einmal gestartet), ist die Datenbank nicht mehr leer: dann `restore … --force` verwenden – das löscht die vorhandene Datenbank und den Inhalt von `mail-data` vollständig. Falscher Key, beschädigte Datei oder zu neue Version fallen bereits in der Prüfung vor dem Löschen auf. Bricht ein Restore danach ab (z. B. Platte voll), ist die Instanz eventuell halb befüllt; nach Behebung der Ursache mit `--force` wiederholen.
 
 Domainwechsel, Push-Abos und Geräte: siehe [Umzug](migration.md#3-prüfen).
 
 ## Restore regelmäßig testen
 
-- **Automatisch in CI:** `apps/worker/test/backup.test.ts` legt bei jedem Lauf gegen echtes PostgreSQL eine befüllte Instanz an (Konto mit verschlüsselten Zugangsdaten, Nachricht, verschlüsselte Rohmail, größere Datei), erstellt ein Backup, stellt es in eine frisch angelegte Datenbank und ein leeres Verzeichnis wieder her und prüft, dass alles identisch und entschlüsselbar ist. Außerdem: falscher Key, abgeschnittene Datei, nicht leeres Ziel und Backups einer neueren Version schlagen sauber fehl.
+- **Automatisch in CI:** `apps/worker/test/backup.test.ts` legt bei jedem Lauf gegen echtes PostgreSQL eine befüllte Instanz an (Konto mit verschlüsselten Zugangsdaten, Nachricht, verschlüsselte Rohmail, größere Datei), erstellt ein Backup, stellt es in eine frisch angelegte Datenbank und ein leeres Verzeichnis wieder her und prüft, dass alles identisch und entschlüsselbar ist. Außerdem: falscher Key, abgeschnittene Datei, nicht leeres Ziel und Backups einer neueren Version schlagen sauber fehl; `restore --force` mit falschem Key oder beschädigter Datei lässt ein befülltes Ziel unverändert; ein auf viele Manifest-Blöcke verteiltes Manifest bleibt restorebar.
 - **Im Betrieb:** monatlich das neueste Backup mit `verify` prüfen (oben, Schritt 3) und mindestens einmal im Jahr einen vollständigen Restore auf einer Test-Instanz auf einem anderen Rechner durchspielen – mit dem **separat aufbewahrten** `MASTER_KEY`, nicht mit dem vom laufenden Server. Nur so ist sicher, dass Key-Backup und Daten-Backup zusammenpassen.

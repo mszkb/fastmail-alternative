@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     if (!file) usage()
     const summary = await restoreBackup({
       ...common,
-      input: createReadStream(file),
+      openInput: () => createReadStream(file),
       force,
       verifyOnly: command === 'verify',
     })

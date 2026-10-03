@@ -59,12 +59,13 @@ describe.skipIf(!databaseUrl)('backup and restore', () => {
     return { ...source, database: name }
   }
 
-  async function backup(file: string): Promise<void> {
+  async function backup(file: string, manifestEntriesPerRecord?: number): Promise<void> {
     await createBackup({
       db: source,
       mailDataDir: sourceDir,
       masterKey: MASTER_KEY,
       output: createWriteStream(file, { mode: 0o600 }),
+      manifestEntriesPerRecord,
     })
   }
 
@@ -78,7 +79,7 @@ describe.skipIf(!databaseUrl)('backup and restore', () => {
       db,
       mailDataDir: dir,
       masterKey: extra.masterKey ?? MASTER_KEY,
-      input: createReadStream(file),
+      openInput: () => createReadStream(file),
       force: extra.force,
       verifyOnly: extra.verifyOnly,
     })
@@ -257,6 +258,48 @@ describe.skipIf(!databaseUrl)('backup and restore', () => {
     await expect(
       restore(truncated, source, path.join(workDir, 'x'), { verifyOnly: true }),
     ).rejects.toBeInstanceOf(BackupDecryptError)
+  })
+
+  it('splits a large manifest into several records and stays restorable', async () => {
+    // One entry per record: the manifest of db + 2 files spans three M records.
+    const split = path.join(workDir, 'split.fmabk')
+    await backup(split, 1)
+    const summary = await restore(split, source, path.join(workDir, 'split'), { verifyOnly: true })
+    expect(summary.files).toBe(2)
+    const target = await freshDatabase()
+    const targetDir = path.join(workDir, 'split-restored')
+    expect((await restore(split, target, targetDir)).files).toBe(2)
+    expect(await readFile(path.join(targetDir, 'uploads', 'big.enc'))).toEqual(bigFile)
+  })
+
+  it('keeps a filled target untouched when restore --force fails verification', async () => {
+    const target = await freshDatabase()
+    const targetDir = path.join(workDir, 'force-wrong-key')
+    await restore(backupFile, target, targetDir)
+    const tablesBefore = await tableCount(target)
+    const filesBefore = (await readdir(targetDir)).sort()
+
+    const wrongKey = await restore(backupFile, target, targetDir, {
+      masterKey: WRONG_KEY,
+      force: true,
+    }).catch((err: unknown) => err)
+    expect(wrongKey).toBeInstanceOf(BackupDecryptError)
+
+    const content = await readFile(backupFile)
+    const damaged = path.join(workDir, 'damaged.fmabk')
+    await writeFile(damaged, content.subarray(0, content.length - 100))
+    await expect(restore(damaged, target, targetDir, { force: true })).rejects.toThrow()
+
+    expect(await tableCount(target)).toBe(tablesBefore)
+    expect(tablesBefore).toBeGreaterThan(0)
+    expect((await readdir(targetDir)).sort()).toEqual(filesBefore)
+    const restored = new pg.Pool({ ...target, max: 1 })
+    try {
+      const { rows } = await restored.query('SELECT id FROM message WHERE id = $1', [messageId])
+      expect(rows).toHaveLength(1)
+    } finally {
+      await restored.end()
+    }
   })
 
   it('refuses backups from a newer app version', async () => {

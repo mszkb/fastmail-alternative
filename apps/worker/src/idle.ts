@@ -47,6 +47,18 @@ export function idleBackoffMs(failures: number, random = Math.random): number {
   return Math.round(delay / 2 + (random() * delay) / 2)
 }
 
+/** A connection must stay up this long before its failure count is reset. */
+export const IDLE_STABLE_MS = 60_000
+
+/**
+ * Failure count after a connection closed: only a connection that was stable
+ * for IDLE_STABLE_MS starts over, so a server that accepts and immediately
+ * drops connections still backs off exponentially.
+ */
+export function failuresAfterClose(failures: number, connectedForMs: number): number {
+  return (connectedForMs >= IDLE_STABLE_MS ? 0 : failures) + 1
+}
+
 function errorCode(err: unknown): string {
   const classified = classifyAccountError(err)
   if (classified) return classified.code
@@ -63,6 +75,8 @@ interface IdleConnection {
   stopped: boolean
   connected: boolean
   failures: number
+  /** Date.now() of the last successful connect (0 while not connected). */
+  connectedAt: number
   timer: NodeJS.Timeout | null
 }
 
@@ -147,6 +161,7 @@ export class IdleManager {
         stopped: false,
         connected: false,
         failures: 0,
+        connectedAt: 0,
         timer: null,
       }
       this.connections.set(accountId, connection)
@@ -229,7 +244,11 @@ export class IdleManager {
         if (connection.client !== ownClient || connection.stopped) return
         connection.client = null
         connection.connected = false
-        connection.failures += 1
+        connection.failures = failuresAfterClose(
+          connection.failures,
+          connection.connectedAt ? Date.now() - connection.connectedAt : 0,
+        )
+        connection.connectedAt = 0
         log.info({ accountId }, 'idle connection closed, reconnecting')
         this.scheduleReconnect(connection, idleBackoffMs(connection.failures))
       })
@@ -242,8 +261,9 @@ export class IdleManager {
       }
       // After a reconnect, changes during the gap are picked up by a sync.
       if (connection.failures > 0) this.enqueue(connection)
-      connection.failures = 0
+      // failures is reset only once the connection proved stable (see 'close').
       connection.connected = true
+      connection.connectedAt = Date.now()
       log.info({ accountId }, 'idle connected')
       // Enter IDLE now (imapflow's auto-IDLE would wait 15 s); imapflow
       // restarts it every maxIdleTime and re-enters it after other commands.
