@@ -124,7 +124,7 @@ erDiagram
         text[] references
         bytea subject_enc
         bytea from_enc
-        bytea recipients_enc "To + Cc"
+        bytea recipients_enc "To + Cc + Reply-To"
         bytea snippet_enc
         timestamptz sent_at
         timestamptz received_at

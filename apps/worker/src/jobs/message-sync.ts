@@ -33,6 +33,13 @@ import { mailTestMode } from '../ports'
 const MESSAGE_SYNC_LIMIT = 200
 const MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024 // skip bodies above 20 MB
 const MAX_TEXT_PLAIN_BYTES = 100 * 1024
+/** Newest References kept per message (threading needs only a few). */
+const MAX_REFERENCES = 100
+
+interface EnvelopeAddress {
+  address?: string
+  name?: string
+}
 
 interface FetchMessage {
   uid: number
@@ -44,9 +51,10 @@ interface FetchMessage {
     inReplyTo?: string
     references?: string | string[]
     subject?: string
-    from?: { value?: { address?: string; name?: string }[] }
-    to?: { value?: { address?: string; name?: string }[] }
-    cc?: { value?: { address?: string; name?: string }[] }
+    from?: EnvelopeAddress[]
+    to?: EnvelopeAddress[]
+    cc?: EnvelopeAddress[]
+    replyTo?: EnvelopeAddress[]
     date?: Date | string | false
   }
   bodyStructure?: { childNodes?: unknown[] } | false
@@ -65,16 +73,36 @@ function fallbackMessageId(date: Date | null, size: number, subjectHmac: string)
   return `<${hash}@fma.local>`
 }
 
+/**
+ * imapflow returns envelope addresses as arrays; `{ value: [...] }`
+ * (mailparser shape) is accepted as well.
+ */
 function personList(value: unknown): { name: string; address: string }[] {
-  const list = (value as { value?: { address?: string; name?: string }[] } | undefined)?.value ?? []
+  const list: EnvelopeAddress[] = Array.isArray(value)
+    ? (value as EnvelopeAddress[])
+    : ((value as { value?: EnvelopeAddress[] } | undefined)?.value ?? [])
   return list
     .filter((entry) => entry.address)
     .map((entry) => ({ name: entry.name ?? '', address: entry.address! }))
 }
 
+/**
+ * Reply-To only when it differs from From: IMAP servers fill the envelope's
+ * reply-to with From when the header is missing (RFC 3501 7.4.2).
+ */
+function replyToList(envelope: NonNullable<FetchMessage['envelope']>): {
+  name: string
+  address: string
+}[] {
+  const replyTo = personList(envelope.replyTo)
+  const from = new Set(personList(envelope.from).map((p) => p.address.toLowerCase()))
+  if (replyTo.length === 0 || replyTo.every((p) => from.has(p.address.toLowerCase()))) return []
+  return replyTo
+}
+
 function normalizeReferences(value: string | string[] | undefined): string[] {
   if (!value) return []
-  const raw = Array.isArray(value) ? value : value.split(/\s+/)
+  const raw = (Array.isArray(value) ? value.join(' ') : value).split(/\s+/)
   return raw.map((ref) => ref.trim()).filter((ref) => ref.startsWith('<'))
 }
 
@@ -93,14 +121,20 @@ async function streamToBuffer(
   return Buffer.concat(chunks)
 }
 
-/** Extracts a plain-text preview/full text from the parsed raw mail. */
-async function extractText(raw: Buffer): Promise<string> {
+/**
+ * Extracts the plain text (preview/full text) and the References header
+ * from the raw mail (the IMAP envelope does not carry References).
+ */
+async function parseRaw(raw: Buffer): Promise<{ text: string; references: string[] }> {
   try {
     const parsed: ParsedMail = await simpleParser(raw)
     const text = (parsed.text ?? '').trim()
-    return text.slice(0, MAX_TEXT_PLAIN_BYTES)
+    return {
+      text: text.slice(0, MAX_TEXT_PLAIN_BYTES),
+      references: normalizeReferences(parsed.references).slice(-MAX_REFERENCES),
+    }
   } catch {
-    return ''
+    return { text: '', references: [] }
   }
 }
 
@@ -276,7 +310,11 @@ export async function runMessageSync(
               Buffer.from(
                 encryptField(
                   ctx.dek,
-                  JSON.stringify({ to: personList(envelope.to), cc: personList(envelope.cc) }),
+                  JSON.stringify({
+                    to: personList(envelope.to),
+                    cc: personList(envelope.cc),
+                    replyTo: replyToList(envelope),
+                  }),
                   aad('recipients', dbMessageId),
                 ),
                 'utf8',
@@ -526,11 +564,17 @@ async function downloadBody(
     Buffer.from(encryptField(ctx.dek, raw.toString('latin1'), aad('body', messageId)), 'utf8'),
   )
 
-  const text = await extractText(raw)
-  await pool.query(`UPDATE message SET snippet_enc = $2 WHERE id = $1`, [
-    messageId,
-    Buffer.from(encryptField(ctx.dek, text.slice(0, 200), aad('snippet', messageId)), 'utf8'),
-  ])
+  const { text, references } = await parseRaw(raw)
+  await pool.query(
+    `UPDATE message SET snippet_enc = $2,
+       "references" = CASE WHEN cardinality($3::text[]) > 0 THEN $3::text[] ELSE "references" END
+     WHERE id = $1`,
+    [
+      messageId,
+      Buffer.from(encryptField(ctx.dek, text.slice(0, 200), aad('snippet', messageId)), 'utf8'),
+      references,
+    ],
+  )
   await pool.query(
     `INSERT INTO message_body (message_id, storage_ref, text_plain_enc)
      VALUES ($1, $2, $3)

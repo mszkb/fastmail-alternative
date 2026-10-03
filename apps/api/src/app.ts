@@ -4,6 +4,7 @@ import { registerAuth } from './auth/routes'
 import { pool } from './db'
 import { buildLoggerOptions } from './logging'
 import { accountRoutes } from './mail/accounts'
+import { identityRoutes } from './mail/identities'
 import { messageActionRoutes } from './mail/message-actions'
 import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
@@ -78,6 +79,7 @@ export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
   app.register(messageRoutes)
   app.register(messageActionRoutes)
   app.register(outboxRoutes)
+  app.register(identityRoutes)
 
   return app
 }

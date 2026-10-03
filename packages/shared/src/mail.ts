@@ -57,9 +57,15 @@ export interface MessageDetail {
   from: MailPerson | null
   to: MailPerson[]
   cc: MailPerson[]
+  /** Reply-To header; empty when the message has none (reply goes to From). */
+  replyTo: MailPerson[]
   date: string
   flags: MessageFlags
   hasAttachments: boolean
+  /** Message-ID header (angle brackets); null when the message has none. */
+  messageId: string | null
+  /** References header (Message-IDs, oldest first). */
+  references: string[]
   /** null while the body has not been downloaded by the sync worker yet. */
   text: string | null
 }

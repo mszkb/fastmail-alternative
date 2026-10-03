@@ -21,6 +21,7 @@ import {
   OUTBOX_ERROR_MESSAGES,
   OUTBOX_LIMITS,
   isValidEmailAddress,
+  isValidMessageId,
   type MailPerson,
   type OutboxContent,
   type OutboxErrorCode,
@@ -34,9 +35,6 @@ import {
 import { requireAuth } from '../auth/routes'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-/** `<local@domain>` without whitespace or nested brackets. */
-const MESSAGE_ID_RE = /^<[^\s<>@]+@[^\s<>@]+>$/
-const MAX_MESSAGE_ID_LENGTH = 250
 /** Generous body limit for long plain-text messages (UTF-8 up to 4 bytes/char). */
 const BODY_LIMIT_BYTES = 4 * 1024 * 1024
 const LIST_LIMIT = 100
@@ -90,12 +88,6 @@ function parsePeople(value: unknown): MailPerson[] | null {
   return people
 }
 
-function isMessageId(value: unknown): value is string {
-  return (
-    typeof value === 'string' && value.length <= MAX_MESSAGE_ID_LENGTH && MESSAGE_ID_RE.test(value)
-  )
-}
-
 /** Validates the request; returns a German error message on failure. */
 export function parseSendRequest(body: unknown): ParsedRequest | string {
   if (!body || typeof body !== 'object') return 'Ungültige Anfrage.'
@@ -123,14 +115,14 @@ export function parseSendRequest(body: unknown): ParsedRequest | string {
   if (subject.length > OUTBOX_LIMITS.maxSubjectLength) return 'Der Betreff ist zu lang.'
   if (typeof input.text !== 'string') return 'Ungültiger Nachrichtentext.'
   if (input.text.length > OUTBOX_LIMITS.maxTextLength) return 'Der Nachrichtentext ist zu lang.'
-  if (input.inReplyTo !== undefined && !isMessageId(input.inReplyTo)) {
+  if (input.inReplyTo !== undefined && !isValidMessageId(input.inReplyTo)) {
     return 'Ungültiger In-Reply-To-Header.'
   }
   const references = input.references ?? []
   if (
     !Array.isArray(references) ||
     references.length > OUTBOX_LIMITS.maxReferences ||
-    !references.every(isMessageId)
+    !references.every(isValidMessageId)
   ) {
     return 'Ungültiger References-Header.'
   }

@@ -165,8 +165,12 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       text: 'Hallo von Testmail eins.',
     })
     await transporter.sendMail({
-      from: 'sender-two@example.com',
+      from: 'Sender Two <sender-two@example.com>',
       to: greenmailUser,
+      cc: 'Carol <carol@example.com>',
+      replyTo: 'Team <team@example.com>',
+      inReplyTo: '<parent@example.org>',
+      references: ['<root@example.org>', '<parent@example.org>'],
       subject: 'Zweite Testmail',
       text: 'Hallo von Testmail zwei.',
     })
@@ -247,6 +251,48 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     )
     expect(subjects).toContain('Erste Testmail')
     expect(subjects).toContain('Zweite Testmail')
+  })
+
+  it('stores addresses, Reply-To and threading headers', async () => {
+    const { rows } = await pool.query<{
+      id: string
+      from_enc: Buffer
+      recipients_enc: Buffer
+      in_reply_to: string | null
+      references: string[]
+      subject_enc: Buffer
+    }>(
+      `SELECT id, from_enc, recipients_enc, in_reply_to, "references", subject_enc
+       FROM message WHERE account_id = $1`,
+      [accountId],
+    )
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const decoded = rows.map((row) => ({
+      subject: decryptField(ctx.dek, row.subject_enc.toString('utf8'), `message.subject:${row.id}`),
+      from: JSON.parse(
+        decryptField(ctx.dek, row.from_enc.toString('utf8'), `message.from:${row.id}`),
+      ) as unknown,
+      recipients: JSON.parse(
+        decryptField(ctx.dek, row.recipients_enc.toString('utf8'), `message.recipients:${row.id}`),
+      ) as { to: unknown; cc: unknown; replyTo: unknown },
+      inReplyTo: row.in_reply_to,
+      references: row.references,
+    }))
+    const first = decoded.find((m) => m.subject === 'Erste Testmail')!
+    const second = decoded.find((m) => m.subject === 'Zweite Testmail')!
+
+    expect(first.from).toEqual([{ name: '', address: 'sender-one@example.com' }])
+    expect(first.recipients.to).toEqual([{ name: '', address: greenmailUser }])
+    // No Reply-To header: the envelope's reply-to (= From) is not stored.
+    expect(first.recipients.replyTo).toEqual([])
+    expect(first.references).toEqual([])
+
+    expect(second.from).toEqual([{ name: 'Sender Two', address: 'sender-two@example.com' }])
+    expect(second.recipients.cc).toEqual([{ name: 'Carol', address: 'carol@example.com' }])
+    expect(second.recipients.replyTo).toEqual([{ name: 'Team', address: 'team@example.com' }])
+    expect(second.inReplyTo).toBe('<parent@example.org>')
+    // References come from the raw message (not part of the IMAP envelope).
+    expect(second.references).toEqual(['<root@example.org>', '<parent@example.org>'])
   })
 
   it('stores locations with uidvalidity and flags', async () => {

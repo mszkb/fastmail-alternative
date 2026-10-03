@@ -39,6 +39,9 @@ const SPECIAL_USE_RANK: Record<string, number> = {
   trash: 5,
 }
 
+/** Deterministic id the sync generates for messages without Message-ID. */
+const FALLBACK_MESSAGE_ID_RE = /^<[0-9a-f]{64}@fma\.local>$/
+
 /** Sort date of a message: Date header, falling back to arrival/insert time. */
 const SORT_AT = 'coalesce(m.sent_at, m.received_at, m.created_at)'
 
@@ -70,6 +73,8 @@ interface DetailRow {
   subject_enc: Buffer
   from_enc: Buffer
   recipients_enc: Buffer
+  message_id_header: string
+  references: string[]
   sort_at: Date
   has_attachments: boolean
   text_plain_enc: Buffer | null
@@ -315,6 +320,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       // several folders of the account).
       const { rows } = await pool.query<DetailRow>(
         `SELECT m.id, m.account_id, a.wrapped_dek, m.subject_enc, m.from_enc, m.recipients_enc,
+                m.message_id_header, m."references",
                 ${SORT_AT} AS sort_at, m.has_attachments, mb.text_plain_enc,
                 coalesce((SELECT array_agg(DISTINCT flag) FROM message_location ml,
                             unnest(ml.flags) AS flag WHERE ml.message_id = m.id), '{}') AS flags,
@@ -335,7 +341,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       const dek = unwrapAccountKey(masterKey(), row.wrapped_dek)
       const recipients = (parseJson(
         decrypt(request.log, dek, row.recipients_enc, 'recipients', row.id),
-      ) ?? {}) as { to?: unknown; cc?: unknown }
+      ) ?? {}) as { to?: unknown; cc?: unknown; replyTo?: unknown }
       const body: MessageDetail = {
         id: row.id,
         accountId: row.account_id,
@@ -345,9 +351,16 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
           toPeople(parseJson(decrypt(request.log, dek, row.from_enc, 'from', row.id)))[0] ?? null,
         to: toPeople(recipients.to),
         cc: toPeople(recipients.cc),
+        replyTo: toPeople(recipients.replyTo),
         date: row.sort_at.toISOString(),
         flags: toFlags(row.flags),
         hasAttachments: row.has_attachments,
+        // Synthetic ids of messages without a Message-ID are not exposed:
+        // a reply must not reference an id no other client knows.
+        messageId: FALLBACK_MESSAGE_ID_RE.test(row.message_id_header)
+          ? null
+          : row.message_id_header,
+        references: row.references,
         text: decrypt(request.log, dek, row.text_plain_enc, 'text', row.id),
       }
       await reply.send(body)

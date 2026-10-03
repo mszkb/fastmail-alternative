@@ -6,7 +6,14 @@
 // counts and rolled back if the API refuses them (the server writes them
 // back to IMAP in the background). Bodies are shown as text, never as HTML
 // (sanitized HTML rendering follows in 2.9).
+// Compose (2.6): new message, reply, reply all and forward open the
+// ComposeForm (prefilled via createDraft from @fma/shared); submitted
+// messages show up in the OutboxPanel until they are sent.
+import { createDraft } from '@fma/shared'
 import type {
+  ComposeDraft,
+  ComposeIdentity,
+  ComposeMode,
   FolderListResponse,
   FolderSummary,
   MailPerson,
@@ -15,7 +22,10 @@ import type {
   MessageDetail,
   MessageListItem,
   MessageListResponse,
+  IdentityListResponse,
+  OutboxMessage,
 } from '@fma/shared'
+import type OutboxPanel from './OutboxPanel.vue'
 
 interface AccountOption {
   id: string
@@ -48,6 +58,15 @@ const error = ref('')
 // Mobile: only one pane is visible at a time (list -> detail).
 const mobilePane = ref<'list' | 'detail'>('list')
 const sentinel = ref<HTMLElement | null>(null)
+const identities = ref<ComposeIdentity[]>([])
+const compose = ref<{
+  accountId: string
+  identities: ComposeIdentity[]
+  draft: ComposeDraft
+} | null>(null)
+let composeCounter = 0
+const composeKey = ref(0)
+const outbox = ref<InstanceType<typeof OutboxPanel> | null>(null)
 
 // Guards against stale responses when the user switches folders quickly.
 let listRequest = 0
@@ -111,6 +130,38 @@ function storeAccount(id: string): void {
   } catch {
     // storage unavailable (private mode): selection is not remembered
   }
+}
+
+async function loadIdentities(): Promise<ComposeIdentity[]> {
+  const requestedAccount = accountId.value
+  if (!requestedAccount) return []
+  try {
+    const res = await getJson<IdentityListResponse>(`/api/accounts/${requestedAccount}/identities`)
+    if (requestedAccount === accountId.value) identities.value = res.identities
+    return res.identities
+  } catch {
+    return []
+  }
+}
+
+/** Opens the compose form; replies/forwards are prefilled from the open message. */
+async function openCompose(mode: ComposeMode): Promise<void> {
+  if (compose.value) return
+  const original = mode === 'new' ? undefined : (detail.value ?? undefined)
+  if (mode !== 'new' && !original) return
+  const account = original?.accountId ?? accountId.value
+  if (!account) return
+  // Fresh identities (the signature may have been edited in the settings);
+  // the cached list is the fallback when offline.
+  const loaded = account === accountId.value ? await loadIdentities() : []
+  const list = loaded.length > 0 ? loaded : identities.value
+  if (compose.value) return
+  composeKey.value = ++composeCounter
+  compose.value = { accountId: account, identities: list, draft: createDraft(mode, list, original) }
+}
+
+function onQueued(message: OutboxMessage): void {
+  outbox.value?.track(message)
 }
 
 async function loadFolders(): Promise<void> {
@@ -299,7 +350,7 @@ function onMoveSelect(event: Event): void {
 
 // Keyboard shortcuts for the open message (ignored while typing).
 function onKeydown(event: KeyboardEvent): void {
-  if (!detail.value || event.ctrlKey || event.metaKey || event.altKey) return
+  if (!detail.value || compose.value || event.ctrlKey || event.metaKey || event.altKey) return
   const element = event.target as HTMLElement | null
   if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return
   if (element?.isContentEditable) return
@@ -320,6 +371,15 @@ function onKeydown(event: KeyboardEvent): void {
     case 'Delete':
       void runAction('delete', [id])
       break
+    case 'r':
+      void openCompose('reply')
+      break
+    case 'a':
+      void openCompose('replyAll')
+      break
+    case 'f':
+      void openCompose('forward')
+      break
     default:
       return
   }
@@ -336,7 +396,9 @@ function closeDetail(): void {
 
 watch(accountId, (id) => {
   storeAccount(id)
+  identities.value = []
   void loadFolders()
+  void loadIdentities()
 })
 
 // Pick a valid account whenever the account list changes (e.g. after adding
@@ -372,6 +434,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="mail" :class="`pane-${mobilePane}`">
     <aside class="sidebar">
+      <button type="button" class="primary compose-button" @click="openCompose('new')">
+        Neue E-Mail
+      </button>
       <label class="account-picker">
         <span class="visually-hidden">Konto</span>
         <select v-model="accountId">
@@ -394,6 +459,7 @@ onBeforeUnmount(() => {
           <span v-if="folder.unreadCount > 0" class="count">{{ folder.unreadCount }}</span>
         </button>
       </nav>
+      <OutboxPanel ref="outbox" :account-id="accountId" />
     </aside>
 
     <section class="list" aria-label="Nachrichten">
@@ -461,6 +527,30 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="secondary"
+            title="Tastenkürzel: r"
+            @click="openCompose('reply')"
+          >
+            Antworten
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            title="Tastenkürzel: a"
+            @click="openCompose('replyAll')"
+          >
+            Allen antworten
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            title="Tastenkürzel: f"
+            @click="openCompose('forward')"
+          >
+            Weiterleiten
+          </button>
+          <button
+            type="button"
+            class="secondary"
             title="Tastenkürzel: u"
             @click="runAction(detail.flags.seen ? 'unread' : 'read', [detail.id])"
           >
@@ -523,6 +613,16 @@ onBeforeUnmount(() => {
       </article>
       <p v-else class="hint empty">Keine Nachricht ausgewählt.</p>
     </section>
+
+    <ComposeForm
+      v-if="compose"
+      :key="composeKey"
+      :account-id="compose.accountId"
+      :identities="compose.identities"
+      :draft="compose.draft"
+      @queued="onQueued"
+      @close="compose = null"
+    />
   </div>
 </template>
 
@@ -560,6 +660,21 @@ select {
 
 .account-picker {
   display: block;
+  margin-bottom: 0.75rem;
+}
+
+button.primary {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #1273de;
+  border-radius: 0.375rem;
+  background: #1273de;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.compose-button {
+  width: 100%;
   margin-bottom: 0.75rem;
 }
 

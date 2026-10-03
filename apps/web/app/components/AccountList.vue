@@ -13,6 +13,8 @@ const emit = defineEmits<{ deleted: [id: string] }>()
 
 const busy = ref(false)
 const error = ref('')
+// Account whose signature editor is open.
+const editing = ref('')
 
 async function remove(account: Account): Promise<void> {
   if (busy.value) return
@@ -51,7 +53,18 @@ async function remove(account: Account): Promise<void> {
           <span class="mail">{{ account.emailAddress }}</span>
           <span class="tag">{{ account.status }}</span>
         </span>
-        <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
+        <span class="actions">
+          <button
+            type="button"
+            class="neutral"
+            :aria-expanded="editing === account.id"
+            @click="editing = editing === account.id ? '' : account.id"
+          >
+            Signatur
+          </button>
+          <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
+        </span>
+        <IdentitySignatures v-if="editing === account.id" :account-id="account.id" />
       </li>
     </ul>
     <p v-if="error" class="error">{{ error }}</p>
@@ -87,6 +100,7 @@ h2 {
 .accounts li {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
@@ -121,6 +135,16 @@ button {
   color: #cf1124;
   font: inherit;
   cursor: pointer;
+}
+
+button.neutral {
+  border-color: #1273de;
+  color: #1273de;
+}
+
+.actions {
+  display: flex;
+  gap: 0.4rem;
 }
 
 button:disabled {

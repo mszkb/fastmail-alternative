@@ -84,6 +84,9 @@ async function createMessage(
     flags?: string[]
     text?: string
     from?: { name: string; address: string }
+    replyTo?: { name: string; address: string }[]
+    messageIdHeader?: string
+    references?: string[]
   },
 ): Promise<string> {
   const id = randomUUID()
@@ -92,12 +95,12 @@ async function createMessage(
   await pool.query(
     `INSERT INTO message
        (id, account_id, message_id_header, subject_enc, from_enc, recipients_enc,
-        snippet_enc, sent_at, received_at, has_attachments)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '2020-01-01T00:00:00Z', false)`,
+        snippet_enc, sent_at, received_at, has_attachments, "references")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '2020-01-01T00:00:00Z', false, $9)`,
     [
       id,
       account.id,
-      `<${id}@test>`,
+      opts.messageIdHeader ?? `<${id}@test>`,
       enc('subject', opts.subject),
       enc('from', JSON.stringify([opts.from ?? { name: 'Alice', address: 'alice@example.com' }])),
       enc(
@@ -105,10 +108,12 @@ async function createMessage(
         JSON.stringify({
           to: [{ name: 'Bob', address: 'bob@example.com' }],
           cc: [{ name: '', address: 'carol@example.com' }],
+          ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
         }),
       ),
       enc('snippet', `Snippet of ${opts.subject}`),
       opts.sentAt,
+      opts.references ?? [],
     ],
   )
   await pool.query(
@@ -321,9 +326,12 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
       from: { name: 'Zoë', address: 'zoe@example.com' },
       to: [{ name: 'Bob', address: 'bob@example.com' }],
       cc: [{ name: '', address: 'carol@example.com' }],
+      replyTo: [],
       date: '2026-02-01T08:30:00.000Z',
       flags: { seen: false, flagged: false, answered: false },
       hasAttachments: false,
+      messageId: `<${detailMessageId}@test>`,
+      references: [],
       text: 'Hallo Bob,\n<script>alert(1)</script>\nBis bald',
     })
 
@@ -339,5 +347,113 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
     const res = await get(`/api/messages/${id}`, authToken)
     expect(res.statusCode).toBe(200)
     expect(res.json().text).toBeNull()
+  })
+
+  it('exposes Reply-To, Message-ID and References for replies', async () => {
+    const id = await createMessage(account, inboxId, {
+      subject: 'thread',
+      sentAt: '2026-02-02T08:30:00Z',
+      replyTo: [{ name: 'List', address: 'list@example.com' }],
+      messageIdHeader: '<reply-me@example.com>',
+      references: ['<root@example.com>', '<parent@example.com>'],
+    })
+    const body = (await get(`/api/messages/${id}`, authToken)).json()
+    expect(body.replyTo).toEqual([{ name: 'List', address: 'list@example.com' }])
+    expect(body.messageId).toBe('<reply-me@example.com>')
+    expect(body.references).toEqual(['<root@example.com>', '<parent@example.com>'])
+  })
+
+  it('hides synthetic Message-IDs of messages without one', async () => {
+    const id = await createMessage(account, inboxId, {
+      subject: 'no id',
+      sentAt: null,
+      messageIdHeader: `<${'ab'.repeat(32)}@fma.local>`,
+    })
+    const body = (await get(`/api/messages/${id}`, authToken)).json()
+    expect(body.messageId).toBeNull()
+  })
+
+  describe('identities', () => {
+    let identityId: string
+
+    beforeAll(async () => {
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO identity (account_id, name, email_address, signature)
+         VALUES ($1, 'Test', $2, NULL), ($1, 'Alias', 'alias@example.com', 'Gruß')
+         RETURNING id`,
+        [account.id, `${account.id}@example.com`],
+      )
+      identityId = rows[0]!.id
+      await pool.query(
+        `INSERT INTO identity (account_id, name, email_address) VALUES ($1, 'X', 'x@example.com')`,
+        [foreignAccountId],
+      )
+    })
+
+    it('lists the identities of an account, default first', async () => {
+      const res = await get(`/api/accounts/${account.id}/identities`, authToken)
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({
+        identities: [
+          {
+            id: identityId,
+            name: 'Test',
+            emailAddress: `${account.id}@example.com`,
+            signature: null,
+            isDefault: true,
+          },
+          {
+            id: expect.any(String),
+            name: 'Alias',
+            emailAddress: 'alias@example.com',
+            signature: 'Gruß',
+            isDefault: false,
+          },
+        ],
+      })
+    })
+
+    it('updates the signature (normalized), and clears it', async () => {
+      const patch = (id: string, payload: unknown, token = authToken) =>
+        app.inject({
+          method: 'PATCH',
+          url: `/api/identities/${id}`,
+          headers: { cookie: `fma_session=${token}` },
+          payload: payload as Record<string, unknown>,
+        })
+      const res = await patch(identityId, { signature: 'Martin\r\nTel. 123\n\n' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().identity.signature).toBe('Martin\nTel. 123')
+
+      const cleared = await patch(identityId, { signature: '   ' })
+      expect(cleared.json().identity.signature).toBeNull()
+
+      expect((await patch(identityId, { signature: 42 })).statusCode).toBe(400)
+      expect((await patch(identityId, {})).statusCode).toBe(400)
+      expect((await patch(identityId, { signature: 'x'.repeat(10_001) })).statusCode).toBe(400)
+      expect((await patch('nope', { signature: 'x' })).statusCode).toBe(404)
+      expect((await patch(randomUUID(), { signature: 'x' })).statusCode).toBe(404)
+    })
+
+    it('answers 404 for foreign accounts and identities', async () => {
+      expect(
+        (await get(`/api/accounts/${foreignAccountId}/identities`, authToken)).statusCode,
+      ).toBe(404)
+      expect((await get(`/api/accounts/nope/identities`, authToken)).statusCode).toBe(404)
+      expect((await get(`/api/accounts/${account.id}/identities`)).statusCode).toBe(401)
+      const { rows } = await pool.query<{ id: string }>(
+        'SELECT id FROM identity WHERE account_id = $1',
+        [foreignAccountId],
+      )
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/identities/${rows[0]!.id}`,
+        headers: { cookie: `fma_session=${authToken}` },
+        payload: { signature: 'hijack' },
+      })
+      expect(res.statusCode).toBe(404)
+      const after = await pool.query('SELECT signature FROM identity WHERE id = $1', [rows[0]!.id])
+      expect(after.rows[0].signature).toBeNull()
+    })
   })
 })
