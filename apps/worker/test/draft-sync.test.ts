@@ -10,11 +10,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import pg from 'pg'
 import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
+import { simpleParser } from 'mailparser'
 import {
   draftContentAad,
+  encryptBytes,
   encryptField,
   generateDataKey,
   loadMasterKey,
+  uploadFieldAad,
   wrapDataKey,
 } from '@fma/crypto'
 import type { DraftContent } from '@fma/shared'
@@ -28,7 +31,7 @@ const greenmailUser = process.env.GREENMAIL_USER ?? ''
 const greenmailPassword = process.env.GREENMAIL_PASSWORD ?? ''
 
 const TABLES =
-  'session, device, "user", mail_account, identity, folder, job, message, message_location, draft'
+  'session, device, "user", mail_account, identity, folder, job, message, message_location, draft, attachment_upload'
 const DRAFTS = 'FmaDraftSync'
 
 function imapClient(): ImapFlow {
@@ -231,6 +234,45 @@ describe.skipIf(!databaseUrl || !greenmailHost)('draft_sync job', () => {
     expect(copies).toHaveLength(1)
     expect(copies[0]!.source).toContain('Subject: Zweite Fassung')
     expect(copies[0]!.messageId).toBe(draftMessageId(id, 2, greenmailUser))
+  })
+
+  it('includes the attachments kept with the draft in the IMAP copy', async () => {
+    const id = randomUUID()
+    await saveDraft(id, 1, { subject: 'Mit Anhang' })
+    const pdf = randomBytes(50_000)
+    const uploadId = randomUUID()
+    await pool.query(
+      `INSERT INTO attachment_upload
+         (id, account_id, draft_id, filename_enc, content_type, size_bytes, content_enc)
+       VALUES ($1, $2, $3, $4, 'application/pdf', $5, $6)`,
+      [
+        uploadId,
+        accountId,
+        id,
+        Buffer.from(
+          encryptField(dek, 'Angebot ä.pdf', uploadFieldAad('filename', uploadId)),
+          'utf8',
+        ),
+        pdf.length,
+        encryptBytes(dek, pdf, uploadFieldAad('content', uploadId)),
+      ],
+    )
+    expect(await runDraftSync(pool, accountId, { draftId: id })).toBe('uploaded')
+    const copies = await folderContents()
+    expect(copies).toHaveLength(1)
+    const parsed = await simpleParser(copies[0]!.source)
+    expect(parsed.text?.trim()).toBe('Noch nicht fertig.')
+    expect(parsed.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['Angebot ä.pdf', 'application/pdf'],
+    ])
+    expect(parsed.attachments[0]!.content.equals(pdf)).toBe(true)
+
+    // Discarded: the copy goes, and the uploads with the draft row.
+    await pool.query('UPDATE draft SET deleted_at = now(), content_enc = NULL WHERE id = $1', [id])
+    expect(await runDraftSync(pool, accountId, { draftId: id })).toBe('removed')
+    expect(await folderContents()).toHaveLength(0)
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [uploadId])
+    expect(rows).toHaveLength(0)
   })
 
   it('cleans up copies left over by an interrupted upload', async () => {

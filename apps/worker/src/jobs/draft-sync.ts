@@ -12,6 +12,8 @@
  *   that was written in another client (`source_*`). A new Message-ID per
  *   version keeps the message sync from reusing stale metadata.
  * - Delete (`deleted_at` set): remove all copies, then delete the row.
+ * - Attachments kept with the draft (roadmap 5.3) are part of the copy,
+ *   built like the sent message (../uploads).
  * - Without a Drafts folder the draft stays server-only.
  * - Coalescing: the api enqueues one job per burst of autosaves (see
  *   enqueueDraftSync); a save during the upload enqueues the next job.
@@ -30,6 +32,7 @@ import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { assertMailHost, mailTestMode } from '../ports'
 import { enqueueMessageSync } from '../scheduler'
+import { composerAttachments, loadUploads, type OutgoingAttachment } from '../uploads'
 
 const CONNECT_TIMEOUT_MS = 15_000
 
@@ -95,10 +98,12 @@ async function buildDraft(
   content: DraftContent,
   from: MailPerson,
   messageId: string,
+  attachments: OutgoingAttachment[],
 ): Promise<Buffer> {
   // Only the valid addresses of the typed fields (a draft may be incomplete).
   const people = (value: string) => parseAddressList(value).people
   const composer = new MailComposer({
+    attachments: composerAttachments(attachments),
     from,
     to: people(content.to),
     cc: people(content.cc),
@@ -205,7 +210,8 @@ export async function runDraftSync(
     ) as DraftContent
     const from = await senderOf(pool, ctx, row)
     const messageId = draftMessageId(row.id, row.version, from.address)
-    upload = { raw: await buildDraft(row, content, from, messageId), messageId }
+    const attachments = await loadUploads(pool, ctx.dek, { draftId: row.id })
+    upload = { raw: await buildDraft(row, content, from, messageId, attachments), messageId }
   }
 
   await assertMailHost(ctx.imap.host)

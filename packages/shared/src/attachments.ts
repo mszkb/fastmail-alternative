@@ -35,6 +35,23 @@ export interface UploadedAttachment {
 }
 
 /**
+ * `POST /api/messages/:id/attachments/copy` (forwarding, roadmap 5.3):
+ * copies the attachments of a received message into new uploads of
+ * `accountId` (encrypted like a file the user picked), optionally kept with
+ * the draft `draftId`. Inline parts (cid: images of an HTML body) are not
+ * copied; attachments beyond the limits are skipped and counted.
+ */
+export interface CopyAttachmentsRequest {
+  accountId: string
+}
+
+export interface CopyAttachmentsResponse {
+  attachments: UploadedAttachment[]
+  /** Attachments not copied because of the size/count limits. */
+  skipped: number
+}
+
+/**
  * `POST /api/outbox` answers 410 with this code when an `attachmentIds`
  * entry is gone (removed, already sent, or expired: uploads not bound to a
  * message are deleted after UPLOAD_RETENTION_HOURS, default 7 days).

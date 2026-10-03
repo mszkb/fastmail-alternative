@@ -33,7 +33,7 @@ const greenmailUser = process.env.GREENMAIL_USER ?? ''
 const greenmailPassword = process.env.GREENMAIL_PASSWORD ?? ''
 
 const TABLES =
-  'session, device, push_subscription, "user", mail_account, identity, folder, job, message, message_location, message_body, thread, outbox_message, attachment_upload'
+  'session, device, push_subscription, "user", mail_account, identity, folder, job, message, message_location, message_body, thread, outbox_message, attachment_upload, draft'
 
 const HOUR = 60 * 60_000
 const SETTINGS: CleanupSettings = {
@@ -255,6 +255,31 @@ describe.skipIf(!databaseUrl)('cleanup job', () => {
     )
     expect(outbox.map((row) => row.id)).not.toContain(sentOld)
     expect(outcome.outbox).toBe(2)
+  })
+
+  it('keeps uploads of an existing draft and removes them with the draft', async () => {
+    const draftId = randomUUID()
+    await pool.query(`INSERT INTO draft (id, account_id, content_enc) VALUES ($1, $2, '\\x01')`, [
+      draftId,
+      accountId,
+    ])
+    const kept = randomUUID()
+    await pool.query(
+      `INSERT INTO attachment_upload (id, account_id, draft_id, filename_enc, content_type,
+         size_bytes, content_enc, created_at)
+       VALUES ($1, $2, $3, '\\x00', 'text/plain', 1, '\\x00', now() - interval '30 days')`,
+      [kept, accountId, draftId],
+    )
+    await runCleanup(pool, SETTINGS)
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [kept])
+    expect(rows).toHaveLength(1)
+
+    // Discarded draft: the draft_sync job deletes the row, the uploads go with it.
+    await pool.query('DELETE FROM draft WHERE id = $1', [draftId])
+    const { rows: after } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [
+      kept,
+    ])
+    expect(after).toHaveLength(0)
   })
 
   it('keeps an upload bound and a message re-queued concurrently with the cleanup', async () => {

@@ -28,6 +28,8 @@ import {
 } from '@fma/crypto'
 import type {
   AttachmentMissingResponse,
+  CopyAttachmentsResponse,
+  Draft,
   MessageAttachmentListResponse,
   UploadedAttachment,
 } from '@fma/shared'
@@ -38,7 +40,7 @@ process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
 const databaseUrl = process.env.DATABASE_URL
 const TABLES =
-  'session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, outbox_message, attachment_upload'
+  'session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, outbox_message, attachment_upload, draft'
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
   'base64',
@@ -450,5 +452,204 @@ describe.skipIf(!databaseUrl)('attachments api', () => {
   it('rejects uploads to foreign accounts', async () => {
     const res = await upload(randomUUID(), Buffer.from('x'), 'a.txt', 'text/plain')
     expect(res.statusCode).toBe(404)
+  })
+
+  function json(method: 'PUT' | 'POST' | 'GET' | 'DELETE', url: string, payload?: object) {
+    return app.inject({
+      method,
+      url,
+      payload: payload as Record<string, unknown> | undefined,
+      headers: { cookie: `fma_session=${authToken}` },
+    })
+  }
+
+  const draftBody = (extra: Record<string, unknown> = {}) => ({
+    accountId: account.id,
+    to: 'anna@example.com',
+    cc: '',
+    bcc: '',
+    subject: 'Entwurf mit Anhang',
+    text: 'Text',
+    ...extra,
+  })
+
+  it('keeps uploads with a draft until it is discarded', async () => {
+    const a = (
+      await upload(account.id, Buffer.from('eins'), 'eins.txt', 'text/plain')
+    ).json<UploadedAttachment>()
+    const b = (
+      await upload(account.id, Buffer.from('zwei'), 'zwei.txt', 'text/plain')
+    ).json<UploadedAttachment>()
+    const draftId = randomUUID()
+    let res = await json(
+      'PUT',
+      `/api/drafts/${draftId}`,
+      draftBody({ attachmentIds: [a.id, b.id, randomUUID()] }),
+    )
+    expect(res.statusCode).toBe(201)
+    expect(res.json<Draft>().attachments.map((x) => x.filename)).toEqual(['eins.txt', 'zwei.txt'])
+
+    // A save without attachmentIds (older client, offline replay) keeps them.
+    res = await json('PUT', `/api/drafts/${draftId}`, draftBody({ baseVersion: 1, text: 'Neu' }))
+    expect(res.json<Draft>().attachments).toHaveLength(2)
+    // Reopening shows them.
+    res = await json('GET', `/api/drafts/${draftId}`)
+    expect(res.json<Draft>().attachments.map((x) => x.id)).toEqual([a.id, b.id])
+
+    // Removing one releases it from the draft.
+    res = await json(
+      'PUT',
+      `/api/drafts/${draftId}`,
+      draftBody({ baseVersion: 2, attachmentIds: [a.id] }),
+    )
+    expect(res.json<Draft>().attachments.map((x) => x.id)).toEqual([a.id])
+    const { rows: released } = await pool.query(
+      'SELECT draft_id FROM attachment_upload WHERE id = $1',
+      [b.id],
+    )
+    expect(released[0]!.draft_id).toBeNull()
+
+    // Discarding the draft deletes its uploads.
+    expect((await json('DELETE', `/api/drafts/${draftId}`)).statusCode).toBe(204)
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [a.id])
+    expect(rows).toHaveLength(0)
+  })
+
+  it('moves the uploads of a draft to the message when it is sent', async () => {
+    const a = (
+      await upload(account.id, Buffer.from('anhang'), 'a.txt', 'text/plain')
+    ).json<UploadedAttachment>()
+    const draftId = randomUUID()
+    await json('PUT', `/api/drafts/${draftId}`, draftBody({ attachmentIds: [a.id] }))
+    const res = await json('POST', '/api/outbox', {
+      accountId: account.id,
+      to: ['anna@example.com'],
+      subject: 'Entwurf mit Anhang',
+      text: 'Text',
+      draftId,
+      attachmentIds: [a.id],
+    })
+    expect(res.statusCode).toBe(201)
+    const { rows } = await pool.query<{ outbox_id: string | null; draft_id: string | null }>(
+      'SELECT outbox_id, draft_id FROM attachment_upload WHERE id = $1',
+      [a.id],
+    )
+    expect(rows[0]).toEqual({ outbox_id: res.json<{ id: string }>().id, draft_id: null })
+    // The draft row going away (draft_sync) does not take the upload with it.
+    await pool.query('DELETE FROM draft WHERE id = $1', [draftId])
+    const { rows: still } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [
+      a.id,
+    ])
+    expect(still).toHaveLength(1)
+  })
+
+  it('copies the attachments of a message for forwarding, encrypted', async () => {
+    const res = await json('POST', `/api/messages/${messageId}/attachments/copy`, {
+      accountId: account.id,
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json<CopyAttachmentsResponse>()
+    // The inline logo of the HTML body is not taken over.
+    expect(body.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['Rechnung März.pdf', 'application/pdf'],
+      ['evil.html', 'text/html'],
+      ['bild.png', 'image/png'],
+    ])
+    expect(body.skipped).toBe(0)
+    const { rows } = await pool.query<{
+      filename_enc: Buffer
+      content_enc: Buffer
+      draft_id: string | null
+    }>('SELECT filename_enc, content_enc, draft_id FROM attachment_upload WHERE id = $1', [
+      body.attachments[0]!.id,
+    ])
+    expect(rows[0]!.filename_enc.toString('utf8')).not.toContain('Rechnung')
+    expect(rows[0]!.draft_id).toBeNull()
+    expect(
+      decryptBytes(
+        account.dek,
+        rows[0]!.content_enc,
+        uploadFieldAad('content', body.attachments[0]!.id),
+      ).equals(pdf),
+    ).toBe(true)
+    expect(
+      decryptField(
+        account.dek,
+        rows[0]!.filename_enc.toString('utf8'),
+        uploadFieldAad('filename', body.attachments[0]!.id),
+      ),
+    ).toBe('Rechnung März.pdf')
+    await pool.query('DELETE FROM attachment_upload WHERE id = ANY($1::uuid[])', [
+      body.attachments.map((a) => a.id),
+    ])
+  })
+
+  it('skips attachments beyond the limits when copying', async () => {
+    process.env.MAX_ATTACHMENT_BYTES = String(100_000)
+    try {
+      const res = await json('POST', `/api/messages/${messageId}/attachments/copy`, {
+        accountId: account.id,
+      })
+      const body = res.json<CopyAttachmentsResponse>()
+      expect(body.attachments.map((a) => a.filename)).toEqual(['evil.html', 'bild.png'])
+      expect(body.skipped).toBe(1)
+      await pool.query('DELETE FROM attachment_upload WHERE id = ANY($1::uuid[])', [
+        body.attachments.map((a) => a.id),
+      ])
+    } finally {
+      process.env.MAX_ATTACHMENT_BYTES = String(1024 * 1024)
+    }
+  })
+
+  it('keeps the attachments of a draft written in another client when it is opened', async () => {
+    const res = await json('POST', `/api/messages/${messageId}/draft`)
+    expect(res.statusCode).toBe(201)
+    const draft = res.json<Draft>()
+    expect(draft.attachments.map((a) => a.filename)).toEqual([
+      'Rechnung März.pdf',
+      'evil.html',
+      'bild.png',
+    ])
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE draft_id = $1', [
+      draft.id,
+    ])
+    expect(rows).toHaveLength(3)
+    await json('DELETE', `/api/drafts/${draft.id}`)
+  })
+
+  it('copies only from own messages to own accounts', async () => {
+    const other = await pool.query<{ id: string }>(
+      `INSERT INTO "user" (email, password_hash) VALUES ('copy-other@example.com', 'x') RETURNING id`,
+    )
+    const foreign = await createAccount(other.rows[0]!.id)
+    const foreignMessage = await createMessage(
+      foreign,
+      await compose({ text: 'x', attachments: [{ filename: 'a.txt', content: 'a' }] }),
+    )
+    const cases = [
+      [`/api/messages/${foreignMessage}/attachments/copy`, account.id],
+      [`/api/messages/${messageId}/attachments/copy`, foreign.id],
+      [`/api/messages/${randomUUID()}/attachments/copy`, account.id],
+      [`/api/messages/${messageId}/attachments/copy`, 'nope'],
+    ] as const
+    for (const [url, accountId] of cases) {
+      expect((await json('POST', url, { accountId })).statusCode).toBe(404)
+    }
+    const anonymous = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${messageId}/attachments/copy`,
+      payload: { accountId: account.id },
+    })
+    expect(anonymous.statusCode).toBe(401)
+    // Raw mail not stored yet.
+    const pending = await createMessage(account, null)
+    expect(
+      (await json('POST', `/api/messages/${pending}/attachments/copy`, { accountId: account.id }))
+        .statusCode,
+    ).toBe(409)
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE account_id = $1', [
+      foreign.id,
+    ])
+    expect(rows).toHaveLength(0)
   })
 })

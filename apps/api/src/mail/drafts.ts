@@ -18,6 +18,13 @@
  *   it belongs to, or creates one from it that replaces the IMAP copy on
  *   the first upload.
  *
+ * Attachments (roadmap 5.3, #53): `attachmentIds` in a save keeps those
+ * uploads with the draft (`attachment_upload.draft_id`), the answer lists
+ * them; the cleanup leaves them alone while the draft exists, the IMAP copy
+ * contains them, sending moves them to the message (see ./outbox) and
+ * discarding deletes them. Opening a draft of another client copies its
+ * attachments into uploads of the new draft.
+ *
  * Every save, delete and send enqueues a coalesced `draft_sync` job: the
  * worker mirrors the draft into the account's Drafts folder (or removes
  * it). Autosaves are delayed by DRAFT_UPLOAD_DELAY_MS so a burst of saves
@@ -34,10 +41,13 @@ import {
   encryptField,
   messageFieldAad,
   unwrapAccountKey,
+  uploadFieldAad,
 } from '@fma/crypto'
 import { enqueueDraftSync } from '@fma/db/job-queue'
 import {
+  ATTACHMENT_LIMIT_DEFAULTS,
   DRAFT_LIMITS,
+  formatByteSize,
   formatAddressList,
   isValidMessageId,
   type Draft,
@@ -45,8 +55,10 @@ import {
   type DraftContent,
   type DraftListResponse,
   type MailPerson,
+  type UploadedAttachment,
 } from '@fma/shared'
 import { requireAuth } from '../auth/routes'
+import { attachmentLimits, copyAttachmentsToUploads, loadOwnedRaw } from './attachments'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Message-ID of an uploaded draft version: `<draft id>.<version>@domain`. */
@@ -72,6 +84,7 @@ interface DraftRow {
   deleted_at: Date | null
   wrapped_dek: Buffer
   message_ids: string[]
+  attachments: { id: string; filename_enc: string; content_type: string; size: number }[]
 }
 
 const DRAFT_SELECT = /* sql */ `
@@ -79,7 +92,13 @@ const DRAFT_SELECT = /* sql */ `
          d.version, d.created_at, d.updated_at, d.deleted_at, a.wrapped_dek,
          coalesce((SELECT array_agg(m.id::text) FROM message m
                    WHERE d.message_id_header IS NOT NULL AND m.account_id = d.account_id
-                     AND m.message_id_header = d.message_id_header), '{}') AS message_ids
+                     AND m.message_id_header = d.message_id_header), '{}') AS message_ids,
+         coalesce((SELECT json_agg(json_build_object(
+                     'id', u.id, 'filename_enc', convert_from(u.filename_enc, 'UTF8'),
+                     'content_type', u.content_type, 'size', u.size_bytes)
+                     ORDER BY u.created_at, u.id)
+                   FROM attachment_upload u
+                   WHERE u.draft_id = d.id AND u.outbox_id IS NULL), '[]') AS attachments
   FROM draft d JOIN mail_account a ON a.id = d.account_id`
 
 interface ParsedDraftRequest extends DraftContent {
@@ -89,6 +108,8 @@ interface ParsedDraftRequest extends DraftContent {
   references: string[]
   baseVersion?: number
   force: boolean
+  /** undefined = leave the draft's attachments unchanged. */
+  attachmentIds?: string[]
 }
 
 function masterKey(): string {
@@ -133,6 +154,17 @@ export function parseDraftRequest(body: unknown): ParsedDraftRequest | string {
     return 'Ungültige Version.'
   }
   if (input.force !== undefined && typeof input.force !== 'boolean') return 'Ungültige Anfrage.'
+  const attachmentIds = input.attachmentIds
+  if (
+    attachmentIds !== undefined &&
+    (!Array.isArray(attachmentIds) ||
+      !attachmentIds.every((value) => typeof value === 'string' && UUID_RE.test(value)))
+  ) {
+    return 'Ungültige Anhänge.'
+  }
+  if (attachmentIds && attachmentIds.length > ATTACHMENT_LIMIT_DEFAULTS.maxCount) {
+    return `Höchstens ${ATTACHMENT_LIMIT_DEFAULTS.maxCount} Anhänge sind erlaubt.`
+  }
   return {
     accountId: input.accountId.toLowerCase(),
     identityId: identityId?.toLowerCase() ?? null,
@@ -146,11 +178,28 @@ export function parseDraftRequest(body: unknown): ParsedDraftRequest | string {
     references: references as string[],
     baseVersion: baseVersion as number | undefined,
     force: input.force === true,
+    attachmentIds: attachmentIds
+      ? [...new Set((attachmentIds as string[]).map((value) => value.toLowerCase()))]
+      : undefined,
   }
 }
 
 function encryptContent(dek: Buffer, id: string, content: DraftContent): Buffer {
   return Buffer.from(encryptField(dek, JSON.stringify(content), draftContentAad(id)), 'utf8')
+}
+
+function toAttachments(log: FastifyBaseLogger, row: DraftRow): UploadedAttachment[] {
+  if (row.attachments.length === 0) return []
+  const dek = unwrapAccountKey(masterKey(), row.wrapped_dek)
+  return row.attachments.map((upload) => {
+    let filename = 'anhang'
+    try {
+      filename = decryptField(dek, upload.filename_enc, uploadFieldAad('filename', upload.id))
+    } catch {
+      log.warn({ draftId: row.id }, 'attachment name could not be decrypted')
+    }
+    return { id: upload.id, filename, contentType: upload.content_type, size: upload.size }
+  })
 }
 
 function toDraft(log: FastifyBaseLogger, row: DraftRow): Draft {
@@ -183,6 +232,7 @@ function toDraft(log: FastifyBaseLogger, row: DraftRow): Draft {
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     messageIds: row.message_ids,
+    attachments: toAttachments(log, row),
   }
 }
 
@@ -327,6 +377,30 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
             [id, parsed.identityId, contentEnc, parsed.inReplyTo, parsed.references],
           )
         }
+        if (parsed.attachmentIds) {
+          // Released uploads fall back to the normal retention of the cleanup.
+          await client.query(
+            `UPDATE attachment_upload SET draft_id = NULL
+             WHERE draft_id = $1 AND NOT (id = ANY($2::uuid[]))`,
+            [id, parsed.attachmentIds],
+          )
+          // Unknown, foreign, sent or other drafts' uploads are ignored.
+          const { rows: kept } = await client.query<{ size_bytes: number }>(
+            `UPDATE attachment_upload SET draft_id = $1
+             WHERE account_id = $2 AND outbox_id IS NULL AND id = ANY($3::uuid[])
+               AND (draft_id IS NULL OR draft_id = $1)
+             RETURNING size_bytes`,
+            [id, parsed.accountId, parsed.attachmentIds],
+          )
+          const { maxTotalBytes } = attachmentLimits()
+          if (kept.reduce((sum, row) => sum + row.size_bytes, 0) > maxTotalBytes) {
+            await client.query('ROLLBACK')
+            await reply.code(413).send({
+              message: `Die Anhänge sind zusammen zu groß (höchstens ${formatByteSize(maxTotalBytes)}).`,
+            })
+            return
+          }
+        }
         await enqueueDraftSync(client, parsed.accountId, id, DRAFT_UPLOAD_DELAY_MS)
         await client.query('COMMIT')
       } catch (err) {
@@ -403,7 +477,14 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
              WHERE id = $1 AND deleted_at IS NULL`,
             [id],
           )
-          if (rowCount) await enqueueDraftSync(client, row.account_id, id)
+          if (rowCount) {
+            // The uploads go now; the row (and with it any rest) after the IMAP cleanup.
+            await client.query(
+              'DELETE FROM attachment_upload WHERE draft_id = $1 AND outbox_id IS NULL',
+              [id],
+            )
+            await enqueueDraftSync(client, row.account_id, id)
+          }
           await client.query('COMMIT')
         } catch (err) {
           await client.query('ROLLBACK').catch(() => {})
@@ -534,6 +615,25 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
         throw err
       } finally {
         client.release()
+      }
+      if (created) {
+        // Keep the attachments of the other client's draft (they would be
+        // lost with the first upload otherwise). Best effort: the draft
+        // opens without them when the raw mail is not stored.
+        try {
+          const raw = await loadOwnedRaw(pool, request.log, userId, messageId)
+          if (raw && raw !== 'missing') {
+            const { rows: accounts } = await pool.query<{ id: string; wrapped_dek: Buffer }>(
+              `SELECT a.id, a.wrapped_dek FROM draft d JOIN mail_account a ON a.id = d.account_id
+               WHERE d.id = $1`,
+              [draftId],
+            )
+            const { skipped } = await copyAttachmentsToUploads(pool, raw, accounts[0]!, draftId)
+            if (skipped > 0) request.log.warn({ draftId, skipped }, 'draft attachments skipped')
+          }
+        } catch {
+          request.log.warn({ draftId }, 'draft attachments could not be copied')
+        }
       }
       const row = await loadOwned(draftId, userId)
       await reply.code(created ? 201 : 200).send(toDraft(request.log, row!))

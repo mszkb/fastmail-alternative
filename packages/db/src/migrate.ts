@@ -33,6 +33,7 @@ import { migration0016 } from './migrations/0016_drafts'
 import { migration0017 } from './migrations/0017_attachment_uploads'
 import { migration0018 } from './migrations/0018_cleanup_indexes'
 import { migration0019 } from './migrations/0019_outbox_attachment_count'
+import { migration0020 } from './migrations/0020_draft_attachments'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -65,6 +66,7 @@ export const migrations: Migration[] = [
   migration0017,
   migration0018,
   migration0019,
+  migration0020,
 ]
 
 /** The database schema is newer than this app version. */

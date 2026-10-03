@@ -32,6 +32,7 @@ erDiagram
     FOLDER ||--o{ MESSAGE_LOCATION : "enthält"
     MESSAGE ||--|| MESSAGE_BODY : "hat"
     OUTBOX_MESSAGE ||--o{ ATTACHMENT_UPLOAD : "hat"
+    DRAFT ||--o{ ATTACHMENT_UPLOAD : "behält"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
     MAIL_ACCOUNT ||--o{ DRAFT : "entwirft"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
@@ -161,6 +162,7 @@ erDiagram
         uuid id PK
         uuid account_id FK
         uuid outbox_id FK "NULL bis zum Absenden"
+        uuid draft_id FK "Entwurf, bei dem der Upload liegt (Migration 0020)"
         bytea filename_enc
         text content_type
         int size_bytes
@@ -232,6 +234,8 @@ Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server
 - **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)). Rohmails über `MAX_RAW_MESSAGE_BYTES` (Standard 20 MB) oder leere werden nicht gespeichert; sie bekommen eine `message_body`-Zeile ohne `storage_ref` mit `skip_reason` (`too_large`/`empty`), damit der Sync sie nicht bei jedem Lauf erneut lädt.
 - **Empfangene Anhänge** (Roadmap 5.3): keine eigene Tabelle. Liste (Name, Typ, Größe) und Inhalt leitet die API beim Abruf aus der verschlüsselten Rohmail ab (MIME-Parser gestreamt, Inhalte anderer Teile werden verworfen), wie beim HTML. Dadurch gibt es keine weitere Kopie, keinen Klartext-Dateinamen in der DB und keinen Backfill für bestehende Mails. `message.has_attachments` (Multipart laut `BODYSTRUCTURE`) ist nur ein Hinweis, ob die Liste geladen wird.
 - **`attachment_upload`** (Migration 0017): Anhang zum Versenden, beim Verfassen hochgeladen. Dateiname und Inhalt mit dem Konto-DEK verschlüsselt (AAD `attachment_upload.filename|content:<id>`). Liegt in der DB statt im Volume, weil die API das Volume nur lesend einbindet; Größe begrenzt (`MAX_ATTACHMENT_BYTES`, `MAX_ATTACHMENTS_TOTAL_BYTES`). `POST /api/outbox` bindet Uploads über `outbox_id` an genau eine Nachricht und merkt sich deren Anzahl in `outbox_message.attachment_count` (Migration 0019; fehlt beim Versand ein Upload, schlägt die Nachricht mit `ATTACHMENT_MISSING` fehl statt ohne Anhang zu gehen); der Worker löscht sie, sobald die Nachricht samt Kopie in „Gesendet" erledigt ist. Nicht gesendete Uploads löscht der Client beim Schließen/Verwerfen; nie gebundene Reste löscht der Cleanup-Job nach `UPLOAD_RETENTION_HOURS` (Standard 168 h = 7 Tage, damit offline geschriebene Nachrichten mit Anhängen auch nach längerer Offline-Phase noch gesendet werden können; ist ein Upload beim Senden weg, antwortet `POST /api/outbox` mit `410` und Code `ATTACHMENT_MISSING`, die Offline-Queue speichert den Text dann als Entwurf und bittet, die Anhänge neu hinzuzufügen), Uploads fehlgeschlagener Nachrichten bleiben für einen erneuten Versuch, bis der Outbox-Eintrag nach `OUTBOX_RETENTION_DAYS` (Standard 30 Tage) entfernt wird (Roadmap 5.5).
+  - **Anhänge in Entwürfen** (Migration 0020 `attachment_upload.draft_id`, #53): `PUT /api/drafts/:id` mit `attachmentIds` hält Uploads beim Entwurf (vollständige Liste; nicht mehr genannte werden freigegeben und fallen unter die normale Aufbewahrung). Solange der Entwurf existiert, löscht der Cleanup sie nicht; die IMAP-Drafts-Kopie enthält sie (gleicher MIME-Aufbau wie beim Versand). Beim Senden wandern sie in derselben Transaktion an die Outbox-Nachricht (`draft_id` wird geleert), beim Verwerfen werden sie gelöscht (sofort per API, Rest per `ON DELETE CASCADE`, wenn der draft_sync-Job die Zeile entfernt). Öffnet man einen Entwurf eines anderen Clients, werden dessen Anhänge in Uploads des neuen Entwurfs kopiert.
+  - **Weiterleiten mit Originalanhängen** (#53): `POST /api/messages/:id/attachments/copy` kopiert die Anhänge einer eigenen Nachricht (ohne Inline-Teile des HTML) beim Öffnen des Weiterleitens in verschlüsselte Uploads des Absendekontos – ein Anhang nach dem anderen aus dem MIME-Parser, Grenzen wie beim Upload (Datei, Summe, Anzahl; Überzählige werden übersprungen und gezählt). Danach sind es normale Uploads: im Composer einzeln entfernbar, im Entwurf gespeichert, vom Worker ohne Zugriff auf das `mail-data`-Volume versendet.
 - **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 
 Archivieren und Verschieben ändern nur `message_location`, nicht `message`.

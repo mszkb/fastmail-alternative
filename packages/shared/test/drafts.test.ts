@@ -53,6 +53,7 @@ function serverDraft(id: string, updatedAt: string): Draft {
     createdAt: updatedAt,
     updatedAt,
     messageIds: ['m1'],
+    attachments: [{ id: 'u1', filename: 'a.txt', contentType: 'text/plain', size: 1 }],
   }
 }
 
@@ -109,5 +110,7 @@ describe('draft offline queue', () => {
     ])
     // Server metadata of an existing draft is kept.
     expect(result[1]).toMatchObject({ version: 1, messageIds: ['m1'] })
+    // Queued saves without attachmentIds keep the attachments.
+    expect(result[1]!.attachments).toHaveLength(1)
   })
 })

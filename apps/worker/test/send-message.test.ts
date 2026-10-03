@@ -23,6 +23,10 @@ import {
   wrapDataKey,
 } from '@fma/crypto'
 import type { OutboxContent } from '@fma/shared'
+import MailComposer from 'nodemailer/lib/mail-composer'
+// The api copies the original's attachments when a forward is opened; the
+// worker sends them like any upload (end-to-end: forward -> GreenMail).
+import { copyAttachmentsToUploads } from '../../api/src/mail/attachments'
 import type { AccountContext } from '../src/accounts'
 import {
   SendRetryError,
@@ -322,6 +326,54 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
 
     const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE outbox_id = $1', [id])
     expect(rows).toHaveLength(0)
+  })
+
+  it('forwards the attachments of the original message', async () => {
+    const pdf = randomBytes(120_000)
+    const original = await new MailComposer({
+      from: 'kunde@example.org',
+      to: greenmailUser,
+      subject: 'Rechnung',
+      text: 'Anbei die Rechnung.',
+      html: '<p>Anbei <img src="cid:logo"></p>',
+      attachments: [
+        { filename: 'Rechnung 42.pdf', contentType: 'application/pdf', content: pdf },
+        { filename: 'logo.png', contentType: 'image/png', content: randomBytes(10), cid: 'logo' },
+      ],
+    })
+      .compile()
+      .build()
+    const { rows: accounts } = await pool.query<{ id: string; wrapped_dek: Buffer }>(
+      'SELECT id, wrapped_dek FROM mail_account WHERE id = $1',
+      [accountId],
+    )
+    const copied = await copyAttachmentsToUploads(pool, original, accounts[0]!)
+    // Inline parts of the HTML body are not taken over.
+    expect(copied.skipped).toBe(0)
+    expect(copied.attachments.map((a) => [a.filename, a.size])).toEqual([
+      ['Rechnung 42.pdf', pdf.length],
+    ])
+    const { rows: stored } = await pool.query<{ filename_enc: Buffer }>(
+      'SELECT filename_enc FROM attachment_upload WHERE id = $1',
+      [copied.attachments[0]!.id],
+    )
+    expect(stored[0]!.filename_enc.toString('utf8')).not.toContain('Rechnung')
+
+    // POST /api/outbox binds the uploads; the worker sends them.
+    const { id, messageId } = await createOutbox({ subject: 'Fwd: Rechnung' })
+    await pool.query('UPDATE attachment_upload SET outbox_id = $1 WHERE id = ANY($2::uuid[])', [
+      id,
+      copied.attachments.map((a) => a.id),
+    ])
+    await pool.query('UPDATE outbox_message SET attachment_count = 1 WHERE id = $1', [id])
+    expect(await runSendMessage(pool, accountId, { outboxId: id })).toBe('sent')
+    const delivered = await waitForDelivery(messageId)
+    expect(delivered).toHaveLength(1)
+    const parsed = await simpleParser(delivered[0]!.slice(delivered[0]!.indexOf('\n') + 1))
+    expect(parsed.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['Rechnung 42.pdf', 'application/pdf'],
+    ])
+    expect(parsed.attachments[0]!.content.equals(pdf)).toBe(true)
   })
 
   it('fails for good instead of sending without a vanished attachment', async () => {

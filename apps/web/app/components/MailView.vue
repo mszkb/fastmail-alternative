@@ -131,6 +131,8 @@ const compose = ref<{
   identities: ComposeIdentity[]
   draft: ComposeDraft
   saved?: Draft
+  /** Forward: the original, whose attachments the form takes over (5.3). */
+  forwardOf?: string
 } | null>(null)
 const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
 // Search (5.1): criteria of the form and the shown result (null = folder view).
@@ -388,7 +390,12 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   // Switched accounts meanwhile: never open a draft for the previous one.
   if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
-  compose.value = { accountId: account, identities: list, draft: createDraft(mode, list, original) }
+  compose.value = {
+    accountId: account,
+    identities: list,
+    draft: createDraft(mode, list, original),
+    ...(mode === 'forward' && original ? { forwardOf: original.id } : {}),
+  }
 }
 
 /** Continues a saved draft in the compose form. */
@@ -1427,6 +1434,7 @@ onBeforeUnmount(() => {
       :identities="compose.identities"
       :draft="compose.draft"
       :saved="compose.saved"
+      :forward-of="compose.forwardOf"
       @queued="onQueued"
       @drafts-changed="draftList?.reload()"
       @close="compose = null"
