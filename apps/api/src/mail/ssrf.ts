@@ -10,7 +10,7 @@
  * which is only reachable via loopback/private addresses. Set
  * MAIL_ALLOW_PRIVATE_HOSTS=1 there (never in production).
  */
-import { lookup as dnsLookup } from 'node:dns'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 
 export class PrivateHostError extends Error {
@@ -30,10 +30,10 @@ type Lookup = (
   options: { all: true },
 ) => Promise<{ address: string; family: number }[]>
 
-/** Injects the resolver for tests; defaults to node:dns lookup. */
+/** Injects the resolver for tests; defaults to node:dns/promises lookup. */
 export async function assertPublicHost(
   host: string,
-  lookup: Lookup = dnsLookup as unknown as Lookup,
+  lookup: Lookup = dnsLookup,
 ): Promise<ResolvedAddress[]> {
   let addresses: ResolvedAddress[]
   if (isIP(host)) {

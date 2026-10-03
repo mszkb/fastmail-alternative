@@ -55,7 +55,7 @@ async function submit(): Promise<void> {
         smtp: {
           host: smtpHost.value,
           port: smtpPort.value,
-          user: smtpUser.value,
+          user: samePassword.value ? undefined : smtpUser.value,
           password: samePassword.value ? undefined : smtpPassword.value,
         },
       }),
@@ -146,6 +146,9 @@ async function submit(): Promise<void> {
     <button type="submit" :disabled="busy">
       {{ busy ? 'Teste Verbindung …' : 'Verbinden' }}
     </button>
+
+    <p v-if="error" class="msg error">{{ error }}</p>
+    <p v-else-if="success" class="msg success">{{ success }}</p>
   </form>
 </template>
 
@@ -238,5 +241,22 @@ button {
 button:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.msg {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.9rem;
+}
+
+.msg.error {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.msg.success {
+  background: #def7ec;
+  color: #046c4e;
 }
 </style>

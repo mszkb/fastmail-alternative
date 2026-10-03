@@ -77,8 +77,9 @@ function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | n
       host: smtp.host.trim().toLowerCase().slice(0, 253),
       port: smtp.port,
       secure: isSecurePort(smtp.port),
-      user: (smtp.user ?? imap.user).trim().slice(0, 320),
-      password: smtp.password ?? imap.password,
+      // Empty strings count as "not provided" -> fall back to IMAP credentials.
+      user: (smtp.user?.trim() || imap.user).trim().slice(0, 320),
+      password: smtp.password || imap.password,
     },
   }
 }

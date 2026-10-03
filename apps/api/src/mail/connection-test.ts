@@ -75,26 +75,22 @@ function classifyError(err: unknown): { code: string; message: string } {
 
 /** Tests IMAP: connect + login + capability list. */
 export async function testImap(config: HostConfig): Promise<TestResult> {
+  let client: ImapFlow | null = null
   try {
     if (!testMode()) await assertPublicHost(config.host)
-  } catch (err) {
-    const { code, message } = classifyError(err)
-    return { ok: false, code, message }
-  }
 
-  const client = new ImapFlow({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: { user: config.user, pass: config.password },
-    logger: false,
-    connectTimeout: CONNECT_TIMEOUT_MS,
-    tls: testMode() ? { rejectUnauthorized: false } : undefined,
-    // Test mode talks to plain GreenMail ports even when STARTTLS is offered.
-    ignoreTLS: testMode(),
-  })
+    client = new ImapFlow({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: { user: config.user, pass: config.password },
+      logger: false,
+      connectTimeout: CONNECT_TIMEOUT_MS,
+      tls: testMode() ? { rejectUnauthorized: false } : undefined,
+      // Test mode talks to plain GreenMail ports even when STARTTLS is offered.
+      ignoreTLS: testMode(),
+    })
 
-  try {
     await client.connect()
     // imapflow 2.x: `capabilities` is a Map (capability name -> flag); older
     // versions expose a Set and/or rawCapabilities.
@@ -113,10 +109,13 @@ export async function testImap(config: HostConfig): Promise<TestResult> {
     )
     return { ok: true, capabilities }
   } catch (err) {
+    // Full stack server-side for every failure, so bundling/platform quirks
+    // are diagnosable without leaking internals to the client.
+    console.warn('[connection-test] imap error:', err)
     const { code, message } = classifyError(err)
     return { ok: false, code, message }
   } finally {
-    client.close()
+    client?.close()
   }
 }
 
