@@ -1,6 +1,7 @@
-// Offline queue (roadmap 4.6): message actions and sends that could not
-// reach the server are kept (encrypted, see offline-store.ts) and replayed
-// in order once the app is online again (start, `online`, focus). The
+// Offline queue (roadmap 4.6): message actions, sends and draft saves
+// (2.8) that could not reach the server are kept (encrypted, see
+// offline-store.ts) and replayed in order once the app is online again
+// (start, `online`, focus). The
 // rules - coalescing, what to do with each answer - are in @fma/shared
 // (offline.ts). Sends carry a clientId, so a replay never sends twice.
 // Multiple tabs: queue changes and replays run under a Web Lock.
@@ -10,6 +11,7 @@ import {
   replayDecision,
   type MessageActionRequest,
   type QueuedOperation,
+  type SaveDraftRequest,
   type SendMessageRequest,
 } from '@fma/shared'
 import { computed, reactive } from 'vue'
@@ -126,6 +128,25 @@ export function enqueueSend(request: SendMessageRequest & { clientId: string }):
   })
 }
 
+/**
+ * Queues a draft save (`body`, saved with `force`: the offline edit wins)
+ * or delete (`null`); only the newest one per draft is kept.
+ */
+export function enqueueDraft(
+  accountId: string,
+  draftId: string,
+  body: SaveDraftRequest | null,
+): Promise<void> {
+  return enqueue({
+    kind: 'draft',
+    id: newId(),
+    accountId,
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    request: { draftId, body: body && { ...body, force: true } },
+  })
+}
+
 /** Forgets the in-memory queue (the stored one is gone with clearOfflineData). */
 export function resetOfflineState(): void {
   offlineState.queue = []
@@ -134,6 +155,14 @@ export function resetOfflineState(): void {
 }
 
 async function sendOperation(operation: QueuedOperation): Promise<Response> {
+  if (operation.kind === 'draft') {
+    const { draftId, body } = operation.request
+    return fetch(`/api/drafts/${draftId}`, {
+      method: body ? 'PUT' : 'DELETE',
+      headers: body ? { 'content-type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  }
   const path = operation.kind === 'send' ? '/api/outbox' : '/api/messages/actions'
   return fetch(path, {
     method: 'POST',
@@ -144,9 +173,13 @@ async function sendOperation(operation: QueuedOperation): Promise<Response> {
 
 function dropNotice(operation: QueuedOperation, serverMessage: string | undefined): string {
   const reason = serverMessage ? ` (${serverMessage})` : ''
-  return operation.kind === 'send'
-    ? `Eine offline geschriebene Nachricht konnte nicht gesendet werden${reason}.`
-    : `Eine offline ausgeführte Aktion wurde verworfen${reason}.`
+  if (operation.kind === 'send') {
+    return `Eine offline geschriebene Nachricht konnte nicht gesendet werden${reason}.`
+  }
+  if (operation.kind === 'draft') {
+    return `Ein offline gespeicherter Entwurf konnte nicht übertragen werden${reason}.`
+  }
+  return `Eine offline ausgeführte Aktion wurde verworfen${reason}.`
 }
 
 /**

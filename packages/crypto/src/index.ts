@@ -224,6 +224,11 @@ export function outboxContentAad(outboxId: string): string {
   return `outbox_message.content:${outboxId}`
 }
 
+/** AAD context of a draft's encrypted content (see migration 0016). */
+export function draftContentAad(draftId: string): string {
+  return `draft.content:${draftId}`
+}
+
 /**
  * AAD context of a push subscription's encrypted keys (p256dh/auth,
  * migration 0010), encrypted with the user DEK and bound to the endpoint

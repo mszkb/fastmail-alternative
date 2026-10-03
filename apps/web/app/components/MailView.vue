@@ -30,6 +30,11 @@
 // network (stale-while-revalidate). Actions that cannot reach the server -
 // or while older ones are still queued - stay applied locally and go to the
 // offline queue; queued actions are overlaid on lists loaded later.
+// Drafts (2.8): the compose form autosaves to the server; saved drafts are
+// listed by DraftList at the top of the Drafts folder (their synced IMAP
+// copies are hidden there) and continued by clicking them. A message of
+// the Drafts folder (e.g. written in another client) gets "Bearbeiten",
+// which opens it as a draft. Switching accounts saves an open draft.
 import {
   RequestScope,
   accountDataChanged,
@@ -45,6 +50,7 @@ import type {
   ComposeDraft,
   ComposeIdentity,
   ComposeMode,
+  Draft,
   FolderListResponse,
   FolderSummary,
   MailPerson,
@@ -57,6 +63,8 @@ import type {
   OutboxMessage,
   ThreadDetail,
 } from '@fma/shared'
+import type ComposeForm from './ComposeForm.vue'
+import type DraftList from './DraftList.vue'
 import type OutboxPanel from './OutboxPanel.vue'
 import { cacheGet, cachePut } from '~/utils/offline-store'
 import {
@@ -114,7 +122,10 @@ const compose = ref<{
   accountId: string
   identities: ComposeIdentity[]
   draft: ComposeDraft
+  saved?: Draft
 } | null>(null)
+const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
+const draftList = ref<InstanceType<typeof DraftList> | null>(null)
 let composeCounter = 0
 const composeKey = ref(0)
 const outbox = ref<InstanceType<typeof OutboxPanel> | null>(null)
@@ -163,6 +174,24 @@ function statusInfo(account: AccountOption) {
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
 const inTrash = computed(() => currentFolder.value?.specialUse === 'trash')
+const draftsFolder = computed(
+  () => folders.value.find((f) => f.specialUse === 'drafts' && f.selectable) ?? null,
+)
+const inDraftsFolder = computed(
+  () => !!draftsFolder.value && draftsFolder.value.id === folderId.value,
+)
+// Drafts folder: the IMAP copies of drafts listed by DraftList are hidden.
+const visibleMessages = computed(() => {
+  const hidden = inDraftsFolder.value ? draftList.value?.messageIds : undefined
+  if (!hidden || hidden.size === 0) return messages.value
+  return messages.value.filter((m) => !hidden.has(m.id))
+})
+const detailIsDraft = computed(
+  () =>
+    !!detail.value &&
+    !!draftsFolder.value &&
+    detail.value.folderIds.includes(draftsFolder.value.id),
+)
 const moveTargets = computed(() =>
   folders.value.filter((f) => f.selectable && f.id !== folderId.value),
 )
@@ -258,17 +287,13 @@ function accountUnread(account: AccountOption): number {
 
 /**
  * Switches the active account. An open compose form belongs to the previous
- * account and is discarded (after confirmation). Returns false when the user
- * keeps the current account.
+ * account; its draft is saved and the form closed. Returns false when the
+ * account is kept.
  */
 function switchAccount(id: string): boolean {
   if (!id || id === accountId.value) return true
-  if (
-    compose.value &&
-    !window.confirm('Der begonnene Entwurf wird verworfen. Trotzdem das Konto wechseln?')
-  ) {
-    return false
-  }
+  // The open draft belongs to the previous account: save it, then close.
+  void composeForm.value?.flush()
   compose.value = null
   accountId.value = id
   return true
@@ -331,6 +356,56 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
   compose.value = { accountId: account, identities: list, draft: createDraft(mode, list, original) }
+}
+
+/** Continues a saved draft in the compose form. */
+async function openSavedDraft(saved: Draft): Promise<void> {
+  if (compose.value || saved.accountId !== accountId.value) return
+  const scope = accountScope.token
+  const loaded = await loadIdentities()
+  const list = loaded.length > 0 ? loaded : identities.value
+  if (compose.value || !accountScope.isCurrent(scope)) return
+  composeKey.value = ++composeCounter
+  compose.value = {
+    accountId: saved.accountId,
+    identities: list,
+    draft: {
+      mode: saved.inReplyTo ? 'reply' : 'new',
+      identityId: saved.identityId,
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: saved.subject,
+      text: saved.text,
+      ...(saved.inReplyTo ? { inReplyTo: saved.inReplyTo } : {}),
+      references: saved.references,
+    },
+    saved,
+  }
+}
+
+/**
+ * "Bearbeiten" on a message of the Drafts folder: continues the draft it
+ * belongs to, or turns a draft of another client into one (online only).
+ */
+async function editDraftMessage(): Promise<void> {
+  const message = detail.value
+  if (!message || compose.value) return
+  error.value = ''
+  try {
+    const res = await fetch(`/api/messages/${message.id}/draft`, { method: 'POST' })
+    const body = (await res.json().catch(() => null)) as (Draft & { message?: string }) | null
+    if (!res.ok || !body) {
+      error.value = body?.message ?? `Entwurf konnte nicht geöffnet werden (Fehler ${res.status}).`
+      return
+    }
+    if (message.accountId !== accountId.value) return
+    void draftList.value?.reload()
+    await openSavedDraft(body)
+  } catch (err) {
+    if (!isNetworkError(err)) throw err
+    error.value = 'Entwürfe aus dem Entwürfe-Ordner können nur online bearbeitet werden.'
+  }
 }
 
 function onQueued(message: OutboxMessage): void {
@@ -888,6 +963,12 @@ onBeforeUnmount(() => {
           <span v-if="folder.unreadCount > 0" class="count">{{ folder.unreadCount }}</span>
         </button>
       </nav>
+      <DraftList
+        v-if="accountId && folders.length > 0 && !draftsFolder"
+        ref="draftList"
+        :account-id="accountId"
+        @open="openSavedDraft"
+      />
       <OutboxPanel ref="outbox" :account-id="accountId" />
     </aside>
 
@@ -925,7 +1006,13 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <p v-if="error" class="error">{{ error }}</p>
-      <p v-if="!listLoading && folderId && messages.length === 0" class="hint">
+      <DraftList
+        v-if="accountId && inDraftsFolder"
+        ref="draftList"
+        :account-id="accountId"
+        @open="openSavedDraft"
+      />
+      <p v-if="!listLoading && folderId && visibleMessages.length === 0" class="hint">
         Keine Nachrichten in diesem Ordner.
       </p>
       <p v-if="folders.length === 0 && !error" class="hint">
@@ -933,7 +1020,7 @@ onBeforeUnmount(() => {
       </p>
 
       <ul class="messages">
-        <li v-for="message in messages" :key="message.id">
+        <li v-for="message in visibleMessages" :key="message.id">
           <button
             type="button"
             class="item"
@@ -976,6 +1063,15 @@ onBeforeUnmount(() => {
       <p v-if="detailLoading" class="hint">Wird geladen &hellip;</p>
       <article v-else-if="detail">
         <div class="toolbar" role="toolbar" aria-label="Aktionen">
+          <button
+            v-if="detailIsDraft"
+            type="button"
+            class="primary"
+            title="Entwurf weiter bearbeiten"
+            @click="editDraftMessage"
+          >
+            Bearbeiten
+          </button>
           <button
             type="button"
             class="secondary"
@@ -1094,11 +1190,14 @@ onBeforeUnmount(() => {
 
     <ComposeForm
       v-if="compose"
+      ref="composeForm"
       :key="composeKey"
       :account-id="compose.accountId"
       :identities="compose.identities"
       :draft="compose.draft"
+      :saved="compose.saved"
       @queued="onQueued"
+      @drafts-changed="draftList?.reload()"
       @close="compose = null"
     />
   </div>
@@ -1409,7 +1508,8 @@ button.secondary {
   margin-bottom: 1rem;
 }
 
-.toolbar button.secondary {
+.toolbar button.secondary,
+.toolbar button.primary {
   padding: 0.3rem 0.65rem;
   font-size: 0.85rem;
 }

@@ -33,6 +33,7 @@ erDiagram
     MESSAGE ||--|| MESSAGE_BODY : "hat"
     MESSAGE ||--o{ ATTACHMENT : "hat"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
+    MAIL_ACCOUNT ||--o{ DRAFT : "entwirft"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
 
     USER {
@@ -177,6 +178,18 @@ erDiagram
         text sent_copy "pending | done | skipped | failed"
         timestamptz sent_at
     }
+    DRAFT {
+        uuid id PK "vom Client erzeugt"
+        uuid account_id FK
+        uuid identity_id FK
+        bytea content_enc "An/Cc/Bcc wie getippt, Betreff, Text"
+        int version "je Speichern +1, Konflikterkennung"
+        int imap_version "zuletzt in den Entwürfe-Ordner geladen"
+        text message_id_header "der IMAP-Kopie"
+        uuid source_folder_id FK "Entwurf eines anderen Programms"
+        bigint source_uid
+        timestamptz deleted_at "verworfen/gesendet, Worker räumt auf"
+    }
     JOB {
         bigserial id PK
         text type
@@ -238,18 +251,19 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 ### Versand und Jobs
 
 - **`outbox_message`**: Versandauftrag mit Status und Retry-Zähler (Roadmap 2.7). Gespeichert wird der verschlüsselte Nachrichteninhalt (Absender, Empfänger inkl. Bcc, Betreff, Text als JSON, `content_enc`); der Worker baut daraus bei jedem Versuch die RFC-822-Nachricht mit der einmalig vergebenen `Message-ID`. Der Inhalt wird nach erfolgreichem Versand und Ablage in „Gesendet" gelöscht. `sent_at` markiert die Annahme durch den SMTP-Server – danach wird nie erneut gesendet, nur die Ablage in „Gesendet" wiederholt. `client_id` (optional, UUID des Clients, eindeutig je Konto) macht `POST /api/outbox` wiederholbar: Die Offline-Queue reicht den Versand mit derselben ID nach, ohne doppelt zu senden (Roadmap 4.6).
+- **`draft`**: Entwürfe (Roadmap 2.8) liegen auf dem Server, damit sie Reload und Gerätewechsel überstehen. Eigene Tabelle statt `outbox_message` mit Status `draft`: Entwürfe werden oft gespeichert, dürfen unvollständig sein (ohne Empfänger, halbe Adressen) und lösen keinen Versand aus. Die ID erzeugt der Client, Speichern ist ein idempotentes `PUT /api/drafts/:id` (auch aus der Offline-Queue). Inhalt (An/Cc/Bcc als getippter Text, Betreff, Text) mit dem Konto-DEK verschlüsselt (`content_enc`, AAD `draft.content:<id>`), `In-Reply-To`/`References` im Klartext wie bei `message`. `version` steigt bei jedem Speichern; ein Speichern auf Basis einer veralteten Version (anderes Gerät hat inzwischen gespeichert) wird mit `409` und der aktuellen Fassung beantwortet, außer mit `force` (letzter Schreiber gewinnt, nach Rückfrage im UI). Der Worker-Job `draft_sync` spiegelt den Entwurf in den Entwürfe-Ordner des Kontos (APPEND mit `\Draft`, je Version eine neue Message-ID `<draft-id>.<version>@domain`, ältere Kopien per UID gelöscht – gefunden über die Entwurfs-ID in der Message-ID); Autosaves werden dafür 15 s gesammelt. `source_*` zeigt auf den Entwurf eines anderen Programms, der hier zum Bearbeiten geöffnet wurde und beim ersten Hochladen ersetzt wird. Verwerfen und Senden (`POST /api/outbox` mit `draftId`) setzen `deleted_at` und leeren den Inhalt; der Worker entfernt die IMAP-Kopie und löscht dann die Zeile.
 - **`job`**: **eine eigene, einfache Tabelle** (Vorschlag in ADR-0003). Worker holen Jobs mit `SELECT … FOR UPDATE SKIP LOCKED`. `account_id` dient der Isolation und den Rate Limits. **Der Payload enthält nur IDs, keine Inhalte**, und `last_error` wird vor dem Speichern redacted.
 
 ## Verschlüsselung
 
 Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt nur, was Sync, Threading und Sortierung technisch brauchen.**
 
-| Klartext                                     | Verschlüsselt                           |
-| -------------------------------------------- | --------------------------------------- |
-| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet   |
-| `Message-ID`, `In-Reply-To`, `References`    | Body, Anhang-Dateinamen, Anhang-Inhalte |
-| Kontoserver (Host/Port), Kontostatus         | Zugangsdaten, Outbox-Nachrichten        |
-|                                              | TOTP-Secret, Push-Subscription-Keys     |
+| Klartext                                     | Verschlüsselt                              |
+| -------------------------------------------- | ------------------------------------------ |
+| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet      |
+| `Message-ID`, `In-Reply-To`, `References`    | Body, Anhang-Dateinamen, Anhang-Inhalte    |
+| Kontoserver (Host/Port), Kontostatus         | Zugangsdaten, Outbox-Nachrichten, Entwürfe |
+|                                              | TOTP-Secret, Push-Subscription-Keys        |
 
 **Verfahren, einfach gehalten:**
 

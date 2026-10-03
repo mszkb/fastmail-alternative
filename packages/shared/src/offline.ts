@@ -7,13 +7,16 @@
  * Pure logic (no IndexedDB, no fetch) so native clients follow the same
  * rules and everything is testable:
  * - queueOperation: appends to the queue and coalesces flag changes
- *   (read -> unread -> read is sent once as "read").
+ *   (read -> unread -> read is sent once as "read") and draft saves (only
+ *   the newest save or delete of a draft is kept, a send drops the queued
+ *   saves of its draft).
  * - replayDecision: what to do with a replayed operation given the HTTP
  *   status (done, retry later, drop with a notice, session gone).
  * - applyMessageAction / overlayPendingActions: the optimistic effect of
  *   (queued) actions on a message list, also after a reload.
  * - selectEvictions: LRU eviction that keeps the cache within its limits.
  */
+import type { SaveDraftRequest } from './drafts'
 import type { MessageAction, MessageActionRequest, MessageFlags, SendMessageRequest } from './mail'
 
 interface QueuedBase {
@@ -36,7 +39,13 @@ export interface QueuedSend extends QueuedBase {
   request: SendMessageRequest & { clientId: string }
 }
 
-export type QueuedOperation = QueuedMessageAction | QueuedSend
+export interface QueuedDraft extends QueuedBase {
+  kind: 'draft'
+  /** `body` null deletes the draft; otherwise saved with `force` (last write wins). */
+  request: { draftId: string; body: SaveDraftRequest | null }
+}
+
+export type QueuedOperation = QueuedMessageAction | QueuedSend | QueuedDraft
 
 /** Actions that only toggle a flag; the last one per message wins. */
 const FLAG_GROUP: Partial<Record<MessageAction, 'seen' | 'flagged'>> = {
@@ -61,6 +70,22 @@ export function queueOperation(
   queue: readonly QueuedOperation[],
   operation: QueuedOperation,
 ): QueuedOperation[] {
+  if (operation.kind === 'draft') {
+    // Only the newest state of a draft matters (PUT is a full replace).
+    const id = operation.request.draftId
+    return [
+      ...queue.filter((entry) => entry.kind !== 'draft' || entry.request.draftId !== id),
+      operation,
+    ]
+  }
+  if (operation.kind === 'send' && operation.request.draftId) {
+    // Sending deletes the draft anyway: its queued saves are obsolete.
+    const id = operation.request.draftId
+    return [
+      ...queue.filter((entry) => entry.kind !== 'draft' || entry.request.draftId !== id),
+      operation,
+    ]
+  }
   if (operation.kind !== 'action') return [...queue, operation]
   const group = FLAG_GROUP[operation.request.action]
   if (!group) return [...queue, operation]

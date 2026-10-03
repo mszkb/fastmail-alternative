@@ -13,6 +13,9 @@
  *   the client once per message) makes POST /api/outbox repeatable - the
  *   offline queue replays it, and a repeat with a known id answers 200 with
  *   the existing entry instead of sending again.
+ * - Drafts (roadmap 2.8): `draftId` names the draft the message was written
+ *   in; it is deleted in the same transaction (the worker then removes its
+ *   copy from the IMAP Drafts folder).
  *
  * Ownership: everything is scoped via mail_account.user_id; foreign or
  * unknown ids answer 404. Decrypted content is never logged.
@@ -20,7 +23,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify'
 import { decryptField, encryptField, outboxContentAad, unwrapAccountKey } from '@fma/crypto'
-import { enqueueJob } from '@fma/db/job-queue'
+import { enqueueDraftSync, enqueueJob } from '@fma/db/job-queue'
 import {
   OUTBOX_ERROR_MESSAGES,
   OUTBOX_LIMITS,
@@ -69,6 +72,7 @@ type ParsedRequest = Omit<SendMessageRequest, 'to' | 'cc' | 'bcc'> & {
   bcc: MailPerson[]
   references: string[]
   clientId?: string
+  draftId?: string
 }
 
 /** Removes line breaks (header injection) and trims. */
@@ -138,6 +142,12 @@ export function parseSendRequest(body: unknown): ParsedRequest | string {
   ) {
     return 'Ungültige Client-ID.'
   }
+  if (
+    input.draftId !== undefined &&
+    (typeof input.draftId !== 'string' || !UUID_RE.test(input.draftId))
+  ) {
+    return 'Ungültige Entwurfs-ID.'
+  }
   return {
     accountId: input.accountId.toLowerCase(),
     identityId: input.identityId?.toLowerCase(),
@@ -149,6 +159,7 @@ export function parseSendRequest(body: unknown): ParsedRequest | string {
     inReplyTo: input.inReplyTo,
     references,
     clientId: input.clientId?.toLowerCase(),
+    draftId: input.draftId?.toLowerCase(),
   }
 }
 
@@ -312,6 +323,15 @@ export async function outboxRoutes(app: FastifyInstance): Promise<void> {
           accountId: account.id,
           payload: { ...payload },
         })
+        if (parsed.draftId) {
+          // The draft is done: delete it, the worker removes its IMAP copy.
+          const { rowCount } = await client.query(
+            `UPDATE draft SET deleted_at = now(), content_enc = NULL, updated_at = now()
+             WHERE id = $1 AND account_id = $2 AND deleted_at IS NULL`,
+            [parsed.draftId, account.id],
+          )
+          if (rowCount) await enqueueDraftSync(client, account.id, parsed.draftId)
+        }
         await client.query('COMMIT')
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {})

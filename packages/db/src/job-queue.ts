@@ -150,3 +150,32 @@ export async function failJob(
     [jobId, String(backoff), safeError],
   )
 }
+
+/**
+ * Enqueues the draft_sync job of a draft (roadmap 2.8), coalesced: while a
+ * job for the draft is still queued, no second one is added - its run_at
+ * is only moved forward when this call asks for an earlier run. Autosaves
+ * pass a delay, so a burst of saves ends in a single IMAP upload; delete
+ * and send pass 0. A job that is already running does not count, since it
+ * may have read the draft before this change.
+ */
+export async function enqueueDraftSync(
+  db: pg.Pool | pg.PoolClient,
+  accountId: string,
+  draftId: string,
+  delayMs = 0,
+): Promise<void> {
+  await db.query(
+    `WITH moved AS (
+       UPDATE job SET run_at = LEAST(run_at, now() + ($3 || ' milliseconds')::interval)
+       WHERE type = 'draft_sync' AND account_id = $1::uuid AND state = 'queued'
+         AND payload->>'draftId' = $2::text
+       RETURNING id
+     )
+     INSERT INTO job (type, account_id, payload, run_at)
+     SELECT 'draft_sync', $1::uuid, jsonb_build_object('draftId', $2::text),
+            now() + ($3 || ' milliseconds')::interval
+     WHERE NOT EXISTS (SELECT 1 FROM moved)`,
+    [accountId, draftId, String(Math.max(0, Math.round(delayMs)))],
+  )
+}

@@ -208,6 +208,12 @@ export interface SendMessageRequest {
    * queued the first time instead of sending it again.
    */
   clientId?: string
+  /**
+   * Draft this message was written in (roadmap 2.8): it is deleted with
+   * the send (also its copy in the IMAP Drafts folder). Unknown ids are
+   * ignored, so a replayed send never fails because of its draft.
+   */
+  draftId?: string
 }
 
 /** Stable error codes of a failed send; `message` carries the German text. */

@@ -23,6 +23,7 @@ import {
 } from './account-health'
 import { runWithJobSignal } from './job-context'
 import { runAccountCleanup } from './jobs/account-cleanup'
+import { runDraftSync } from './jobs/draft-sync'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
 import { runMessageSync } from './jobs/message-sync'
@@ -37,6 +38,7 @@ export const JOB_TYPES = [
   'message_sync',
   'message_action',
   'send_message',
+  'draft_sync',
   'account_cleanup',
   'push_notify',
 ]
@@ -44,9 +46,10 @@ export const JOB_TYPES = [
  * Claimed before all other types: user actions are small and interactive,
  * and writing them back before the next sync keeps the sync from briefly
  * reverting optimistic changes (see jobs/message-action). Sending is
- * user-facing too and must not wait behind a long initial sync.
+ * user-facing too and must not wait behind a long initial sync, and so is
+ * mirroring drafts (small, removes the copy of a sent draft promptly).
  */
-export const PRIORITY_JOB_TYPES = ['message_action', 'send_message']
+export const PRIORITY_JOB_TYPES = ['message_action', 'send_message', 'draft_sync']
 
 const DEFAULT_CONCURRENCY = 4
 /** Hard timeout per job type; message_sync covers a bounded initial sync. */
@@ -55,6 +58,7 @@ const JOB_TIMEOUT_MS: Record<string, number> = {
   message_sync: 15 * 60_000,
   message_action: 3 * 60_000,
   send_message: 5 * 60_000,
+  draft_sync: 2 * 60_000,
   account_cleanup: 5 * 60_000,
   push_notify: 2 * 60_000,
 }
@@ -122,6 +126,13 @@ async function processJob(
       })
       await completeJob(pool, jobId)
       log.info({ jobId, accountId, outcome }, 'send_message done')
+      break
+    }
+    case 'draft_sync': {
+      if (!accountId) throw new Error('draft_sync job without account_id')
+      const outcome = await runDraftSync(pool, accountId, job.payload)
+      await completeJob(pool, jobId)
+      log.info({ jobId, accountId, outcome }, 'draft_sync done')
       break
     }
     case 'account_cleanup': {
