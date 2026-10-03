@@ -17,6 +17,11 @@
  *   in; it is deleted in the same transaction (the worker then removes its
  *   copy from the IMAP Drafts folder).
  *
+ * - Attachments (roadmap 5.3): `attachmentIds` names uploads of the same
+ *   account (./attachments); they are bound to the new message in the same
+ *   transaction (each upload once), limited in count and total size
+ *   (MAX_ATTACHMENTS_TOTAL_BYTES).
+ *
  * Ownership: everything is scoped via mail_account.user_id; foreign or
  * unknown ids answer 404. Decrypted content is never logged.
  */
@@ -25,7 +30,9 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify'
 import { decryptField, encryptField, outboxContentAad, unwrapAccountKey } from '@fma/crypto'
 import { enqueueDraftSync, enqueueJob } from '@fma/db/job-queue'
 import {
+  ATTACHMENT_LIMIT_DEFAULTS,
   OUTBOX_ERROR_MESSAGES,
+  formatByteSize,
   OUTBOX_LIMITS,
   isValidEmailAddress,
   isValidMessageId,
@@ -40,6 +47,7 @@ import {
   type SentCopyStatus,
 } from '@fma/shared'
 import { requireAuth } from '../auth/routes'
+import { attachmentLimits } from './attachments'
 import { IDENTITY_IS_DEFAULT } from './identities'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -73,6 +81,7 @@ type ParsedRequest = Omit<SendMessageRequest, 'to' | 'cc' | 'bcc'> & {
   references: string[]
   clientId?: string
   draftId?: string
+  attachmentIds: string[]
 }
 
 /** Removes line breaks (header injection) and trims. */
@@ -148,6 +157,16 @@ export function parseSendRequest(body: unknown): ParsedRequest | string {
   ) {
     return 'Ungültige Entwurfs-ID.'
   }
+  const attachmentIds = input.attachmentIds ?? []
+  if (
+    !Array.isArray(attachmentIds) ||
+    !attachmentIds.every((id) => typeof id === 'string' && UUID_RE.test(id))
+  ) {
+    return 'Ungültige Anhänge.'
+  }
+  if (attachmentIds.length > ATTACHMENT_LIMIT_DEFAULTS.maxCount) {
+    return `Höchstens ${ATTACHMENT_LIMIT_DEFAULTS.maxCount} Anhänge sind erlaubt.`
+  }
   return {
     accountId: input.accountId.toLowerCase(),
     identityId: input.identityId?.toLowerCase(),
@@ -160,6 +179,7 @@ export function parseSendRequest(body: unknown): ParsedRequest | string {
     references,
     clientId: input.clientId?.toLowerCase(),
     draftId: input.draftId?.toLowerCase(),
+    attachmentIds: [...new Set(attachmentIds.map((id: string) => id.toLowerCase()))],
   }
 }
 
@@ -317,6 +337,28 @@ export async function outboxRoutes(app: FastifyInstance): Promise<void> {
             parsed.clientId ?? null,
           ],
         )
+        if (parsed.attachmentIds.length > 0) {
+          // Each upload belongs to one message only (outbox_id IS NULL).
+          const { rows: attached } = await client.query<{ size_bytes: number }>(
+            `UPDATE attachment_upload SET outbox_id = $1
+             WHERE account_id = $2 AND outbox_id IS NULL AND id = ANY($3::uuid[])
+             RETURNING size_bytes`,
+            [id, account.id, parsed.attachmentIds],
+          )
+          const total = attached.reduce((sum, row) => sum + row.size_bytes, 0)
+          const { maxTotalBytes } = attachmentLimits()
+          if (attached.length !== parsed.attachmentIds.length || total > maxTotalBytes) {
+            await client.query('ROLLBACK')
+            if (attached.length !== parsed.attachmentIds.length) {
+              await reply.code(400).send({ message: 'Anhang nicht gefunden.' })
+            } else {
+              await reply.code(413).send({
+                message: `Die Anhänge sind zusammen zu groß (höchstens ${formatByteSize(maxTotalBytes)}).`,
+              })
+            }
+            return
+          }
+        }
         const payload: SendMessageJobPayload = { outboxId: id }
         await enqueueJob(client, {
           type: 'send_message',

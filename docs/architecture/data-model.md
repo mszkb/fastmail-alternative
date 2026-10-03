@@ -31,7 +31,7 @@ erDiagram
     MESSAGE ||--o{ MESSAGE_LOCATION : "liegt in"
     FOLDER ||--o{ MESSAGE_LOCATION : "enthält"
     MESSAGE ||--|| MESSAGE_BODY : "hat"
-    MESSAGE ||--o{ ATTACHMENT : "hat"
+    OUTBOX_MESSAGE ||--o{ ATTACHMENT_UPLOAD : "hat"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
     MAIL_ACCOUNT ||--o{ DRAFT : "entwirft"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
@@ -157,14 +157,14 @@ erDiagram
         bytea text_plain_enc
         timestamptz fetched_at
     }
-    ATTACHMENT {
+    ATTACHMENT_UPLOAD {
         uuid id PK
-        uuid message_id FK
+        uuid account_id FK
+        uuid outbox_id FK "NULL bis zum Absenden"
         bytea filename_enc
         text content_type
         int size_bytes
-        text imap_part "BODYSTRUCTURE-Part"
-        text storage_ref "Datei im Volume, verschlüsselt"
+        bytea content_enc "verschlüsselt, bis Versand + Ablage"
     }
     OUTBOX_MESSAGE {
         uuid id PK
@@ -230,7 +230,8 @@ Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server
 - **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs). `metadata_version` gibt an, mit welchem Stand der Sync-Logik die Metadaten abgeleitet wurden; veraltete Zeilen leitet der Sync in begrenzten Batches neu ab (bevorzugt aus der gespeicherten Rohmail, sonst per IMAP).
 - **`message_location`**: `(folder_id, uidvalidity, uid)`, eindeutig. Eine Nachricht kann in mehreren Ordnern liegen (Gmail-Labels, Kopien). **Flags liegen hier**, so wie IMAP sie pro Mailbox führt. Kein zusätzliches aggregiertes Feld; die Ansicht zeigt die Flags des Ordners, in dem man gerade ist.
 - **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)). Rohmails über `MAX_RAW_MESSAGE_BYTES` (Standard 20 MB) oder leere werden nicht gespeichert; sie bekommen eine `message_body`-Zeile ohne `storage_ref` mit `skip_reason` (`too_large`/`empty`), damit der Sync sie nicht bei jedem Lauf erneut lädt.
-- **`attachment`**: Metadaten aus `BODYSTRUCTURE`, Inhalt als verschlüsselte Datei im Volume.
+- **Empfangene Anhänge** (Roadmap 5.3): keine eigene Tabelle. Liste (Name, Typ, Größe) und Inhalt leitet die API beim Abruf aus der verschlüsselten Rohmail ab (MIME-Parser gestreamt, Inhalte anderer Teile werden verworfen), wie beim HTML. Dadurch gibt es keine weitere Kopie, keinen Klartext-Dateinamen in der DB und keinen Backfill für bestehende Mails. `message.has_attachments` (Multipart laut `BODYSTRUCTURE`) ist nur ein Hinweis, ob die Liste geladen wird.
+- **`attachment_upload`** (Migration 0017): Anhang zum Versenden, beim Verfassen hochgeladen. Dateiname und Inhalt mit dem Konto-DEK verschlüsselt (AAD `attachment_upload.filename|content:<id>`). Liegt in der DB statt im Volume, weil die API das Volume nur lesend einbindet; Größe begrenzt (`MAX_ATTACHMENT_BYTES`, `MAX_ATTACHMENTS_TOTAL_BYTES`). `POST /api/outbox` bindet Uploads über `outbox_id` an genau eine Nachricht; der Worker löscht sie, sobald die Nachricht samt Kopie in „Gesendet" erledigt ist. Nicht gesendete Uploads löscht der Client beim Schließen/Verwerfen; verwaiste Reste räumt später der Cleanup-Job auf (Roadmap 5.5).
 - **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 
 Archivieren und Verschieben ändern nur `message_location`, nicht `message`.

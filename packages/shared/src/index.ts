@@ -5,6 +5,7 @@
  * `@fma` scope once the project has a final product name.
  */
 
+export * from './attachments'
 export * from './badge'
 export * from './compose'
 export * from './config-export'

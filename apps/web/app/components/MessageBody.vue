@@ -139,6 +139,7 @@ watch(
       <pre v-if="message.text !== null" class="body">{{ message.text }}</pre>
       <p v-else class="hint">Inhalt wird noch synchronisiert &hellip;</p>
     </template>
+    <MessageAttachments v-if="message.hasAttachments" :message-id="message.id" />
   </div>
 </template>
 

@@ -9,6 +9,7 @@ import { draftRoutes } from './mail/drafts'
 import { folderRoutes } from './mail/folders'
 import { identityRoutes } from './mail/identities'
 import { messageActionRoutes } from './mail/message-actions'
+import { attachmentRoutes } from './mail/attachments'
 import { messageHtmlRoutes } from './mail/message-html'
 import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
@@ -91,6 +92,7 @@ export function buildApp({ logger = true, logStream }: AppOptions = {}): Fastify
   app.register(folderRoutes)
   app.register(messageActionRoutes)
   app.register(messageHtmlRoutes)
+  app.register(attachmentRoutes)
   app.register(outboxRoutes)
   app.register(draftRoutes)
   app.register(searchRoutes)

@@ -229,6 +229,11 @@ export function draftContentAad(draftId: string): string {
   return `draft.content:${draftId}`
 }
 
+/** AAD contexts of an uploaded attachment (see migration 0017). */
+export function uploadFieldAad(field: 'filename' | 'content', uploadId: string): string {
+  return `attachment_upload.${field}:${uploadId}`
+}
+
 /**
  * AAD context of a push subscription's encrypted keys (p256dh/auth,
  * migration 0010), encrypted with the user DEK and bound to the endpoint
