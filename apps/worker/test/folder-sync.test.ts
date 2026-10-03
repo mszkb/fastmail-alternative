@@ -96,7 +96,8 @@ describe.skipIf(!databaseUrl || !greenmailHost)('folder_sync job', () => {
     )
     const row = rows[0]
     if (!row) throw new Error('INBOX folder row missing')
-    expect(row.uidvalidity).toBeTruthy()
+    // uidvalidity belongs to message_sync (changes must stay detectable).
+    expect(row.uidvalidity).toBeNull()
     expect(Number(row.uidnext)).toBeGreaterThan(0)
     expect(row.last_synced_at).toBeTruthy()
   })

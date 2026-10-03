@@ -7,7 +7,7 @@
  * values, locations, body files in the mail-data directory, idempotency.
  */
 import { randomBytes, randomUUID } from 'node:crypto'
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -617,5 +617,149 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       [accountId],
     )
     expect(remaining.rows[0].count).toBe(2)
+  })
+
+  it('discards stale locations after a UIDVALIDITY change without mixing up bodies', async () => {
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const textOf = async (messageId: string): Promise<string | null> => {
+      const { rows } = await pool.query<{ text_plain_enc: Buffer | null }>(
+        'SELECT text_plain_enc FROM message_body WHERE message_id = $1',
+        [messageId],
+      )
+      const enc = rows[0]?.text_plain_enc
+      return enc ? decryptField(ctx.dek, enc.toString('utf8'), `message.text:${messageId}`) : null
+    }
+    const { rows: before } = await pool.query<{
+      message_id: string
+      uid: string
+      uidvalidity: string
+    }>(
+      `SELECT message_id::text, uid::text, uidvalidity::text FROM message_location
+       WHERE folder_id = $1 ORDER BY uid`,
+      [inboxFolderId],
+    )
+    expect(before).toHaveLength(2)
+    const [a, b] = [before[0]!, before[1]!]
+    const textA = await textOf(a.message_id)
+    expect(textA).toMatch(/Hallo von Testmail/)
+
+    // Simulate a UIDVALIDITY reset on the server: everything stored refers to
+    // an older uidvalidity, and the old UIDs point at different messages now.
+    const stale = (BigInt(a.uidvalidity) - 1n).toString()
+    await pool.query(
+      `UPDATE message_location SET uidvalidity = $2,
+         uid = CASE WHEN message_id = $3 THEN $4::bigint ELSE $5::bigint END
+       WHERE folder_id = $1`,
+      [inboxFolderId, stale, a.message_id, b.uid, '999999'],
+    )
+    await pool.query('UPDATE folder SET uidvalidity = $2 WHERE id = $1', [inboxFolderId, stale])
+    // A's body was never downloaded (interrupted sync) ...
+    await pool.query('DELETE FROM message_body WHERE message_id = $1', [a.message_id])
+    // ... and a message that is gone on the server only has a stale location
+    // whose old UID now belongs to A.
+    const ghostId = randomUUID()
+    const empty = (field: string) =>
+      Buffer.from(encryptField(ctx.dek, '', `message.${field}:${ghostId}`), 'utf8')
+    await pool.query(
+      `INSERT INTO message (id, account_id, message_id_header, subject_enc, from_enc,
+         recipients_enc, snippet_enc)
+       VALUES ($1, $2, '<ghost@example.org>', $3, $4, $5, $6)`,
+      [ghostId, accountId, empty('subject'), empty('from'), empty('recipients'), empty('snippet')],
+    )
+    await pool.query(
+      `INSERT INTO message_location (message_id, folder_id, uidvalidity, uid)
+       VALUES ($1, $2, $3, $4)`,
+      [ghostId, inboxFolderId, stale, a.uid],
+    )
+
+    // folder_sync runs before every message_sync and must not hide the change.
+    await runFolderSync(pool, accountId)
+    await runMessageSync(pool, accountId, inboxFolderId)
+
+    const { rows: after } = await pool.query<{
+      message_id: string
+      uid: string
+      uidvalidity: string
+    }>(
+      `SELECT message_id::text, uid::text, uidvalidity::text FROM message_location
+       WHERE folder_id = $1 ORDER BY uid`,
+      [inboxFolderId],
+    )
+    // One location per message, all with the server's uidvalidity and UIDs.
+    expect(after).toEqual(before)
+    const ghost = await pool.query('SELECT 1 FROM message WHERE id = $1', [ghostId])
+    expect(ghost.rowCount).toBe(0)
+    // A's body is A's (not the message its stale UID pointed at).
+    expect(await textOf(a.message_id)).toBe(textA)
+    const folder = await pool.query<{ uidvalidity: string; unread_count: number }>(
+      'SELECT uidvalidity::text, unread_count FROM folder WHERE id = $1',
+      [inboxFolderId],
+    )
+    expect(folder.rows[0]!.uidvalidity).toBe(a.uidvalidity)
+  })
+
+  it('stores a skip marker for bodies over the size limit instead of retrying', async () => {
+    const { rows } = await pool.query<{ message_id: string }>(
+      'SELECT message_id::text FROM message_location WHERE folder_id = $1 ORDER BY uid LIMIT 1',
+      [inboxFolderId],
+    )
+    const messageId = rows[0]!.message_id
+    await pool.query('DELETE FROM message_body WHERE message_id = $1', [messageId])
+    await rm(path.join(mailDataDir, accountId, messageId), { recursive: true, force: true })
+    // Force the body backfill path: one new mail arrives.
+    const transporter = nodemailer.createTransport({
+      host: greenmailHost,
+      port: Number(process.env.GREENMAIL_SMTP_PORT),
+      secure: false,
+      tls: { rejectUnauthorized: false },
+    })
+    await transporter.sendMail({
+      from: 'sender-four@example.com',
+      to: greenmailUser,
+      subject: 'Vierte Testmail',
+      text: 'Hallo von Testmail vier.',
+    })
+    transporter.close()
+
+    process.env.MAX_RAW_MESSAGE_BYTES = '100'
+    try {
+      let count = 0
+      for (let attempt = 0; attempt < 10 && count < 3; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        await runMessageSync(pool, accountId, inboxFolderId)
+        const messages = await pool.query(
+          'SELECT count(*)::int AS count FROM message WHERE account_id = $1',
+          [accountId],
+        )
+        count = messages.rows[0].count
+      }
+      expect(count).toBe(3)
+    } finally {
+      delete process.env.MAX_RAW_MESSAGE_BYTES
+    }
+
+    const { rows: markers } = await pool.query<{
+      storage_ref: string | null
+      skip_reason: string | null
+    }>(
+      `SELECT mb.storage_ref, mb.skip_reason FROM message_body mb
+       JOIN message_location ml ON ml.message_id = mb.message_id
+       WHERE ml.folder_id = $1 AND mb.skip_reason IS NOT NULL`,
+      [inboxFolderId],
+    )
+    // The backfilled one and the new one: marked, nothing stored.
+    expect(markers).toHaveLength(2)
+    expect(
+      markers.every((row) => row.storage_ref === null && row.skip_reason === 'too_large'),
+    ).toBe(true)
+    expect(await readdir(path.join(mailDataDir, accountId, messageId)).catch(() => [])).toEqual([])
+
+    // Marked bodies are not downloaded again (even without the limit now).
+    await runMessageSync(pool, accountId, inboxFolderId)
+    const still = await pool.query(
+      'SELECT 1 FROM message_body WHERE message_id = $1 AND skip_reason IS NOT NULL',
+      [messageId],
+    )
+    expect(still.rowCount).toBe(1)
   })
 })

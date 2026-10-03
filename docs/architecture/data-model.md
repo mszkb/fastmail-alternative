@@ -150,7 +150,8 @@ erDiagram
     }
     MESSAGE_BODY {
         uuid message_id PK
-        text storage_ref "Datei im Volume: verschlüsselte Rohmail"
+        text storage_ref "Datei im Volume: verschlüsselte Rohmail (NULL = übersprungen)"
+        text skip_reason
         bytea html_sanitized_enc "aufbereitet für die Anzeige"
         bytea text_plain_enc
         timestamptz fetched_at
@@ -207,7 +208,7 @@ erDiagram
 ### Ordner
 
 - **`folder`**: ein IMAP-Mailbox-Eintrag. Ordnerrollen (Roadmap 3.3): `special_use_detected` setzt der Sync aus RFC 6154 bzw. der Namensheuristik (deutsche/englische Ordnernamen, nur für Rollen ohne Attribut), `special_use_override` der Benutzer; `special_use` ist die daraus aufgelöste effektive Rolle (Override vor Erkennung, je Konto höchstens ein Ordner pro Rolle), die alle Aktionen verwenden.
-- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners verworfen und neu synchronisiert.
+- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). `folder.uidvalidity` ist der Wert, mit dem `message_sync` die Orte zuletzt synchronisiert hat – nur `message_sync` schreibt ihn, `folder_sync` nicht (sonst bliebe eine Änderung unbemerkt). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners mit anderer `uidvalidity` verworfen, die Nachrichten unter ihren neuen UIDs neu geholt (per Message-ID wieder verknüpft) und Nachrichten ohne verbleibenden Ort gelöscht. Inhalte werden immer per UID (`UID FETCH`) geholt, nie per Sequenznummer – ein paralleles EXPUNGE könnte sonst Inhalte vertauschen.
 
 ### Nachrichten
 
@@ -215,7 +216,7 @@ Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server
 
 - **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs). `metadata_version` gibt an, mit welchem Stand der Sync-Logik die Metadaten abgeleitet wurden; veraltete Zeilen leitet der Sync in begrenzten Batches neu ab (bevorzugt aus der gespeicherten Rohmail, sonst per IMAP).
 - **`message_location`**: `(folder_id, uidvalidity, uid)`, eindeutig. Eine Nachricht kann in mehreren Ordnern liegen (Gmail-Labels, Kopien). **Flags liegen hier**, so wie IMAP sie pro Mailbox führt. Kein zusätzliches aggregiertes Feld; die Ansicht zeigt die Flags des Ordners, in dem man gerade ist.
-- **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)).
+- **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)). Rohmails über `MAX_RAW_MESSAGE_BYTES` (Standard 20 MB) oder leere werden nicht gespeichert; sie bekommen eine `message_body`-Zeile ohne `storage_ref` mit `skip_reason` (`too_large`/`empty`), damit der Sync sie nicht bei jedem Lauf erneut lädt.
 - **`attachment`**: Metadaten aus `BODYSTRUCTURE`, Inhalt als verschlüsselte Datei im Volume.
 - **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 

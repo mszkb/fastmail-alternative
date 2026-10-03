@@ -1,7 +1,8 @@
 /**
  * folder_sync job (roadmap 2.2 step 1): lists the IMAP mailboxes of an
- * account and upserts them into the folder table, including per-folder sync
- * state (uidvalidity, uidnext, highestmodseq) and RFC 6154 special-use flags.
+ * account and upserts them into the folder table, including per-folder
+ * status (uidnext, unread count) and RFC 6154 special-use flags. The
+ * folder's uidvalidity is written by message_sync only.
  *
  * Folder roles (roadmap 3.3): the detected role (SPECIAL-USE attribute, else
  * German/English name heuristic) goes to special_use_detected; the
@@ -55,30 +56,28 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
     )
 
     for (const mailbox of mailboxes) {
-      // Per-folder status: uidnext/uidvalidity/unread counts.
+      // Per-folder status: uidnext/unread counts. uidvalidity is NOT stored
+      // here: folder.uidvalidity is the one message_sync synced the
+      // locations with, so it can detect a change (it is the only writer).
       let uidnext: string | null = null
-      let uidvalidity: string | null = null
       let unread: number | null = null
       const status = await client.status(mailbox.path, {
         uidNext: true,
-        uidValidity: true,
         unseen: true,
       })
       if (status) {
         uidnext = status.uidNext != null ? String(status.uidNext) : null
-        uidvalidity = status.uidValidity != null ? String(status.uidValidity) : null
         unread = status.unseen ?? null
       }
 
       await pool.query(
         `INSERT INTO folder
-           (account_id, path, delimiter, special_use_detected, uidvalidity, uidnext,
+           (account_id, path, delimiter, special_use_detected, uidnext,
             unread_count, last_synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+         VALUES ($1, $2, $3, $4, $5, $6, now())
          ON CONFLICT (account_id, path) DO UPDATE SET
            delimiter = EXCLUDED.delimiter,
            special_use_detected = EXCLUDED.special_use_detected,
-           uidvalidity = EXCLUDED.uidvalidity,
            uidnext = EXCLUDED.uidnext,
            unread_count = EXCLUDED.unread_count,
            last_synced_at = now()`,
@@ -87,7 +86,6 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
           mailbox.path,
           mailbox.delimiter ?? null,
           detected.get(mailbox.path) ?? null,
-          uidvalidity,
           uidnext,
           unread,
         ],

@@ -48,7 +48,8 @@ import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
 
 const MESSAGE_SYNC_LIMIT = 200
-const MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024 // skip bodies above 20 MB
+/** Raw messages above this size are not stored (MAX_RAW_MESSAGE_BYTES, default 20 MB). */
+const DEFAULT_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024
 const MAX_TEXT_PLAIN_BYTES = 100 * 1024
 /** Newest References kept per message (threading needs only a few). */
 const MAX_REFERENCES = 100
@@ -89,7 +90,6 @@ interface EnvelopeAddress {
 
 interface FetchMessage {
   uid: number
-  seq: number
   modseq?: bigint
   flags: Set<string>
   envelope?: {
@@ -110,6 +110,11 @@ interface FetchMessage {
 
 function mailDataDir(): string {
   return process.env.MAIL_DATA_DIR ?? '/app/mail-data'
+}
+
+export function maxRawMessageBytes(): number {
+  const value = Number(process.env.MAX_RAW_MESSAGE_BYTES)
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_RAW_MESSAGE_BYTES
 }
 
 /** Deterministic fallback id when the server/message has no Message-ID. */
@@ -269,16 +274,31 @@ export async function runMessageSync(
     ).mailbox
     if (!selected) throw new Error('mailbox could not be selected')
 
+    // folder.uidvalidity is the uidvalidity the stored locations were synced
+    // with; only this job writes it (folder_sync must not, or a change would
+    // go unnoticed).
     const serverUidvalidity = BigInt(selected.uidValidity ?? 0)
     const dbUidvalidity = folder.uidvalidity ? BigInt(folder.uidvalidity) : null
 
-    // UIDVALIDITY changed (or first sync): old locations for this folder are
-    // meaningless and get discarded; messages are re-fetched as new UIDs.
-    if (dbUidvalidity !== null && dbUidvalidity !== serverUidvalidity) {
-      await pool.query('DELETE FROM message_location WHERE folder_id = $1', [folderId])
+    // Locations of any other uidvalidity are meaningless (their UIDs may name
+    // different messages now) and get discarded; the messages are re-fetched
+    // under their new UIDs and re-linked by Message-ID. Messages left without
+    // a location are removed after the fetch. Placeholders of optimistic
+    // moves (uid < 0) are not server UIDs and stay.
+    const { rows: staleLocations } = await pool.query<{ message_id: string }>(
+      `DELETE FROM message_location
+       WHERE folder_id = $1 AND uidvalidity <> $2 AND uid > 0
+       RETURNING message_id::text`,
+      [folderId, serverUidvalidity.toString()],
+    )
+    if (staleLocations.length > 0) {
+      log.warn(
+        { accountId, folderId, locationsRemoved: staleLocations.length },
+        'uidvalidity changed, stale locations discarded',
+      )
     }
 
-    // List all UIDs (cheap, headers only), then fetch by EXPLICIT uid list:
+    // List all UIDs (cheap, flags only), then fetch by EXPLICIT uid list:
     // range strings like "22:*" are unreliable across servers (GreenMail
     // omits the highest message even though RFC 3501 mandates including it,
     // and Dovecot rejects FETCH 1:* on an EMPTY mailbox with BAD
@@ -323,44 +343,29 @@ export async function runMessageSync(
       // any other command (download) runs - IMAP pipelines one command at a
       // time, calling download() inside the loop would deadlock.
       //
-      // Sequence-number workaround: GreenMail's UID FETCH mishandles explicit
-      // uid sets (returns nothing), so we fetch by sequence number and map
-      // results back to uids by position. Sequence numbers of existing
-      // messages are stable while new messages only append.
+      // UID FETCH (not sequence numbers): an EXPUNGE by another client
+      // between listing and fetching shifts sequence numbers, which would
+      // attach one message's data to another. The UID echoed in each FETCH
+      // response is authoritative.
       const targetSet = new Set(targetUids)
-      const seqs: number[] = []
-      const uidBySeq = new Map<number, number>()
-      allUids.forEach((uid, index) => {
-        if (targetSet.has(uid)) {
-          const seq = index + 1
-          seqs.push(seq)
-          uidBySeq.set(seq, uid)
-        }
-      })
-
       const fetched: FetchMessage[] = []
-      let position = 0
-      for await (const msg of client.fetch(seqs, {
-        flags: true,
-        size: true,
-        envelope: true,
-        bodyStructure: true,
-        headers: DELIVERED_TO_HEADERS,
-      })) {
-        // Map back via the sequence number the server echoes (fallback:
-        // request order). Positions start at 1 while incremental runs fetch
-        // e.g. only seq 3, so the position itself is NOT a sequence number.
-        const seq = (msg as { seq?: number }).seq ?? seqs[position]
-        position += 1
-        const uid = seq !== undefined ? uidBySeq.get(seq) : undefined
-        if (seq === undefined || uid === undefined) continue
-        fetched.push({ ...(msg as unknown as FetchMessage), uid, seq })
+      for await (const msg of client.fetch(
+        targetUids,
+        {
+          flags: true,
+          size: true,
+          envelope: true,
+          bodyStructure: true,
+          headers: DELIVERED_TO_HEADERS,
+        },
+        { uid: true },
+      )) {
+        if (!targetSet.has(msg.uid)) continue
+        fetched.push(msg as unknown as FetchMessage)
       }
 
       // Phase 2: process messages one by one.
       for (const message of fetched) {
-        // Sequence number of this message on the server (for downloads).
-        const seq = message.seq
         const envelope = message.envelope ?? {}
         const subject = envelope.subject ?? ''
         const subjectHmac = hmacValue(hmacKey, subject)
@@ -475,30 +480,40 @@ export async function runMessageSync(
           dbMessageId,
         ])
         if (bodyRow.rowCount === 0) {
-          await downloadBody(pool, ctx, client, accountId, dbMessageId, seq)
+          await downloadBody(pool, ctx, client, accountId, dbMessageId, message.uid)
         }
       }
 
       // Backfill: bodies for older messages in this folder that were stored
-      // without one (e.g. interrupted syncs) - keyed by uid, downloaded by
-      // sequence number.
+      // without one (e.g. interrupted syncs). Only locations of the current
+      // uidvalidity whose UID still exists name the right message.
       const missingBodies = await pool.query<{ id: string; uid: string }>(
-        `SELECT ml.message_id::text AS id, ml.uid::text AS uid
+        `SELECT DISTINCT ON (ml.message_id) ml.message_id::text AS id, ml.uid::text AS uid
          FROM message_location ml
          LEFT JOIN message_body mb ON mb.message_id = ml.message_id
-         WHERE ml.folder_id = $1 AND mb.message_id IS NULL`,
-        [folderId],
+         WHERE ml.folder_id = $1 AND ml.uidvalidity = $2 AND ml.uid > 0
+           AND mb.message_id IS NULL`,
+        [folderId, serverUidvalidity.toString()],
       )
       for (const row of missingBodies.rows) {
-        const seq = allUids.indexOf(Number(row.uid)) + 1
-        if (seq > 0) {
-          await downloadBody(pool, ctx, client, accountId, row.id, seq)
+        const uid = Number(row.uid)
+        if (serverFlags.has(uid)) {
+          await downloadBody(pool, ctx, client, accountId, row.id, uid)
         }
       }
     }
 
+    // Messages whose only location had an outdated uidvalidity and that did
+    // not come back under a new UID (after the fetch above, so re-fetched
+    // ones keep their row and body).
+    if (staleLocations.length > 0) {
+      await removeOrphanMessages(pool, accountId, [
+        ...new Set(staleLocations.map((row) => row.message_id)),
+      ])
+    }
+
     try {
-      await backfillMetadata(pool, ctx, client, accountId, folderId, serverUidvalidity, allUids)
+      await backfillMetadata(pool, ctx, client, accountId, folderId, serverUidvalidity, serverFlags)
     } catch (err) {
       // Best effort: the regular sync result stays; the next run retries.
       log.warn(
@@ -678,9 +693,13 @@ export async function removeOrphanMessages(
 }
 
 /**
- * Downloads the raw RFC-822 source of one message (by sequence number),
- * encrypts it with the account DEK and stores it in the mail-data volume;
- * also stores the plain-text version (encrypted) in the database.
+ * Downloads the raw RFC-822 source of one message (by UID), encrypts it
+ * with the account DEK and stores it in the mail-data volume; also stores
+ * the plain-text version (encrypted) in the database.
+ *
+ * Bodies that are never stored (over the size limit, empty) get a
+ * message_body row without storage_ref and with a skip_reason, so later
+ * runs do not download them again.
  */
 async function downloadBody(
   pool: Pool,
@@ -688,16 +707,24 @@ async function downloadBody(
   client: ImapFlow,
   accountId: string,
   messageId: string,
-  seq: number,
+  uid: number,
 ): Promise<void> {
-  const download = await client.download(String(seq), undefined)
+  const download = await client.download(String(uid), undefined, { uid: true })
   if (!('content' in download) || !download.content) {
-    log.warn({ accountId, messageId, seq }, 'message download returned no content')
+    // The UID vanished meanwhile (expunged); the next run reconciles it.
+    log.warn({ accountId, messageId, uid }, 'message download returned no content')
     return
   }
-  const raw = await streamToBuffer(download.content, MAX_RAW_MESSAGE_BYTES)
-  if (!raw) {
-    log.warn({ accountId, messageId, seq }, 'raw message exceeds size limit, body skipped')
+  const raw = await streamToBuffer(download.content, maxRawMessageBytes())
+  if (!raw || raw.length === 0) {
+    const skipReason = raw ? 'empty' : 'too_large'
+    log.warn({ accountId, messageId, uid, skipReason }, 'message body skipped')
+    await pool.query(
+      `INSERT INTO message_body (message_id, storage_ref, skip_reason)
+       VALUES ($1, NULL, $2)
+       ON CONFLICT (message_id) DO NOTHING`,
+      [messageId, skipReason],
+    )
     return
   }
 
@@ -747,7 +774,7 @@ async function backfillMetadata(
   accountId: string,
   folderId: string,
   uidvalidity: bigint,
-  allUids: number[],
+  serverFlags: Map<number, string[]>,
 ): Promise<void> {
   const { rows } = await pool.query<{ id: string; uid: string; storage_ref: string | null }>(
     `SELECT DISTINCT ON (m.id) m.id::text AS id, ml.uid::text AS uid, mb.storage_ref
@@ -769,7 +796,7 @@ async function backfillMetadata(
   if (rows.length === 0) return
 
   let fromRaw = 0
-  const viaImap = new Map<number, string>() // sequence number -> message id
+  const viaImap = new Map<number, string>() // uid -> message id
   for (const row of rows) {
     const metadata = row.storage_ref
       ? await metadataFromStoredRaw(ctx, row.id, row.storage_ref)
@@ -779,23 +806,20 @@ async function backfillMetadata(
       fromRaw += 1
       continue
     }
-    const seq = allUids.indexOf(Number(row.uid)) + 1
-    if (seq > 0) viaImap.set(seq, row.id)
+    const uid = Number(row.uid)
+    if (serverFlags.has(uid)) viaImap.set(uid, row.id)
   }
 
-  // IMAP fallback, fetched by sequence number (see runMessageSync). The
-  // fetch is consumed completely before the database writes.
+  // IMAP fallback, fetched by UID (see runMessageSync). The fetch is
+  // consumed completely before the database writes.
   const fetched: { messageId: string; metadata: DerivedMetadata }[] = []
   if (viaImap.size > 0) {
-    const seqs = [...viaImap.keys()]
-    let position = 0
-    for await (const msg of client.fetch(seqs, {
-      envelope: true,
-      headers: DELIVERED_TO_HEADERS,
-    })) {
-      const seq = (msg as { seq?: number }).seq ?? seqs[position]
-      position += 1
-      const messageId = seq !== undefined ? viaImap.get(seq) : undefined
+    for await (const msg of client.fetch(
+      [...viaImap.keys()],
+      { envelope: true, headers: DELIVERED_TO_HEADERS },
+      { uid: true },
+    )) {
+      const messageId = viaImap.get(msg.uid)
       if (!messageId) continue
       const envelope = (msg.envelope ?? {}) as NonNullable<FetchMessage['envelope']>
       fetched.push({
