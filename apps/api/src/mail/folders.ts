@@ -74,8 +74,12 @@ export async function folderRoutes(app: FastifyInstance): Promise<void> {
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
-        const folder = await client.query<{ account_id: string; path: string }>(
-          `SELECT f.account_id, f.path FROM folder f
+        const folder = await client.query<{
+          account_id: string
+          path: string
+          selectable: boolean
+        }>(
+          `SELECT f.account_id, f.path, f.selectable FROM folder f
            JOIN mail_account a ON a.id = f.account_id
            WHERE f.id = $1 AND a.user_id = $2
            FOR UPDATE OF f`,
@@ -85,6 +89,11 @@ export async function folderRoutes(app: FastifyInstance): Promise<void> {
         if (!row) {
           await client.query('ROLLBACK')
           await reply.code(404).send({ message: 'Ordner nicht gefunden.' })
+          return
+        }
+        if (role && !row.selectable) {
+          await client.query('ROLLBACK')
+          await reply.code(400).send({ message: 'Dieser Ordner kann keine Nachrichten enthalten.' })
           return
         }
         if (role && row.path.toUpperCase() === 'INBOX') {

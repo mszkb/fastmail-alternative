@@ -91,7 +91,9 @@ onMounted(load)
         <select :value="selected(role)" :disabled="saving" @change="change(role, $event)">
           <option :value="AUTO">{{ autoLabel(role) }}</option>
           <option
-            v-for="folder in folders.filter((f) => f.path.toUpperCase() !== 'INBOX')"
+            v-for="folder in folders.filter(
+              (f) => f.selectable && f.path.toUpperCase() !== 'INBOX',
+            )"
             :key="folder.id"
             :value="folder.id"
           >

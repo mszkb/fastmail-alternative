@@ -23,6 +23,13 @@ interface ListedMailbox {
   path: string
   delimiter?: string
   specialUse?: string | false
+  flags?: Set<string>
+}
+
+/** Mailboxes that cannot be selected hold no messages (e.g. Gmail's "[Gmail]"). */
+export function isSelectable(mailbox: ListedMailbox): boolean {
+  const flags = [...(mailbox.flags ?? [])].map((flag) => flag.toLowerCase())
+  return !flags.includes('\\noselect') && !flags.includes('\\nonexistent')
 }
 
 export async function runFolderSync(pool: Pool, accountId: string): Promise<void> {
@@ -48,8 +55,9 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
     await assertMailHost(credentials.host)
     await client.connect()
     const mailboxes = (await client.list()) as unknown as ListedMailbox[]
+    // Containers without messages never get a role.
     const detected = detectFolderRoles(
-      mailboxes.map((mailbox) => ({
+      mailboxes.filter(isSelectable).map((mailbox) => ({
         path: mailbox.path,
         delimiter: mailbox.delimiter,
         specialUseAttribute: mailbox.specialUse || null,
@@ -60,12 +68,13 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
       // Per-folder status: uidnext/unread counts. uidvalidity is NOT stored
       // here: folder.uidvalidity is the one message_sync synced the
       // locations with, so it can detect a change (it is the only writer).
+      // Non-selectable mailboxes have no status (servers answer NO).
+      const selectable = isSelectable(mailbox)
       let uidnext: string | null = null
       let unread: number | null = null
-      const status = await client.status(mailbox.path, {
-        uidNext: true,
-        unseen: true,
-      })
+      const status = selectable
+        ? await client.status(mailbox.path, { uidNext: true, unseen: true })
+        : null
       if (status) {
         uidnext = status.uidNext != null ? String(status.uidNext) : null
         unread = status.unseen ?? null
@@ -74,10 +83,11 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
       await pool.query(
         `INSERT INTO folder
            (account_id, path, delimiter, special_use_detected, uidnext,
-            unread_count, last_synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+            unread_count, selectable, last_synced_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (account_id, path) DO UPDATE SET
            delimiter = EXCLUDED.delimiter,
+           selectable = EXCLUDED.selectable,
            special_use_detected = EXCLUDED.special_use_detected,
            uidnext = EXCLUDED.uidnext,
            unread_count = EXCLUDED.unread_count,
@@ -88,7 +98,8 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
           mailbox.delimiter ?? null,
           detected.get(mailbox.path) ?? null,
           uidnext,
-          unread,
+          unread ?? 0,
+          selectable,
         ],
       )
     }

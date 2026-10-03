@@ -278,12 +278,16 @@ export async function runMessageSync(
     path: string
     uidvalidity: string | null
     special_use: string | null
-  }>('SELECT id, path, uidvalidity, special_use FROM folder WHERE id = $1 AND account_id = $2', [
-    folderId,
-    accountId,
-  ])
+    selectable: boolean
+  }>(
+    `SELECT id, path, uidvalidity, special_use, selectable FROM folder
+     WHERE id = $1 AND account_id = $2`,
+    [folderId, accountId],
+  )
   const folder = folderRows.rows[0]
   if (!folder) throw new Error(`folder ${folderId} not found for account ${accountId}`)
+  // \Noselect container (e.g. "[Gmail]"): no messages, SELECT would fail.
+  if (!folder.selectable) return
 
   const client = new ImapFlow({
     host: ctx.imap.host,

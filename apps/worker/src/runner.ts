@@ -82,9 +82,9 @@ async function processJob(
       if (!accountId) throw new Error('folder_sync job without account_id')
       await runFolderSync(pool, accountId)
       health.synced = true
-      // Chain: one message_sync job per synced folder (deduplicated).
+      // Chain: one message_sync job per selectable folder (deduplicated).
       const { rows } = await pool.query<{ id: string }>(
-        'SELECT id FROM folder WHERE account_id = $1',
+        'SELECT id FROM folder WHERE account_id = $1 AND selectable',
         [accountId],
       )
       for (const row of rows) {

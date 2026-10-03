@@ -9,7 +9,7 @@ import pg from 'pg'
 import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
 import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
-import { runFolderSync } from '../src/jobs/folder-sync'
+import { isSelectable, runFolderSync } from '../src/jobs/folder-sync'
 
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
@@ -70,6 +70,13 @@ describe.skipIf(!databaseUrl || !greenmailHost)('folder_sync job', () => {
       'TRUNCATE session, device, "user", mail_account, identity, folder, job CASCADE',
     )
     await pool.end()
+  })
+
+  it('treats \\Noselect and \\NonExistent mailboxes as not selectable', () => {
+    expect(isSelectable({ path: 'INBOX', flags: new Set(['\\HasNoChildren']) })).toBe(true)
+    expect(isSelectable({ path: '[Gmail]', flags: new Set(['\\Noselect']) })).toBe(false)
+    expect(isSelectable({ path: 'Gone', flags: new Set(['\\NonExistent']) })).toBe(false)
+    expect(isSelectable({ path: 'Plain' })).toBe(true)
   })
 
   it('refuses to connect to private hosts outside test mode (SSRF guard)', async () => {

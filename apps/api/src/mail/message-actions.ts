@@ -119,7 +119,8 @@ async function resolveTarget(
     }
     case 'move': {
       const { rows } = await client.query<FolderRow>(
-        'SELECT id, account_id, special_use FROM folder WHERE id = $1 AND account_id = $2',
+        `SELECT id, account_id, special_use FROM folder
+         WHERE id = $1 AND account_id = $2 AND selectable`,
         [request.targetFolderId, source.account_id],
       )
       const target = rows[0]

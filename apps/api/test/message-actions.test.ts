@@ -321,6 +321,23 @@ describe.skipIf(!databaseUrl)('message actions api', () => {
     expect(projects!.total).toBeGreaterThanOrEqual(1)
   })
 
+  it('refuses to move into a \\Noselect container', async () => {
+    const id = await createMessage(account, inboxId)
+    await pool.query('UPDATE folder SET selectable = false WHERE id = $1', [otherId])
+    try {
+      const res = await action({
+        folderId: inboxId,
+        messageIds: [id],
+        action: 'move',
+        targetFolderId: otherId,
+      })
+      expect(res.statusCode).toBe(404)
+      expect((await locationsOf(id))[0]!.folder_id).toBe(inboxId)
+    } finally {
+      await pool.query('UPDATE folder SET selectable = true WHERE id = $1', [otherId])
+    }
+  })
+
   it('deletes into Trash, and permanently inside Trash', async () => {
     const id = await createMessage(account, inboxId)
     const res = await action({ folderId: inboxId, messageIds: [id], action: 'delete' })

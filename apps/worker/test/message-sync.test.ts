@@ -726,6 +726,17 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     expect(folder.rows[0]!.uidvalidity).toBe(a.uidvalidity)
   })
 
+  it('skips \\Noselect containers without selecting them', async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path, delimiter, selectable)
+       VALUES ($1, '[Gmail]', '/', false) RETURNING id`,
+      [accountId],
+    )
+    // GreenMail has no such mailbox: selecting it would fail the job.
+    await expect(runMessageSync(pool, accountId, rows[0]!.id)).resolves.toBeUndefined()
+    await pool.query('DELETE FROM folder WHERE id = $1', [rows[0]!.id])
+  })
+
   it('stores a skip marker for bodies over the size limit instead of retrying', async () => {
     const { rows } = await pool.query<{ message_id: string }>(
       'SELECT message_id::text FROM message_location WHERE folder_id = $1 ORDER BY uid LIMIT 1',

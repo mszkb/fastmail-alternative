@@ -227,6 +227,23 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
     expect(alpha.parentId).toBe(projects.id)
     expect(projects.parentId).toBeNull()
     expect(folders[0]!.specialUse).toBe('inbox')
+    expect(folders.every((f) => f.selectable)).toBe(true)
+  })
+
+  it('marks \\Noselect containers as not selectable but keeps them in the tree', async () => {
+    await pool.query(
+      `UPDATE folder SET selectable = false WHERE account_id = $1 AND path = 'Projects'`,
+      [account.id],
+    )
+    try {
+      const res = await get(`/api/accounts/${account.id}/folders`, authToken)
+      const folders = res.json().folders as FolderSummary[]
+      const projects = folders.find((f) => f.path === 'Projects')!
+      expect(projects.selectable).toBe(false)
+      expect(folders.find((f) => f.path === 'Projects/Alpha')!.parentId).toBe(projects.id)
+    } finally {
+      await pool.query(`UPDATE folder SET selectable = true WHERE account_id = $1`, [account.id])
+    }
   })
 
   it('pages newest first with a stable keyset cursor', async () => {

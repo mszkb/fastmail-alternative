@@ -23,6 +23,7 @@ import { migration0010 } from './migrations/0010_push'
 import { migration0011 } from './migrations/0011_folder_roles'
 import { migration0012 } from './migrations/0012_default_identity'
 import { migration0013 } from './migrations/0013_message_body_skip'
+import { migration0014 } from './migrations/0014_folder_selectable'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -49,6 +50,7 @@ export const migrations: Migration[] = [
   migration0011,
   migration0012,
   migration0013,
+  migration0014,
 ]
 
 /**

@@ -137,7 +137,9 @@ function statusInfo(account: AccountOption) {
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
 const inTrash = computed(() => currentFolder.value?.specialUse === 'trash')
-const moveTargets = computed(() => folders.value.filter((f) => f.id !== folderId.value))
+const moveTargets = computed(() =>
+  folders.value.filter((f) => f.selectable && f.id !== folderId.value),
+)
 // Messages shown in the detail pane: the conversation (with the opened
 // message's live object, so optimistic flag changes show) or just the detail.
 const shownMessages = computed<MessageDetail[]>(() => {
@@ -306,7 +308,8 @@ async function loadFolders(): Promise<void> {
     const res = await getJson<FolderListResponse>(`/api/accounts/${requestedAccount}/folders`)
     if (requestedAccount !== accountId.value) return
     folders.value = res.folders
-    const inbox = res.folders.find((f) => f.specialUse === 'inbox') ?? res.folders[0]
+    const inbox =
+      res.folders.find((f) => f.specialUse === 'inbox') ?? res.folders.find((f) => f.selectable)
     if (inbox) await selectFolder(inbox.id)
   } catch (err) {
     if (isStaleResponse(err)) return
@@ -530,7 +533,9 @@ async function refreshView(): Promise<void> {
     folders.value = folderRes.folders
     if (!folderRes.folders.some((f) => f.id === folder)) {
       // The open folder is gone (deleted/renamed at the provider).
-      const inbox = folderRes.folders.find((f) => f.specialUse === 'inbox') ?? folderRes.folders[0]
+      const inbox =
+        folderRes.folders.find((f) => f.specialUse === 'inbox') ??
+        folderRes.folders.find((f) => f.selectable)
       if (inbox) await selectFolder(inbox.id)
       return
     }
@@ -718,6 +723,7 @@ onBeforeUnmount(() => {
           class="folder"
           :class="{ active: folder.id === folderId }"
           :style="{ paddingLeft: `${0.6 + folder.depth * 0.9}rem` }"
+          :disabled="!folder.selectable"
           @click="selectFolder(folder.id)"
         >
           <span class="folder-name">{{ folderLabel(folder) }}</span>
@@ -735,7 +741,12 @@ onBeforeUnmount(() => {
           :value="folderId"
           @change="selectFolder(($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="folder in folders" :key="folder.id" :value="folder.id">
+          <option
+            v-for="folder in folders"
+            :key="folder.id"
+            :value="folder.id"
+            :disabled="!folder.selectable"
+          >
             {{ '  '.repeat(folder.depth) }}{{ folderLabel(folder) }}
             {{ folder.unreadCount > 0 ? `(${folder.unreadCount})` : '' }}
           </option>
@@ -1078,8 +1089,14 @@ button.primary {
   cursor: pointer;
 }
 
-.folder:hover {
+.folder:hover:not(:disabled) {
   background: #e4e9ee;
+}
+
+/* Container without messages (IMAP \Noselect, e.g. "[Gmail]"). */
+.folder:disabled {
+  color: #6b7785;
+  cursor: default;
 }
 
 .folder.active {

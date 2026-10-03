@@ -25,6 +25,8 @@ export interface FolderSummary {
   specialUse: string | null
   /** Manually assigned role (roadmap 3.3); null = automatic detection. */
   specialUseOverride: string | null
+  /** false: container without messages (IMAP \Noselect, e.g. "[Gmail]"). */
+  selectable: boolean
   unreadCount: number
   total: number
 }
