@@ -1,0 +1,80 @@
+# Upgrade auf eine neue Version
+
+Ein Upgrade besteht immer aus denselben vier Schritten:
+
+1. **Backup** mit der bisherigen Version ([Backup & Restore](backup-restore.md))
+2. **Neue Version** auschecken und Images bauen (die alten Container laufen dabei weiter)
+3. **Migrationen**: Die API führt beim Start alle ausstehenden Migrationen aus
+4. **Health-Check**: warten, bis alle Dienste `healthy` sind
+
+`scripts/upgrade.sh` erledigt das automatisch.
+
+## Upgrade mit dem Skript
+
+Im Projektverzeichnis (auf dem Raspberry Pi `~/fastmail-alternative`):
+
+```sh
+./scripts/upgrade.sh            # aktuellen Branch per fast-forward aktualisieren
+./scripts/upgrade.sh v1.2.0     # auf einen bestimmten Tag/Branch/Commit wechseln
+```
+
+Das Skript
+
+- bricht ab, wenn der Checkout lokale Änderungen hat,
+- erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter),
+- merkt sich den bisherigen Commit in `backups/upgrade-previous-ref` (für einen Rollback),
+- holt die neue Version (`git fetch`, dann `git checkout <ziel>` bzw. `git pull --ff-only`),
+- baut die Images (`docker compose build`),
+- startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird,
+- räumt danach alte, unbenutzte Images weg (`docker image prune -f`).
+
+Nach einem Wechsel auf einen Tag steht der Checkout auf einem „detached HEAD“; das nächste Upgrade dann ebenfalls mit Ziel aufrufen (`./scripts/upgrade.sh v1.3.0`).
+
+Händisch entspricht das:
+
+```sh
+./scripts/backup.sh
+git rev-parse HEAD > backups/upgrade-previous-ref
+git fetch --tags origin && git checkout v1.2.0
+docker compose build
+docker compose up -d --wait
+```
+
+Zwischen Backup und Neustart geschriebene Daten (neue Mails, gesendete Nachrichten) wären bei einem Rollback verloren; neue Mails holt der Worker danach beim Anbieter nach.
+
+## Wie Migrationen laufen
+
+- Migrationen sind reines SQL, werden in fester Reihenfolge angewendet und in `schema_migrations` vermerkt ([ADR-0002](../adr/0002-database.md)). Ein erneuter Start wendet nichts doppelt an.
+- **Jede Migration läuft in einer eigenen Transaktion.** Schlägt eine fehl, wird sie vollständig zurückgerollt; die API startet nicht (Health-Check schlägt fehl), die zuvor erfolgreichen Migrationen bleiben angewendet.
+- Ein **Advisory Lock** verhindert, dass API und Worker (oder mehrere Instanzen) gleichzeitig migrieren.
+- Migrationen sind **nur vorwärts** (keine Down-Migrationen). Sie werden so geschrieben, dass sie auf einer befüllten Datenbank ohne lange Sperren laufen (z. B. neue `NOT NULL`-Spalten nur mit konstantem Default).
+- **Schutz vor zu alter App-Version:** Findet eine App in `schema_migrations` Migrationen, die sie nicht kennt (Datenbank wurde schon von einer neueren Version migriert), bricht sie beim Start mit `database schema is newer than this app version` ab, statt auf einem unbekannten Schema weiterzulaufen. Dasselbe gilt für das Einspielen von Backups einer neueren Version.
+
+## Rollback
+
+Weil Migrationen nur vorwärts laufen, heißt Rollback: **alte Version + Backup von vor dem Upgrade**. Ein bloßes Zurückwechseln des Codes reicht nicht – die alte Version verweigert dann den Start (siehe oben).
+
+```sh
+cd ~/fastmail-alternative
+git checkout "$(cat backups/upgrade-previous-ref)"
+docker compose build
+docker compose stop api worker
+docker compose run --rm --user root -v "$PWD/backups:/backups:ro" worker \
+  node dist/backup.js restore /backups/fma-backup-<zeit>.fmabk --force
+docker compose up -d --wait
+```
+
+`<zeit>` ist das Backup, das `upgrade.sh` direkt vor dem Upgrade geschrieben hat (das neueste in `backups/`). `restore --force` prüft das Backup vollständig, bevor es Datenbank und `mail-data` ersetzt. Details: [Backup & Restore](backup-restore.md).
+
+Ist nur der Build oder Start fehlgeschlagen, **bevor** eine Migration lief (z. B. Build-Fehler), genügt `git checkout <alter commit>`, `docker compose build` und `docker compose up -d --wait` – ohne Restore.
+
+## Hinweise für den Raspberry Pi
+
+- **Speicher:** Die Container sind begrenzt (u. a. Worker 384 MB, API 192 MB). Migrationen sind so geschrieben, dass sie keine Daten in den Speicher laden; der Build (`docker compose build`) ist nicht begrenzt und braucht auf dem Pi einige Minuten und den meisten Arbeitsspeicher. Bei sehr knappem RAM vorher Swap prüfen (`free -h`).
+- **Platz:** Backup und neue Images brauchen zusätzlichen Platz. Vor dem Upgrade `df -h` und `docker system df` prüfen; `upgrade.sh` entfernt danach nicht mehr benutzte Images.
+- **Rootless Docker:** Skript als der Benutzer ausführen, unter dem Docker läuft (über SSH: `ssh raspberrypi`, dann `cd ~/fastmail-alternative`). Bei Aufruf aus Cron/Skripten `XDG_RUNTIME_DIR` und `DOCKER_HOST` setzen wie bei den [automatischen Backups](backup-restore.md#automatisch-per-cron-raspberry-pi-rootless-docker).
+- **`.env` bleibt unverändert.** Neue optionale Variablen stehen in `.env.example`; der `MASTER_KEY` darf nie neu erzeugt werden.
+
+## Getestet
+
+`packages/db/test/upgrade.test.ts` läuft bei jedem Testlauf gegen echtes PostgreSQL: Eine Datenbank wird nur bis zu einer älteren Migration aufgebaut („vorherige Version“), mit Benutzer, Konto (verpackter Data Key, verschlüsselte Zugangsdaten), Identitäten, Ordner, Nachricht mit verschlüsselten Feldern, Body-Verweis und Postausgang befüllt und dann auf den aktuellen Stand migriert. Geprüft wird, dass alle Daten erhalten und mit demselben `MASTER_KEY` entschlüsselbar sind, Daten-Migrationen (z. B. Ordnerrollen, Identitäts-Duplikate) korrekt greifen, das Schema exakt dem einer Neuinstallation entspricht, ein zweiter Start nichts mehr anwendet und eine ältere App-Version die neuere Datenbank ablehnt.
