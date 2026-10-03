@@ -37,7 +37,9 @@ export class Metrics {
       this.histograms.set(name, histogram)
     }
     for (let i = 0; i < histogram.buckets.length; i += 1) {
-      if (value <= (histogram.buckets[i] ?? Infinity)) histogram.counts[i] += 1
+      if (value <= (histogram.buckets[i] ?? Infinity)) {
+        histogram.counts[i] = (histogram.counts[i] ?? 0) + 1
+      }
     }
     histogram.sum += value
     histogram.count += 1

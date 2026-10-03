@@ -9,23 +9,23 @@ import { migrations, runMigrations } from '../src/migrate'
 
 const databaseUrl = process.env.DATABASE_URL
 
+async function resetSchema(pool: pg.Pool): Promise<void> {
+  await pool.query('DROP SCHEMA public CASCADE')
+  await pool.query('CREATE SCHEMA public')
+}
+
 describe.skipIf(!databaseUrl)('runMigrations', () => {
   let pool: pg.Pool
 
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: databaseUrl })
-    // Clean slate: drop everything the migrations create (test-only!).
-    await pool.query(
-      'DROP TABLE IF EXISTS push_subscription, session, device, "user", schema_migrations CASCADE',
-    )
-    await pool.query('DROP EXTENSION IF EXISTS citext')
+    // Clean slate: reset the whole schema so every migration (including ones
+    // added later) re-applies from scratch (test-only!).
+    await resetSchema(pool)
   })
 
   afterAll(async () => {
-    await pool.query(
-      'DROP TABLE IF EXISTS push_subscription, session, device, "user", schema_migrations CASCADE',
-    )
-    await pool.query('DROP EXTENSION IF EXISTS citext')
+    await resetSchema(pool)
     await pool.end()
   })
 

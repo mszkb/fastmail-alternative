@@ -11,7 +11,7 @@
  *   backups) become unreadable.
  */
 import { randomUUID } from 'node:crypto'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
 import { requireAuth } from '../auth/routes'
 import { testImap, testSmtp, type HostConfig } from '../mail/connection-test'
@@ -50,7 +50,7 @@ function isSecurePort(port: number): boolean {
   return port === 993 || port === 465
 }
 
-function isValidPort(port: number | undefined): boolean {
+function isValidPort(port: number | undefined): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
@@ -105,7 +105,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateAccountBody }>(
     '/api/accounts',
     { preHandler: requireAuth },
-    async (request: FastifyRequest, reply) => {
+    async (request, reply) => {
       const parsed = parseCreateBody(request.body)
       if (!parsed) {
         await reply.code(400).send({
