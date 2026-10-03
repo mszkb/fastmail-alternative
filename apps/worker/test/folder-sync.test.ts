@@ -6,6 +6,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import pg from 'pg'
+import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
 import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
 import { runFolderSync } from '../src/jobs/folder-sync'
@@ -126,5 +127,50 @@ describe.skipIf(!databaseUrl || !greenmailHost)('folder_sync job', () => {
       [accountId, 'Gelöschter Ordner'],
     )
     expect(rowCount).toBe(0)
+  })
+
+  it('detects roles by name without SPECIAL-USE and keeps manual overrides', async () => {
+    const imap = new ImapFlow({
+      host: greenmailHost!,
+      port: Number(process.env.GREENMAIL_IMAP_PORT),
+      secure: false,
+      doSTARTTLS: false,
+      auth: { user: process.env.GREENMAIL_USER!, pass: process.env.GREENMAIL_PASSWORD! },
+      logger: false,
+    })
+    const created = ['Gesendete Objekte', 'Papierkorb', 'Junk-E-Mail', 'Projekte']
+    await imap.connect()
+    for (const path of created) await imap.mailboxCreate(path).catch(() => {})
+
+    const roles = async () => {
+      const { rows } = await pool.query<{ path: string; special_use: string | null }>(
+        'SELECT path, special_use FROM folder WHERE account_id = $1',
+        [accountId],
+      )
+      return Object.fromEntries(rows.map((row) => [row.path, row.special_use]))
+    }
+
+    await runFolderSync(pool, accountId)
+    expect(await roles()).toMatchObject({
+      INBOX: 'inbox',
+      'Gesendete Objekte': 'sent',
+      Papierkorb: 'trash',
+      'Junk-E-Mail': 'junk',
+      Projekte: null,
+    })
+
+    // Manual mapping (PATCH /api/folders/:id) survives the next sync.
+    await pool.query(
+      `UPDATE folder SET special_use_override = 'sent'
+       WHERE account_id = $1 AND path = 'Projekte'`,
+      [accountId],
+    )
+    await runFolderSync(pool, accountId)
+    const after = await roles()
+    expect(after).toMatchObject({ Projekte: 'sent', 'Gesendete Objekte': null })
+    expect(Object.values(after).filter((role) => role === 'sent')).toHaveLength(1)
+
+    for (const path of created) await imap.mailboxDelete(path).catch(() => {})
+    await imap.logout()
   })
 })

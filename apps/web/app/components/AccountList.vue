@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Account list in the settings (roadmap 2.1/3.1): edit, signature, remove;
+// Account list in the settings (roadmap 2.1/3.1): edit, signature, folder
+// mapping (3.3), remove;
 // connection problems (3.4) are explained in German with the edit action.
 import { accountStatusInfo, type AccountSummary } from '@fma/shared'
 
@@ -15,6 +16,8 @@ const busy = ref(false)
 const error = ref('')
 // Account whose signature editor is open.
 const editing = ref('')
+// Account whose folder mapping (3.3) is open.
+const mapping = ref('')
 // Account whose edit form is open (also opened from the mail view, e.g.
 // "Zugangsdaten aktualisieren").
 const editingAccount = defineModel<string>('edit', { default: '' })
@@ -84,6 +87,14 @@ async function remove(account: Account): Promise<void> {
           >
             Signatur
           </button>
+          <button
+            type="button"
+            class="neutral"
+            :aria-expanded="mapping === account.id"
+            @click="mapping = mapping === account.id ? '' : account.id"
+          >
+            Ordner
+          </button>
           <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
         </span>
         <p v-if="accountStatusInfo(account)" class="status-text">
@@ -96,6 +107,7 @@ async function remove(account: Account): Promise<void> {
           @cancel="editingAccount = ''"
         />
         <IdentitySignatures v-if="editing === account.id" :account-id="account.id" />
+        <FolderRoles v-if="mapping === account.id" :account-id="account.id" />
       </li>
     </ul>
     <p v-if="error" class="error">{{ error }}</p>

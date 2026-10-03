@@ -3,26 +3,20 @@
  * account and upserts them into the folder table, including per-folder sync
  * state (uidvalidity, uidnext, highestmodseq) and RFC 6154 special-use flags.
  *
+ * Folder roles (roadmap 3.3): the detected role (SPECIAL-USE attribute, else
+ * German/English name heuristic) goes to special_use_detected; the
+ * effective special_use is resolved together with the user's manual
+ * override (never touched here), one folder per role (@fma/shared).
+ *
  * Idempotent: re-running updates rows in place; folders that vanished on the
  * server are removed.
  */
 import { ImapFlow } from 'imapflow'
-import type { Pool } from '@fma/db'
+import type { Pool, PoolClient } from '@fma/db'
+import { detectFolderRoles, resolveFolderRoles } from '@fma/shared'
 import { loadAccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { mailTestMode } from '../ports'
-
-const KNOWN_SPECIAL_USE = new Set(['inbox', 'sent', 'drafts', 'trash', 'archive', 'junk'])
-
-/** RFC 6154 attribute ("\Sent") -> enum value ("sent"); INBOX heuristic. */
-function normalizeSpecialUse(path: string, specialUse?: string | false): string | null {
-  if (typeof specialUse === 'string' && specialUse.startsWith('\\')) {
-    const value = specialUse.slice(1).toLowerCase()
-    if (KNOWN_SPECIAL_USE.has(value)) return value
-  }
-  if (path.toUpperCase() === 'INBOX') return 'inbox'
-  return null
-}
 
 interface ListedMailbox {
   path: string
@@ -52,6 +46,13 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
   try {
     await client.connect()
     const mailboxes = (await client.list()) as unknown as ListedMailbox[]
+    const detected = detectFolderRoles(
+      mailboxes.map((mailbox) => ({
+        path: mailbox.path,
+        delimiter: mailbox.delimiter,
+        specialUseAttribute: mailbox.specialUse || null,
+      })),
+    )
 
     for (const mailbox of mailboxes) {
       // Per-folder status: uidnext/uidvalidity/unread counts.
@@ -71,11 +72,12 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
 
       await pool.query(
         `INSERT INTO folder
-           (account_id, path, delimiter, special_use, uidvalidity, uidnext, unread_count, last_synced_at)
+           (account_id, path, delimiter, special_use_detected, uidvalidity, uidnext,
+            unread_count, last_synced_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (account_id, path) DO UPDATE SET
            delimiter = EXCLUDED.delimiter,
-           special_use = EXCLUDED.special_use,
+           special_use_detected = EXCLUDED.special_use_detected,
            uidvalidity = EXCLUDED.uidvalidity,
            uidnext = EXCLUDED.uidnext,
            unread_count = EXCLUDED.unread_count,
@@ -84,7 +86,7 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
           accountId,
           mailbox.path,
           mailbox.delimiter ?? null,
-          normalizeSpecialUse(mailbox.path, mailbox.specialUse),
+          detected.get(mailbox.path) ?? null,
           uidvalidity,
           uidnext,
           unread,
@@ -98,8 +100,58 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
       accountId,
       paths,
     ])
+    await applyFolderRoles(pool, accountId)
   } finally {
     unregister()
     client.close()
+  }
+}
+
+/**
+ * Recomputes the effective special_use of all folders of the account from
+ * detected roles and manual overrides (same resolver as the api's
+ * PATCH /api/folders/:id). Only changed rows are written. Locks the account
+ * row like the api does, so a concurrent manual change is not overwritten
+ * with a stale result.
+ */
+async function applyFolderRoles(pool: Pool, accountId: string): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('SELECT 1 FROM mail_account WHERE id = $1 FOR UPDATE', [accountId])
+    await resolveAndStore(client, accountId)
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+async function resolveAndStore(client: PoolClient, accountId: string): Promise<void> {
+  const { rows } = await client.query<{
+    id: string
+    path: string
+    special_use: string | null
+    special_use_detected: string | null
+    special_use_override: string | null
+  }>(
+    `SELECT id, path, special_use, special_use_detected, special_use_override
+     FROM folder WHERE account_id = $1`,
+    [accountId],
+  )
+  const roles = resolveFolderRoles(
+    rows.map((row) => ({
+      path: row.path,
+      detected: row.special_use_detected,
+      override: row.special_use_override,
+    })),
+  )
+  for (const row of rows) {
+    const role = roles.get(row.path) ?? null
+    if (role !== row.special_use) {
+      await client.query('UPDATE folder SET special_use = $2 WHERE id = $1', [row.id, role])
+    }
   }
 }

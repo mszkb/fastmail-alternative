@@ -56,6 +56,7 @@ interface FolderRow {
   path: string
   delimiter: string | null
   special_use: string | null
+  special_use_override?: string | null
   unread_count: number
   total: number
 }
@@ -219,6 +220,7 @@ export function buildFolderTree(rows: FolderRow[]): FolderSummary[] {
         parentId,
         depth,
         specialUse: row.path.toUpperCase() === 'INBOX' ? 'inbox' : row.special_use,
+        specialUseOverride: row.special_use_override ?? null,
         unreadCount: row.unread_count,
         total: row.total,
       })
@@ -278,7 +280,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       // Counts are computed from the synced locations, so they always match
       // what the message list can show.
       const { rows } = await pool.query<FolderRow>(
-        `SELECT f.id, f.path, f.delimiter, f.special_use,
+        `SELECT f.id, f.path, f.delimiter, f.special_use, f.special_use_override,
                 count(ml.id) FILTER (WHERE NOT ('\\Seen' = ANY(ml.flags)))::int AS unread_count,
                 count(ml.id)::int AS total
          FROM folder f

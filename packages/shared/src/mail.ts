@@ -23,6 +23,8 @@ export interface FolderSummary {
   parentId: string | null
   depth: number
   specialUse: string | null
+  /** Manually assigned role (roadmap 3.3); null = automatic detection. */
+  specialUseOverride: string | null
   unreadCount: number
   total: number
 }
