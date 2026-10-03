@@ -31,10 +31,18 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ImapFlow } from 'imapflow'
 import type { MailboxLockObject } from 'imapflow'
-import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser'
+import { Readable } from 'node:stream'
+import {
+  MailParser,
+  simpleParser,
+  type AddressObject,
+  type AttachmentStream,
+  type MessageText,
+} from 'mailparser'
 import type { Pool } from '@fma/db'
 import {
-  decryptField,
+  decryptBytes,
+  encryptBytes,
   encryptField,
   deriveHmacKey,
   hmacValue,
@@ -212,17 +220,45 @@ async function streamToBuffer(
   return Buffer.concat(chunks)
 }
 
+/** 64 KiB views of a buffer (no copies) to stream it into a parser. */
+function* slices(buf: Buffer): Generator<Buffer> {
+  for (let i = 0; i < buf.length; i += 64 * 1024) yield buf.subarray(i, i + 64 * 1024)
+}
+
 /**
  * Extracts the plain text (preview/full text) and the References header
  * from the raw mail (the IMAP envelope does not carry References).
+ * Attachment contents are drained, never buffered (simpleParser keeps them
+ * all in memory, which does not fit the worker's memory limit).
  */
 async function parseRaw(raw: Buffer): Promise<{ text: string; references: string[] }> {
   try {
-    const parsed: ParsedMail = await simpleParser(raw)
-    const text = (parsed.text ?? '').trim()
+    const { text, references } = await new Promise<{ text: string; references: string[] }>(
+      (resolve, reject) => {
+        const parser = new MailParser()
+        let text = ''
+        let references: string[] = []
+        parser.on('headers', (headers) => {
+          references = normalizeReferences(headers.get('references') as string | string[])
+        })
+        parser.on('data', (data: AttachmentStream | MessageText) => {
+          if (data.type === 'text') {
+            text = data.text ?? ''
+            return
+          }
+          ;(data.content as Readable).resume()
+          data.release()
+        })
+        parser.once('error', reject)
+        parser.once('end', () => resolve({ text, references }))
+        // Fed in slices with backpressure: writing the whole buffer at once lets
+        // the parser queue all decoded chunks before they are consumed.
+        Readable.from(slices(raw)).pipe(parser)
+      },
+    )
     return {
-      text: text.slice(0, MAX_TEXT_PLAIN_BYTES),
-      references: normalizeReferences(parsed.references).slice(-MAX_REFERENCES),
+      text: text.trim().slice(0, MAX_TEXT_PLAIN_BYTES),
+      references: references.slice(-MAX_REFERENCES),
     }
   } catch {
     return { text: '', references: [] }
@@ -734,7 +770,7 @@ async function downloadBody(
   await mkdir(absolutePath, { recursive: true })
   await writeFile(
     path.join(absolutePath, 'raw.eml.enc'),
-    Buffer.from(encryptField(ctx.dek, raw.toString('latin1'), aad('body', messageId)), 'utf8'),
+    encryptBytes(ctx.dek, raw, aad('body', messageId)),
   )
 
   const { text, references } = await parseRaw(raw)
@@ -864,8 +900,7 @@ async function metadataFromStoredRaw(
   const file = path.resolve(root, storageRef)
   if (!file.startsWith(root + path.sep)) return null // never leave the volume
   try {
-    const envelope = (await readFile(file)).toString('utf8')
-    const raw = Buffer.from(decryptField(ctx.dek, envelope, aad('body', messageId)), 'latin1')
+    const raw = decryptBytes(ctx.dek, await readFile(file), aad('body', messageId))
     // Headers only: parsing bodies/attachments is not needed here.
     const crlf = raw.indexOf('\r\n\r\n')
     const lf = raw.indexOf('\n\n')

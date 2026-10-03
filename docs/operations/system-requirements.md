@@ -41,7 +41,7 @@ Software: Docker (Engine + Compose-Plugin) auf Linux; Rootless-Betrieb wird empf
 
 - **`mail-data`-Volume** (verschlüsselte Rohmails und Anhänge, ADR-0001) skaliert mit der Summe aller verbundenen Postfächer – das ist der dominierende Speicherfaktor.
 - **postgres** bleibt bei Einzelbenutzer klein: Metadaten inkl. verschlüsselnder Betreff-/Snippet-Felder liegen im Bereich weniger MB bis ~100 MB bei großen Postfächern.
-- **RAM-Spitzen** nur beim IMAP-Initial-Sync (Verschlüsselung + Schreiben); danach kehrt der Stack ins Leerlauf-Niveau zurück. Memory-Limits in der `docker-compose.yml` deckeln jeden Service hart.
+- **RAM-Spitzen** nur beim IMAP-Initial-Sync (Verschlüsselung + Schreiben); danach kehrt der Stack ins Leerlauf-Niveau zurück. Memory-Limits in der `docker-compose.yml` deckeln jeden Service hart. Richtwert: Eine große Mail belegt beim Sync (Download, binäre Verschlüsselung, Text-Extraktion ohne Anhänge im Speicher) bis etwa das 5-Fache ihrer Größe – bei `MAX_RAW_MESSAGE_BYTES` = 20 MB rund 100 MB je gleichzeitig laufendem Job (`WORKER_CONCURRENCY`, Standard 4; Worker-Limit 384 MB). Die HTML-Ansicht der API braucht für eine 20-MB-Mail rund 60 MB (Anhänge werden gestreamt und verworfen, nur kleine Inline-Bilder bleiben im Speicher). Wer das Limit senkt (z. B. auf 1 GB-Systemen), setzt `MAX_RAW_MESSAGE_BYTES` und/oder `WORKER_CONCURRENCY` in der `.env` herunter.
 - **Logs** sind auf 10 MB × 3 Dateien pro Service rotiert.
 
 ## Hinweis zu Memory-Limits auf Raspberry-Pi-Systemen

@@ -7,7 +7,7 @@
  * values, locations, body files in the mail-data directory, idempotency.
  */
 import { randomBytes, randomUUID } from 'node:crypto'
-import { access, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -16,7 +16,9 @@ import nodemailer from 'nodemailer'
 import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
 import {
+  decryptBytes,
   decryptField,
+  encryptBytes,
   encryptField,
   generateDataKey,
   loadMasterKey,
@@ -396,11 +398,35 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
   it('backfills outdated metadata from the stored raw mail', async () => {
     const ids = (await loadDecoded()).map((m) => m.id)
     await resetToLegacyMetadata(ids)
+    // Raw files written before the binary format (text envelope) stay readable.
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const { rows: bodies } = await pool.query<{ message_id: string; storage_ref: string }>(
+      'SELECT message_id::text, storage_ref FROM message_body WHERE message_id = ANY($1::uuid[])',
+      [ids],
+    )
+    for (const body of bodies) {
+      const file = path.join(mailDataDir, body.storage_ref)
+      const aad = `message.body:${body.message_id}`
+      const raw = decryptBytes(ctx.dek, await readFile(file), aad)
+      await writeFile(file, encryptField(ctx.dek, raw.toString('latin1'), aad))
+    }
     const legacy = await loadDecoded()
     expect(legacy.every((m) => m.metadataVersion === 1)).toBe(true)
     expect(legacy.every((m) => JSON.stringify(m.from) === '[]')).toBe(true)
 
-    await runMessageSync(pool, accountId, inboxFolderId)
+    try {
+      await runMessageSync(pool, accountId, inboxFolderId)
+    } finally {
+      // Back to the current format for the following tests.
+      for (const body of bodies) {
+        const file = path.join(mailDataDir, body.storage_ref)
+        const aad = `message.body:${body.message_id}`
+        await writeFile(
+          file,
+          encryptBytes(ctx.dek, decryptBytes(ctx.dek, await readFile(file), aad), aad),
+        )
+      }
+    }
 
     expectCurrentMetadata(await loadDecoded())
   })
@@ -467,8 +493,10 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     for (const row of rows) {
       expect(row.storage_ref).toContain(accountId)
       const file = await readFile(path.join(mailDataDir, row.storage_ref))
-      expect(file.toString('utf8')).toContain('fma.f1.')
-      expect(file.toString('utf8')).not.toContain('Hallo von Testmail')
+      expect(file.subarray(0, 7).toString('latin1')).toBe('fma.b1.')
+      expect(file.toString('latin1')).not.toContain('Hallo von Testmail')
+      const raw = decryptBytes(ctx.dek, file, `message.body:${row.message_id}`)
+      expect(raw.toString('latin1')).toContain('Hallo von Testmail')
 
       const text = decryptField(
         ctx.dek,

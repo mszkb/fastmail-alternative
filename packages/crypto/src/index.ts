@@ -16,6 +16,9 @@
  * Envelope formats (ASCII, safe for bytea/text columns):
  * - field: `fma.f1.` + base64(nonce[12] | ciphertext | tag[16])
  * - wrapped DEK: `fma.k1.` + base64(keyIdLen[1] | keyId | nonce[12] | ct | tag[16])
+ * Binary format (files, e.g. raw mails in the mail-data volume):
+ * - bytes: `fma.b1.` | nonce[12] | ciphertext | tag[16] (no base64/UTF-8
+ *   blow-up; same AES-256-GCM + AAD binding as fields)
  */
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
 
@@ -24,6 +27,7 @@ const KEY_BYTES = 32
 const NONCE_BYTES = 12
 const TAG_BYTES = 16
 const FIELD_PREFIX = 'fma.f1.'
+const BYTES_PREFIX = Buffer.from('fma.b1.', 'ascii')
 const WRAPPED_PREFIX = 'fma.k1.'
 
 /** Validates and decodes the base64 master key from the environment. */
@@ -111,6 +115,69 @@ export function decryptField(dataKey: Buffer, envelope: string, aad: string): st
     decipher.update(ct.subarray(0, ct.length - TAG_BYTES)),
     decipher.final(),
   ]).toString('utf8')
+}
+
+/**
+ * Encrypts binary content (e.g. a raw mail) without text encoding:
+ * `fma.b1.` | nonce | ciphertext | tag. `aad` binds it to its context.
+ */
+export function encryptBytes(dataKey: Buffer, plaintext: Buffer, aad: string): Buffer {
+  const nonce = randomBytes(NONCE_BYTES)
+  const cipher = createCipheriv(ALGORITHM, dataKey, nonce)
+  cipher.setAAD(Buffer.from(aad, 'utf8'))
+  const ct = cipher.update(plaintext)
+  const final = cipher.final()
+  return Buffer.concat([BYTES_PREFIX, nonce, ct, final, cipher.getAuthTag()])
+}
+
+/**
+ * Decrypts content written by encryptBytes; throws if dataKey, aad or
+ * ciphertext do not match. Also reads the legacy text format (a field
+ * envelope holding the bytes as a latin1 string, raw mails stored before
+ * the binary format) and returns the original bytes.
+ */
+export function decryptBytes(dataKey: Buffer, envelope: Buffer, aad: string): Buffer {
+  if (envelope.subarray(0, FIELD_PREFIX.length).toString('latin1') === FIELD_PREFIX) {
+    const ct = Buffer.from(envelope.toString('latin1', FIELD_PREFIX.length), 'base64')
+    return latin1FromUtf8(decryptRaw(dataKey, ct, aad))
+  }
+  if (!envelope.subarray(0, BYTES_PREFIX.length).equals(BYTES_PREFIX)) {
+    throw new Error('invalid envelope: expected prefix fma.b1.')
+  }
+  return decryptRaw(dataKey, envelope.subarray(BYTES_PREFIX.length), aad)
+}
+
+/** nonce | ciphertext | tag -> plaintext. */
+function decryptRaw(dataKey: Buffer, buf: Buffer, aad: string): Buffer {
+  if (buf.length < NONCE_BYTES + TAG_BYTES) throw new Error('invalid envelope: too short')
+  const nonce = buf.subarray(0, NONCE_BYTES)
+  const ct = buf.subarray(NONCE_BYTES, buf.length - TAG_BYTES)
+  const decipher = createDecipheriv(ALGORITHM, dataKey, nonce)
+  decipher.setAAD(Buffer.from(aad, 'utf8'))
+  decipher.setAuthTag(buf.subarray(buf.length - TAG_BYTES))
+  const plaintext = decipher.update(ct)
+  const final = decipher.final()
+  return final.length > 0 ? Buffer.concat([plaintext, final]) : plaintext
+}
+
+/**
+ * UTF-8 bytes of a string whose code points are all <= 0xFF -> the latin1
+ * bytes, without materializing the string (large legacy raw mails).
+ */
+function latin1FromUtf8(utf8: Buffer): Buffer {
+  const out = Buffer.allocUnsafe(utf8.length)
+  let o = 0
+  for (let i = 0; i < utf8.length; i++) {
+    const byte = utf8[i]!
+    if (byte < 0x80) {
+      out[o++] = byte
+    } else if ((byte === 0xc2 || byte === 0xc3) && i + 1 < utf8.length) {
+      out[o++] = ((byte & 0x03) << 6) | (utf8[++i]! & 0x3f)
+    } else {
+      throw new Error('invalid legacy envelope: not a latin1 string')
+    }
+  }
+  return out.subarray(0, o)
 }
 
 /**

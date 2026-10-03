@@ -255,6 +255,7 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 
 - **Ein Data Key (DEK) pro Mailkonto**, gespeichert als `mail_account.wrapped_dek` und mit dem Master-Key aus der Umgebung gewrappt (`key_id` = Master-Key-Version). Damit werden Zugangsdaten und alle Inhalte des Kontos verschlüsselt (AEAD, z. B. AES-256-GCM, eigener Nonce pro Feld).
 - Für benutzerbezogene Secrets (TOTP, Push-Keys) gibt es analog einen DEK pro Benutzer.
+- **Formate:** DB-Felder als Text-Envelope `fma.f1.` + base64(Nonce | Ciphertext | Tag); Dateien im Volume (Rohmails) binär als `fma.b1.` | Nonce | Ciphertext | Tag – ohne base64-/UTF-8-Aufblähung, gleiche AAD-Bindung (`message.body:<id>`). Vor dem Binärformat geschriebene Rohmail-Dateien (Text-Envelope) bleiben lesbar (`decryptBytes` erkennt beide).
 - **Master-Key-Rotation** wrappt nur die DEKs neu; die Inhalte selbst müssen nicht neu verschlüsselt werden.
 - **Konto löschen** heißt den DEK löschen. Übrig gebliebene Ciphertexte, etwa in Backups, sind damit nicht mehr lesbar (Crypto-Shredding).
 - `subject_hash` ist ein HMAC mit einem aus dem Konto-DEK abgeleiteten Schlüssel, also kein ungesalzener Hash.

@@ -14,6 +14,7 @@ import type { FastifyInstance } from 'fastify'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import { runMigrations } from '@fma/db/migrate'
 import {
+  encryptBytes,
   encryptField,
   generateDataKey,
   loadMasterKey,
@@ -66,10 +67,14 @@ async function createAccount(userId: string): Promise<{ id: string; dek: Buffer 
   return { id, dek }
 }
 
-/** Stores a message whose raw source is written encrypted like the worker does. */
+/**
+ * Stores a message whose raw source is written encrypted like the worker
+ * does (binary format; `legacy`: the text format used before).
+ */
 async function createMessage(
   account: { id: string; dek: Buffer },
   raw: Buffer | null,
+  legacy = false,
 ): Promise<string> {
   const id = randomUUID()
   const enc = (field: Parameters<typeof messageFieldAad>[0], value: string) =>
@@ -94,10 +99,12 @@ async function createMessage(
     await mkdir(path.join(dataDir, account.id, id), { recursive: true })
     await writeFile(
       path.join(dataDir, ref),
-      Buffer.from(
-        encryptField(account.dek, raw.toString('latin1'), messageFieldAad('body', id)),
-        'utf8',
-      ),
+      legacy
+        ? Buffer.from(
+            encryptField(account.dek, raw.toString('latin1'), messageFieldAad('body', id)),
+            'utf8',
+          )
+        : encryptBytes(account.dek, raw, messageFieldAad('body', id)),
     )
     await pool.query(
       `INSERT INTO message_body (message_id, storage_ref, text_plain_enc) VALUES ($1, $2, $3)`,
@@ -136,6 +143,8 @@ const HOSTILE_HTML = `<!DOCTYPE html><html><head>
 describe.skipIf(!databaseUrl)('message html api', () => {
   let account: { id: string; dek: Buffer }
   let hostileId: string
+  let legacyId: string
+  let largeAttachmentId: string
   let textOnlyId: string
   let notSyncedId: string
   let missingFileId: string
@@ -163,6 +172,28 @@ describe.skipIf(!databaseUrl)('message html api', () => {
         text: 'Hallo Welt',
         html: HOSTILE_HTML,
         attachments: [{ filename: 'logo.png', content: PNG, cid: 'logo@shop' }],
+      }),
+    )
+    legacyId = await createMessage(
+      account,
+      await compose({ html: '<p>Alte Datei – Grüße</p>' }),
+      true,
+    )
+    largeAttachmentId = await createMessage(
+      account,
+      await compose({
+        html: '<p>Mit Anhang</p><img src="cid:big@shop"><img src="cid:logo@shop">',
+        attachments: [
+          { filename: 'report.pdf', content: randomBytes(3 * 1024 * 1024) },
+          // Over the data: URL limit: dropped, not buffered.
+          {
+            filename: 'big.png',
+            content: randomBytes(6 * 1024 * 1024),
+            contentType: 'image/png',
+            cid: 'big@shop',
+          },
+          { filename: 'logo.png', content: PNG, cid: 'logo@shop' },
+        ],
       }),
     )
     textOnlyId = await createMessage(account, await compose({ text: 'Nur Text' }))
@@ -211,6 +242,19 @@ describe.skipIf(!databaseUrl)('message html api', () => {
     expect(html).not.toMatch(/https?:\/\/(cdn|track|evil)\.example/)
     expect(html).not.toMatch(/<(script|meta|base|form|input|iframe)\b/i)
     expect(html).not.toMatch(/javascript:|onload|pwned/i)
+  })
+
+  it('reads raw mails stored in the legacy text format', async () => {
+    const res = await get(`/api/messages/${legacyId}/html`, authToken)
+    expect(res.json<MessageHtmlResponse>().html).toContain('<p>Alte Datei – Grüße</p>')
+  })
+
+  it('embeds small inline images and drops large attachments', async () => {
+    const res = await get(`/api/messages/${largeAttachmentId}/html`, authToken)
+    const html = res.json<MessageHtmlResponse>().html!
+    expect(html).toContain('<p>Mit Anhang</p>')
+    expect(html).toContain(`src="data:image/png;base64,${PNG.toString('base64')}"`)
+    expect(html.length).toBeLessThan(10_000)
   })
 
   it('keeps http(s) images with remote=1', async () => {

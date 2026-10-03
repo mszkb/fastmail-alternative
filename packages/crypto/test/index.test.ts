@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
+  decryptBytes,
   decryptField,
+  encryptBytes,
   deriveHmacKey,
   encryptField,
   generateDataKey,
@@ -84,6 +86,37 @@ describe('field encryption', () => {
   it('fails on tampered ciphertext', () => {
     const envelope = encryptField(dek, 'secret', aad)
     expect(() => decryptField(dek, envelope.slice(0, -3) + 'AAA', aad)).toThrow()
+  })
+})
+
+describe('binary encryption', () => {
+  const dek = generateDataKey()
+  const aad = 'message.body:some-message-id'
+  const raw = Buffer.from(Array.from({ length: 512 }, (_, i) => i % 256))
+
+  it('round-trips arbitrary bytes without base64/UTF-8 overhead', () => {
+    const envelope = encryptBytes(dek, raw, aad)
+    expect(envelope.subarray(0, 7).toString('ascii')).toBe('fma.b1.')
+    expect(envelope.length).toBe(7 + 12 + raw.length + 16)
+    expect(decryptBytes(dek, envelope, aad).equals(raw)).toBe(true)
+  })
+
+  it('reads the legacy text format (latin1 string in a field envelope)', () => {
+    const legacy = Buffer.from(encryptField(dek, raw.toString('latin1'), aad), 'utf8')
+    expect(decryptBytes(dek, legacy, aad).equals(raw)).toBe(true)
+    expect(() => decryptBytes(dek, legacy, 'message.body:other')).toThrow()
+  })
+
+  it('fails with the wrong AAD, wrong key, tampering or truncation', () => {
+    const envelope = encryptBytes(dek, raw, aad)
+    expect(() => decryptBytes(dek, envelope, 'message.body:other')).toThrow()
+    expect(() => decryptBytes(generateDataKey(), envelope, aad)).toThrow()
+    const tampered = Buffer.from(envelope)
+    tampered[30] = tampered[30]! ^ 1
+    expect(() => decryptBytes(dek, tampered, aad)).toThrow()
+    expect(() => decryptBytes(dek, envelope.subarray(0, envelope.length - 4), aad)).toThrow()
+    expect(() => decryptBytes(dek, envelope.subarray(0, 20), aad)).toThrow()
+    expect(() => decryptBytes(dek, Buffer.from('garbage'), aad)).toThrow()
   })
 })
 
