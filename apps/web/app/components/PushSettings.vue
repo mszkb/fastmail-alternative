@@ -176,6 +176,7 @@ onMounted(() => {
     <p v-else-if="availability === 'needs-install'" class="note">
       Auf iPhone und iPad funktionieren Benachrichtigungen nur in der installierten App: im
       Teilen-Menü „Zum Home-Bildschirm“ wählen, die App von dort öffnen und hier aktivieren.
+      <a href="#install">Anleitung zur Installation</a>
     </p>
     <p v-else-if="availability === 'unsupported'" class="note">
       Dieser Browser unterstützt keine Push-Benachrichtigungen (oder der Service Worker ist nicht

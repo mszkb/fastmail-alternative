@@ -11,6 +11,7 @@
 // notification focuses the app and the service worker asks it to sync.
 // Badge (4.4): the unread INBOX total of all accounts goes to the app icon
 // (Badging API) or the title prefix whenever the account list refreshes.
+// Install hints (4.2): banner in a browser tab, guide in the settings.
 import { ForegroundSyncPolicy, unreadBadgeCount } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 
@@ -46,6 +47,16 @@ const ACCOUNT_REFRESH_MS = 60_000
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
+
+// beforeinstallprompt fires once, early: listen before anything else mounts.
+if (import.meta.client) listenForInstallPrompt()
+
+/** Banner "Anleitung": open the install guide in the settings. */
+async function showInstallGuide(): Promise<void> {
+  section.value = 'settings'
+  await nextTick()
+  document.getElementById('install')?.scrollIntoView({ behavior: 'smooth' })
+}
 
 // Logout empties the list, which clears the badge as well.
 watch(accounts, (list) => updateAppBadge(unreadBadgeCount(list)))
@@ -311,6 +322,8 @@ onBeforeUnmount(() => {
         <span class="user">{{ currentEmail }}</span>
       </nav>
 
+      <InstallBanner @guide="showInstallGuide" />
+
       <template v-if="section === 'mail'">
         <MailView v-if="accounts.length > 0" :accounts="accounts" @edit-account="editAccount" />
         <div v-else class="card">
@@ -357,6 +370,7 @@ onBeforeUnmount(() => {
           </ul>
         </div>
 
+        <InstallGuide />
         <PushSettings />
       </div>
     </template>
