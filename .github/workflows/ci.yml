@@ -82,15 +82,14 @@ jobs:
   container-build:
     name: Container build
     runs-on: ubuntu-latest
-    # Activates automatically once the Dockerfiles from roadmap 1.3 exist.
     # Runs on GitHub runners, so no local Docker installation is required.
-    if: hashFiles('apps/*/Dockerfile') != ''
     steps:
       - uses: actions/checkout@v4
 
       - name: Build app images
+        # Build context is the repository root (monorepo, see docker-compose.yml).
         run: |
           for dockerfile in apps/*/Dockerfile; do
-            app_dir=$(dirname "$dockerfile")
-            docker build -t "fma-$(basename "$app_dir"):${GITHUB_SHA::12}" "$app_dir"
+            app=$(basename "$(dirname "$dockerfile")")
+            docker build -f "$dockerfile" -t "fma-$app:${GITHUB_SHA::12}" .
           done
