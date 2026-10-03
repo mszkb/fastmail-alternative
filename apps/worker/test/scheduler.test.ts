@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import pg from 'pg'
 import { runMigrations } from '@fma/db/migrate'
-import { claimNextJob, failJob } from '@fma/db/job-queue'
+import { MAX_JOB_ATTEMPTS, claimNextJob, failJob } from '@fma/db/job-queue'
 import { enqueueDueSyncs, enqueueMessageSync, requeueStaleJobs } from '../src/scheduler'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -138,12 +138,39 @@ describe.skipIf(!databaseUrl)('sync scheduler', () => {
     const a = await createAccount()
     await enqueueDueSyncs(pool, 120)
     await claimNextJob(pool, ['folder_sync'])
-    expect(await requeueStaleJobs(pool)).toBe(0)
+    expect(await requeueStaleJobs(pool)).toEqual({ requeued: 0, failed: 0 })
     await pool.query(
       `UPDATE job SET locked_at = now() - interval '2 hours' WHERE account_id = $1`,
       [a],
     )
-    expect(await requeueStaleJobs(pool)).toBe(1)
+    expect(await requeueStaleJobs(pool)).toEqual({ requeued: 1, failed: 0 })
     expect(await folderSyncJobs(a)).toEqual([{ state: 'queued' }])
+  })
+
+  it('requeues all running jobs at worker startup without waiting', async () => {
+    const a = await createAccount()
+    await enqueueDueSyncs(pool, 120)
+    await claimNextJob(pool, ['folder_sync'])
+    // Startup: every running job belongs to a previous (crashed) worker.
+    expect(await requeueStaleJobs(pool, 0)).toEqual({ requeued: 1, failed: 0 })
+    expect(await folderSyncJobs(a)).toEqual([{ state: 'queued' }])
+    // The account is not blocked: its job can be claimed right away.
+    expect(await claimNextJob(pool, ['folder_sync'])).not.toBeNull()
+  })
+
+  it('fails lost jobs that used up their attempts instead of looping', async () => {
+    const a = await createAccount()
+    await enqueueDueSyncs(pool, 120)
+    await pool.query(`UPDATE job SET attempts = $2 - 1 WHERE account_id = $1`, [
+      a,
+      MAX_JOB_ATTEMPTS,
+    ])
+    await claimNextJob(pool, ['folder_sync']) // last attempt, then the worker dies
+    expect(await requeueStaleJobs(pool, 0)).toEqual({ requeued: 0, failed: 1 })
+    const { rows } = await pool.query<{ state: string; last_error: string }>(
+      'SELECT state, last_error FROM job WHERE account_id = $1',
+      [a],
+    )
+    expect(rows).toEqual([{ state: 'failed', last_error: 'WORKER_LOST' }])
   })
 })

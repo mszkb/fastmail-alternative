@@ -14,6 +14,7 @@
  */
 import { runMigrations } from '@fma/db/migrate'
 import { createPool } from '@fma/db'
+import { markSendGivenUp } from './jobs/send-message'
 import { log } from './log'
 import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
 import { enqueueDueSyncs, requeueStaleJobs, syncIntervalSeconds } from './scheduler'
@@ -31,12 +32,23 @@ async function main(): Promise<void> {
     log.info({ applied }, 'migrations applied')
   }
 
+  // A lost job that used up its attempts: make a failed send visible.
+  const giveUp = async (job: { type: string; payload: Record<string, unknown> }) => {
+    if (job.type === 'send_message') await markSendGivenUp(pool, job.payload)
+  }
+
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       log.info({ signal }, 'shutting down after running jobs')
       shuttingDown = true
     })
   }
+
+  // Crash recovery: jobs still 'running' belong to a previous worker process
+  // (single instance) - requeue them now instead of blocking their accounts
+  // until they count as stale.
+  const recovered = await requeueStaleJobs(pool, 0, giveUp)
+  if (recovered.requeued + recovered.failed > 0) log.warn(recovered, 'lost running jobs recovered')
 
   // Periodic sync. The first tick runs immediately and also covers accounts
   // created while the worker was down.
@@ -46,8 +58,8 @@ async function main(): Promise<void> {
     if (Date.now() < nextSchedulerTick) return
     nextSchedulerTick = Date.now() + SCHEDULER_TICK_MS
     try {
-      const requeued = await requeueStaleJobs(pool)
-      if (requeued > 0) log.warn({ requeued }, 'stale running jobs requeued')
+      const stale = await requeueStaleJobs(pool, undefined, giveUp)
+      if (stale.requeued + stale.failed > 0) log.warn(stale, 'stale running jobs recovered')
       const accountIds = await enqueueDueSyncs(pool, intervalSeconds)
       if (accountIds.length > 0) log.info({ accountIds }, 'periodic sync enqueued')
     } catch (err) {

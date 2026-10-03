@@ -14,6 +14,7 @@
  *   next_retry_at (circuit breaker backoff, ./account-health) are skipped.
  */
 import type { Pool } from '@fma/db'
+import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 
 const DEFAULT_SYNC_INTERVAL_SECONDS = 120
 /** Retry interval after a folder_sync ran out of attempts (state 'failed'). */
@@ -32,16 +33,36 @@ export function syncIntervalSeconds(): number {
 
 /**
  * Re-queues jobs stuck in 'running' (the worker died mid-job), so they
- * neither block the scheduler forever nor get lost.
+ * neither block their account nor get lost. Jobs that already used up
+ * their attempts go to 'failed' instead: a job that crashes the worker
+ * must not loop forever. `onGivenUp` runs for each of those (e.g. to mark
+ * an outbox message as failed).
+ *
+ * `staleSeconds` 0 (worker startup) takes every running job: there is a
+ * single worker instance, so they all belong to a previous process.
  */
-export async function requeueStaleJobs(pool: Pool): Promise<number> {
-  const { rowCount } = await pool.query(
-    `UPDATE job SET state = 'queued', run_at = now(), locked_at = NULL
+export async function requeueStaleJobs(
+  pool: Pool,
+  staleSeconds = STALE_RUNNING_SECONDS,
+  onGivenUp?: (job: { type: string; payload: Record<string, unknown> }) => Promise<void>,
+): Promise<{ requeued: number; failed: number }> {
+  const { rows } = await pool.query<{
+    state: string
+    type: string
+    payload: Record<string, unknown>
+  }>(
+    `UPDATE job SET
+       state = CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,
+       last_error = CASE WHEN attempts >= $2 THEN 'WORKER_LOST' ELSE last_error END,
+       run_at = now(), locked_at = NULL
      WHERE state = 'running'
-       AND locked_at < now() - ($1 || ' seconds')::interval`,
-    [String(STALE_RUNNING_SECONDS)],
+       AND locked_at <= now() - ($1 || ' seconds')::interval
+     RETURNING state, type, payload`,
+    [String(staleSeconds), MAX_JOB_ATTEMPTS],
   )
-  return rowCount ?? 0
+  const failed = rows.filter((row) => row.state === 'failed')
+  for (const job of failed) await onGivenUp?.(job)
+  return { requeued: rows.length - failed.length, failed: failed.length }
 }
 
 /**
