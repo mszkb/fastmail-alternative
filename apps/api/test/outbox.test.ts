@@ -78,7 +78,8 @@ describe.skipIf(!databaseUrl)('outbox api', () => {
   })
 
   beforeAll(async () => {
-    app = buildApp({ logger: false })
+    // Many writes from one test IP; rate limits are covered in security.test.ts.
+    app = buildApp({ logger: false, rateLimits: [] })
     await runMigrations(pool)
     await pool.query(`TRUNCATE ${TABLES} CASCADE`)
 

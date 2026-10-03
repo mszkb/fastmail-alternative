@@ -17,12 +17,18 @@ import { searchRoutes } from './mail/search'
 import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
 import { pushRoutes } from './push/routes'
+import { trustOnePrivateProxy } from './security/client-ip'
+import { registerCsrfProtection } from './security/csrf'
+import { registerSecurityHeaders } from './security/headers'
+import { DEFAULT_RATE_LIMITS, registerRateLimits, type RateLimitRule } from './security/rate-limit'
 
 export interface AppOptions {
   /** Logging can be disabled to keep test output clean. */
   logger?: boolean
   /** Destination of the log lines (tests inspect them); default stdout. */
   logStream?: NodeJS.WritableStream
+  /** Rate limit rules (tests lower them); default DEFAULT_RATE_LIMITS. */
+  rateLimits?: RateLimitRule[]
 }
 
 /**
@@ -32,13 +38,25 @@ export interface AppOptions {
  * All routes live under /api/* (caddy forwards /api/* as-is; native clients
  * later use the same paths, see ADR-0010).
  */
-export function buildApp({ logger = true, logStream }: AppOptions = {}): FastifyInstance {
+export function buildApp({
+  logger = true,
+  logStream,
+  rateLimits = DEFAULT_RATE_LIMITS,
+}: AppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: logger
       ? { ...buildLoggerOptions(), ...(logStream ? { stream: logStream } : {}) }
       : false,
-    trustProxy: true,
+    // Only the reverse proxy in front of the api is trusted for
+    // X-Forwarded-For (security/client-ip.ts).
+    trustProxy: trustOnePrivateProxy,
   })
+
+  // Hardening (roadmap 6.4): order matters - rejected requests are answered
+  // before authentication or body parsing.
+  registerSecurityHeaders(app)
+  registerRateLimits(app, rateLimits)
+  registerCsrfProtection(app)
 
   const metrics = new Metrics()
 

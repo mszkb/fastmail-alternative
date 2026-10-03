@@ -5,11 +5,18 @@
  * - Every session belongs to a device; revoking a device kills its sessions.
  * - Rotation: when a token is older than ROTATION_INTERVAL, the next
  *   authenticated request issues a new token and invalidates the old one.
+ * - Absolute timeout: a session ends SESSION_TTL after login, activity does
+ *   not extend it (expires_at is never updated).
+ * - Idle timeout: a session whose token was not rotated for SESSION_IDLE is
+ *   rejected. Since every active session rotates at least once per
+ *   rotation interval (24 h), rotated_at doubles as "last activity" with a
+ *   resolution of one day - no extra write per request.
  */
 import { createHash, randomBytes } from 'node:crypto'
 import type { Pool } from '@fma/db'
 
-const SESSION_TTL_MS = 30 * 24 * 60 * 60_000 // 30 days
+export const SESSION_TTL_MS = 30 * 24 * 60 * 60_000 // 30 days
+export const SESSION_IDLE_MS = 14 * 24 * 60 * 60_000 // 14 days
 
 export interface SessionRow {
   sessionId: string
@@ -58,8 +65,9 @@ export async function resolveSession(pool: Pool, token: string): Promise<Session
      FROM session s
      JOIN device d ON d.id = s.device_id
      JOIN "user" u ON u.id = d.user_id
-     WHERE s.token_hash = $1 AND s.expires_at > now() AND d.revoked_at IS NULL`,
-    [hashToken(token)],
+     WHERE s.token_hash = $1 AND s.expires_at > now() AND d.revoked_at IS NULL
+       AND s.rotated_at > now() - make_interval(secs => $2)`,
+    [hashToken(token), SESSION_IDLE_MS / 1000],
   )
   const row = rows[0]
   if (!row) return null

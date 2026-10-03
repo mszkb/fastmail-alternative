@@ -14,6 +14,52 @@
 - Sichere Session-Rotation (nach Login, Rechteänderung, periodisch).
 - Cookies: `HttpOnly`, `Secure`, `SameSite=Lax/Strict`.
 
+### Umsetzung (Roadmap 1.6 + 6.4)
+
+- Cookie `fma_session`: `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` sobald `DOMAIN` nicht `:80` ist (TLS über Caddy). Im Cookie steht nur ein Zufallstoken, in der DB nur dessen SHA-256-Hash.
+- **Login** erzeugt immer ein neues Token (neues Gerät + neue Session); schickt der Browser noch ein gültiges altes Token mit, wird diese alte Session serverseitig gelöscht.
+- **Rotation:** Token älter als 24 h werden bei der nächsten Anfrage ersetzt, das alte ist sofort ungültig.
+- **Absoluter Ablauf:** 30 Tage nach dem Login, Aktivität verlängert nicht.
+- **Leerlauf-Ablauf:** 14 Tage ohne Aktivität. Gemessen an `session.rotated_at` (jede aktive Session rotiert mindestens alle 24 h), also ohne Schreibzugriff pro Anfrage; Auflösung ein Tag.
+- **Logout** löscht die Session serverseitig und setzt das Cookie mit denselben Attributen zurück; Geräte-Widerruf löscht alle Sessions des Geräts.
+- **Passwortwechsel** gibt es noch nicht. Sobald er kommt, muss er alle anderen Sessions des Benutzers löschen.
+
+## CSRF
+
+Zwei unabhängige Schichten, ohne CSRF-Token (`apps/api/src/security/csrf.ts`):
+
+1. `SameSite=Strict` – Browser senden das Session-Cookie bei Cross-Site-Anfragen gar nicht mit.
+2. **Origin-Prüfung** für alle Anfragen außer `GET`/`HEAD`/`OPTIONS` (auch Login, Setup, Uploads und `DELETE`), bevor Authentifizierung oder Body-Parsing laufen: Ist `Sec-Fetch-Site` gesetzt, wird nur `same-origin` akzeptiert (auch `same-site` nicht – eine Nachbar-Subdomain ist nicht vertrauenswürdig). Sonst muss der Host im `Origin`-Header dem `Host` der Anfrage entsprechen (`Origin: null` wird abgewiesen). Ohne beide Header (kein Browser, z. B. curl oder ein künftiger nativer Client) ist die Anfrage erlaubt – solche Clients lassen sich nicht von einer fremden Seite fernsteuern. Antwort bei Verstoß: `403`.
+
+Beide Header sind „forbidden header names“, Skripte können sie nicht fälschen, und Browser senden sie bei jedem `fetch()`. Die PWA (inkl. Offline-Queue) braucht deshalb keinen eigenen Header und kein Token. `GET`-Routen dürfen keinen Zustand ändern.
+
+## Rate Limits
+
+In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-limit.ts`, eine API-Instanz, kein Redis; ein Neustart setzt die Zähler zurück). Antwort `429` mit `Retry-After`; die Offline-Queue wiederholt `429` automatisch.
+
+| Regel          | Routen                                                                          | Limit/min |
+| -------------- | ------------------------------------------------------------------------------- | --------- |
+| `global`       | alle Anfragen                                                                   | 600       |
+| `auth`         | `POST /api/auth/login`, `POST /api/auth/setup`                                  | 10        |
+| `account-test` | `POST /api/accounts`, `PATCH /api/accounts/:id` (Verbindungstest beim Provider) | 10        |
+| `send`         | `POST /api/outbox`, `POST /api/outbox/:id/retry`                                | 60        |
+| `upload`       | `POST /api/accounts/:id/uploads`                                                | 60        |
+| `import`       | `POST /api/import/config`                                                       | 5         |
+
+Zusätzlich bleiben die Login-Sperre (5 Fehlversuche in 15 min → 15 min gesperrt) und das Suchlimit (10/min je Konto) bestehen.
+
+**Client-IP hinter dem Proxy** (`apps/api/src/security/client-ip.ts`): Vertraut wird nur dem direkten Gegenüber und nur, wenn es eine Loopback-/private Adresse hat (Caddy im Compose-Netz oder der eigene Proxy des Betreibers). Dann zählt der rechte `X-Forwarded-For`-Eintrag (die Adresse, die der Proxy gesehen hat); weiter links stehende, vom Client geschriebene Einträge werden ignoriert. Caddy ersetzt einen eingehenden `X-Forwarded-For` ohnehin (keine `trusted_proxies` konfiguriert). Direkte Anfragen von öffentlichen Adressen ignorieren `X-Forwarded-For` ganz.
+
+## Security-Header
+
+- **API** (`apps/api/src/security/headers.ts`), nur wenn die Route den Header nicht selbst setzt (Anhänge und HTML-Ansicht behalten ihre strengeren Werte, z. B. CSP `sandbox`): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store`.
+- **PWA** (nginx im `web`-Container, Snippet wird beim Build von `apps/web/scripts/build-csp.mjs` erzeugt, gilt also auch hinter einem eigenen Reverse Proxy):
+  - CSP `default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
+  - `script-src` ohne `'unsafe-inline'`: Die zwei Inline-Skripte von Nuxt (Import-Map, Runtime-Config) werden per SHA-256-Hash erlaubt, der beim Build berechnet wird.
+  - `style-src 'unsafe-inline'` und `img-src http: https:` sind nötig, weil das `srcdoc`-iframe der HTML-Mailanzeige die CSP der App erbt und Mail-HTML `<style>`, `style`-Attribute und (nach Opt-in) entfernte Bilder enthält. Skripte bleiben dort durch Sandbox und eigene CSP blockiert.
+  - Dazu `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy` (Kamera, Mikrofon, Standort, Payment, USB aus).
+- **Caddy:** `Strict-Transport-Security: max-age=31536000` für die ganze Origin (ohne `includeSubDomains`, die Instanz läuft oft auf einer Subdomain), `nosniff` als Fallback, kein `Server`-Header.
+
 ## Serverseitige Mailkopie
 
 Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in der DB und alle Dateien im Volume `mail-data` sind mit einem Data Key pro Konto verschlüsselt (siehe [data-model.md](data-model.md#verschlüsselung)). Ohne `MASTER_KEY` sind DB-Dump und Volume unlesbar. Die Betreiber-Doku muss das Sichern des Keys getrennt vom Backup klar beschreiben.
@@ -22,8 +68,8 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 
 | Bedrohung                      | Maßnahme                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brute Force / Missbrauch       | Rate Limits auf Login, Konto-Test, Versand, Suche beim Provider                                                                                                                                                                                                                                                                                                                          |
-| CSRF                           | CSRF-Token bzw. SameSite + Origin-Prüfung                                                                                                                                                                                                                                                                                                                                                |
+| Brute Force / Missbrauch       | Rate Limits auf Login, Konto-Test, Versand, Suche beim Provider (siehe [Rate Limits](#rate-limits))                                                                                                                                                                                                                                                                                      |
+| CSRF                           | SameSite=Strict + Origin-Prüfung (siehe [CSRF](#csrf))                                                                                                                                                                                                                                                                                                                                   |
 | Session-Diebstahl              | Rotation, Gerätebindung, Widerruf                                                                                                                                                                                                                                                                                                                                                        |
 | SSRF über Mailserver-Hostnamen | Auflösung prüfen, private/Loopback/Link-Local-Adressen standardmäßig blockieren (für Self-Hoster mit internem Mailserver konfigurierbar freigebbar), nur erlaubte Ports                                                                                                                                                                                                                  |
 | Bösartige HTML-Mails           | Sanitizing, strikte CSP, Rendering in sandboxed iframe, Remote-Content opt-in                                                                                                                                                                                                                                                                                                            |

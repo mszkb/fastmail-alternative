@@ -1,6 +1,16 @@
 {$DOMAIN} {
 	encode zstd gzip
 
+	# Security headers (roadmap 6.4). App CSP and friends come from the web
+	# container (apps/web/nginx.conf), api headers from the api itself; caddy
+	# adds HSTS for the whole origin (ignored by browsers on plain-HTTP
+	# instances with DOMAIN=:80) and fills in nosniff where missing.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		-Server
+	}
+
 	handle /api/* {
 		reverse_proxy api:3001
 	}

@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt generate && node scripts/build-sw.mjs",
+    "build": "nuxt generate && node scripts/build-sw.mjs && node scripts/build-csp.mjs",
     "dev": "nuxt dev",
-    "generate": "nuxt generate && node scripts/build-sw.mjs",
+    "generate": "nuxt generate && node scripts/build-sw.mjs && node scripts/build-csp.mjs",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck"
