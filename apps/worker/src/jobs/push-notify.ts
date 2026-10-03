@@ -13,9 +13,10 @@
  *   with a timeout, without redirects, and only to public hosts (SSRF guard
  *   again at send time).
  * - 404/410 from the push service: the subscription is gone and deleted.
- *   Other failures: failure_count++ and the job is retried with backoff;
- *   repeated sends are harmless because the service worker replaces the
- *   previous notification (same tag).
+ *   Other failures: failure_count++; after PUSH_MAX_FAILURES failures in a
+ *   row the subscription is disabled (re-subscribing in the app enables it
+ *   again). The job itself is not retried: that would notify the healthy
+ *   subscriptions again, and push is only a hint (the app syncs on focus).
  * - Endpoints are capability URLs: logs only show the push service host and
  *   a short hash.
  */
@@ -33,6 +34,8 @@ export const PUSH_COALESCE_SECONDS = 30
 /** Push services drop the message when the device is offline this long. */
 const PUSH_TTL_SECONDS = 15 * 60
 const PUSH_REQUEST_TIMEOUT_MS = 15_000
+/** Consecutive failed deliveries after which a subscription is disabled. */
+export const PUSH_MAX_FAILURES = 5
 
 export interface VapidConfig {
   publicKey: string
@@ -96,13 +99,6 @@ export interface PushNotifyOutcome {
   sent: number
   removed: number
   failed: number
-}
-
-export class PushDeliveryError extends Error {
-  override readonly name = 'PushDeliveryError'
-  constructor(readonly failed: number) {
-    super(`${failed} push deliveries failed`)
-  }
 }
 
 /** Unread INBOX messages over all accounts of the user (the app badge). */
@@ -190,17 +186,22 @@ export async function runPushNotify(
       log.info({ subscriptionId: row.id, ...ref, status }, 'push subscription expired, removed')
     } else {
       outcome.failed++
-      await pool.query(
-        'UPDATE push_subscription SET failure_count = failure_count + 1 WHERE id = $1',
-        [row.id],
+      const { rows: updated } = await pool.query<{ disabled: boolean }>(
+        `UPDATE push_subscription SET failure_count = failure_count + 1,
+           disabled_at = CASE WHEN failure_count + 1 >= $2 THEN now() ELSE disabled_at END
+         WHERE id = $1
+         RETURNING disabled_at IS NOT NULL AS disabled`,
+        [row.id, PUSH_MAX_FAILURES],
       )
       if (status !== 0) {
         log.warn({ subscriptionId: row.id, ...ref, status }, 'push delivery failed')
       }
+      if (updated[0]?.disabled) {
+        log.warn({ subscriptionId: row.id, ...ref }, 'push subscription disabled after failures')
+      }
     }
   }
 
-  if (outcome.failed > 0) throw new PushDeliveryError(outcome.failed)
   return outcome
 }
 

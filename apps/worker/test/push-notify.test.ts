@@ -17,7 +17,7 @@ import { runMigrations } from '@fma/db/migrate'
 import { encryptField, generateDataKey, loadMasterKey, pushKeysAad, wrapDataKey } from '@fma/crypto'
 import { PUSH_PAYLOAD_FIELDS } from '@fma/shared'
 import {
-  PushDeliveryError,
+  PUSH_MAX_FAILURES,
   enqueuePushNotify,
   endpointRef,
   runPushNotify,
@@ -188,17 +188,29 @@ describe.skipIf(!databaseUrl)('push_notify job', () => {
     expect(rows.map((row) => row.id)).toEqual([ok.id])
   })
 
-  it('fails the job for retry on other errors and counts the failure', async () => {
+  it('counts other errors without failing the job, disables after repeated failures', async () => {
     await subscribe('/ok')
     const broken = await subscribe('/error')
-    await expect(runPushNotify(pool, { userId }, vapid)).rejects.toBeInstanceOf(PushDeliveryError)
-    const { rows } = await pool.query<{ failure_count: number }>(
-      'SELECT failure_count FROM push_subscription WHERE id = $1',
-      [broken.id],
-    )
-    expect(rows[0]!.failure_count).toBe(1)
-    // The subscription stays for the retry.
+    const failures = async () =>
+      (
+        await pool.query<{ failure_count: number; disabled: boolean }>(
+          'SELECT failure_count, disabled_at IS NOT NULL AS disabled FROM push_subscription WHERE id = $1',
+          [broken.id],
+        )
+      ).rows[0]
+    // No retry of the whole job: the healthy subscription is notified once.
+    expect(await runPushNotify(pool, { userId }, vapid)).toEqual({ sent: 1, removed: 0, failed: 1 })
+    expect(await failures()).toEqual({ failure_count: 1, disabled: false })
     expect(received).toHaveLength(2)
+
+    for (let run = 2; run <= PUSH_MAX_FAILURES; run++) {
+      await runPushNotify(pool, { userId }, vapid)
+    }
+    expect(await failures()).toEqual({ failure_count: PUSH_MAX_FAILURES, disabled: true })
+    // Disabled: no more delivery attempts to the broken endpoint.
+    const before = received.length
+    expect(await runPushNotify(pool, { userId }, vapid)).toEqual({ sent: 1, removed: 0, failed: 0 })
+    expect(received).toHaveLength(before + 1)
   })
 
   it('skips devices without an active session and missing VAPID keys', async () => {
