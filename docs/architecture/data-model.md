@@ -33,6 +33,7 @@ erDiagram
     MESSAGE ||--|| MESSAGE_BODY : "hat"
     MESSAGE ||--o{ ATTACHMENT : "hat"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
+    MAIL_ACCOUNT ||--o{ DRAFT : "entwirft"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
 
     USER {
@@ -41,6 +42,8 @@ erDiagram
         text password_hash
         bytea totp_secret_enc "optional"
         boolean unified_inbox_enabled "Default false"
+        bytea wrapped_dek "Data Key des Benutzers (Push-Keys, TOTP)"
+        text key_id "Master-Key-Version"
         timestamptz created_at
     }
     DEVICE {
@@ -63,10 +66,12 @@ erDiagram
         uuid id PK
         uuid device_id FK
         text transport "webpush | apns | relay"
-        text endpoint
+        text endpoint UK
         bytea keys_enc
         int failure_count
         timestamptz disabled_at
+        timestamptz created_at
+        timestamptz last_success_at
     }
     MAIL_ACCOUNT {
         uuid id PK
@@ -87,8 +92,10 @@ erDiagram
         text status "ok | auth_error | unreachable | disabled"
         int error_count
         timestamptz next_retry_at
+        text last_error_code "nur Fehlercode, nie Servertext"
         timestamptz last_sync_at
         text[] capabilities "IDLE, CONDSTORE, QRESYNC, MOVE, ..."
+        uuid default_identity_id "Standard-Identität, null = Kontoadresse"
     }
     IDENTITY {
         uuid id PK
@@ -102,7 +109,9 @@ erDiagram
         uuid account_id FK
         text path
         text delimiter
-        text special_use "inbox | sent | drafts | trash | archive | junk | null"
+        text special_use "effektive Rolle: inbox | sent | drafts | trash | archive | junk | null"
+        text special_use_detected "Rolle laut Sync (Attribut oder Name)"
+        text special_use_override "manuelle Zuordnung, vom Sync nie überschrieben"
         bigint uidvalidity
         bigint uidnext
         bigint highestmodseq
@@ -112,19 +121,20 @@ erDiagram
     THREAD {
         uuid id PK
         uuid account_id FK
-        bytea subject_hash "HMAC, nur für Fallback-Threading"
         timestamptz last_message_at
     }
     MESSAGE {
         uuid id PK
         uuid account_id FK
         uuid thread_id FK
+        bytea subject_hash "HMAC, nur für Fallback-Threading"
+        int metadata_version
         text message_id_header
         text in_reply_to
         text[] references
         bytea subject_enc
         bytea from_enc
-        bytea recipients_enc "To + Cc"
+        bytea recipients_enc "To + Cc + Reply-To + Delivered-To"
         bytea snippet_enc
         timestamptz sent_at
         timestamptz received_at
@@ -141,7 +151,8 @@ erDiagram
     }
     MESSAGE_BODY {
         uuid message_id PK
-        text storage_ref "Datei im Volume: verschlüsselte Rohmail"
+        text storage_ref "Datei im Volume: verschlüsselte Rohmail (NULL = übersprungen)"
+        text skip_reason
         bytea html_sanitized_enc "aufbereitet für die Anzeige"
         bytea text_plain_enc
         timestamptz fetched_at
@@ -161,7 +172,23 @@ erDiagram
         uuid identity_id FK
         text status "queued | sending | sent | failed"
         int attempts
-        bytea rfc822_enc "bis zum Versand"
+        bytea content_enc "bis Versand + Ablage in Gesendet"
+        text message_id_header
+        text last_error_code "nur Code, kein Inhalt"
+        text sent_copy "pending | done | skipped | failed"
+        timestamptz sent_at
+    }
+    DRAFT {
+        uuid id PK "vom Client erzeugt"
+        uuid account_id FK
+        uuid identity_id FK
+        bytea content_enc "An/Cc/Bcc wie getippt, Betreff, Text"
+        int version "je Speichern +1, Konflikterkennung"
+        int imap_version "zuletzt in den Entwürfe-Ordner geladen"
+        text message_id_header "der IMAP-Kopie"
+        uuid source_folder_id FK "Entwurf eines anderen Programms"
+        bigint source_uid
+        timestamptz deleted_at "verworfen/gesendet, Worker räumt auf"
     }
     JOB {
         bigserial id PK
@@ -183,26 +210,26 @@ erDiagram
 - **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Im MVP gibt es genau einen Benutzer, angelegt beim ersten Start. Passwort-Hash (Argon2id); `totp_secret_enc` bleibt bis zu späterer 2FA leer. `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
 - **`device`**: gemeinsame Basis für Sessions und Push (ADR-0004). `installation_id` ist die einzige gerätebezogene Kennung im Push-Payload ([push.md](push.md)). Widerruf eines Geräts (`revoked_at`) beendet alle Sessions und deaktiviert alle Subscriptions.
 - **`session`**: nur der **Hash** des Tokens wird gespeichert. Ein späterer nativer Client nutzt dieselbe Tabelle mit einem gerätegebundenen Token.
-- **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). Bei HTTP 404/410 wird `disabled_at` gesetzt; der Cleanup-Job löscht später.
+- **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). `endpoint` ist eindeutig (Upsert, wenn derselbe Browser sich neu anmeldet); `keys_enc` ist mit dem DEK des Benutzers verschlüsselt (`user.wrapped_dek`, beim ersten Bedarf angelegt). Bei HTTP 404/410 vom Push-Service wird die Zeile direkt gelöscht; `disabled_at` bleibt für spätere Transporte reserviert. Details: [push.md](push.md).
 
 ### Konten
 
 - **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Initial-Sync-Grenze (`sync_since`, pro Konto wählbar), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
   - Die API darf `credential_enc` nie in Listen- oder Detail-Antworten ausliefern. Dafür ist **ein explizites Spalten-Select** in der Konto-Abfrage Pflicht (kein `SELECT *`).
-- **`identity`**: Absenderadressen pro Konto (Roadmap 3.6). Beim Anlegen wird eine Identität aus `email_address` erzeugt.
+- **`identity`**: Absenderadressen pro Konto (Roadmap 3.6), je Konto eindeutig (Adresse ohne Groß-/Kleinschreibung). Beim Anlegen wird eine Identität aus `email_address` erzeugt und als `mail_account.default_identity_id` gesetzt; weitere Aliase legt der Benutzer an. Die Standard-Identität kann nicht gelöscht werden.
 
 ### Ordner
 
-- **`folder`**: ein IMAP-Mailbox-Eintrag. `special_use` aus RFC 6154 bzw. Heuristik (Roadmap 3.3).
-- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners verworfen und neu synchronisiert.
+- **`folder`**: ein IMAP-Mailbox-Eintrag. Ordnerrollen (Roadmap 3.3): `special_use_detected` setzt der Sync aus RFC 6154 bzw. der Namensheuristik (deutsche/englische Ordnernamen, nur für Rollen ohne Attribut), `special_use_override` der Benutzer; `special_use` ist die daraus aufgelöste effektive Rolle (Override vor Erkennung, je Konto höchstens ein Ordner pro Rolle), die alle Aktionen verwenden. Container mit LIST-Flag `\Noselect`/`\NonExistent` (z. B. Gmails `[Gmail]`) haben `selectable = false`: Sie bleiben als Elternknoten im Ordnerbaum, werden aber nicht synchronisiert, bekommen keine Rolle und sind kein Verschiebeziel.
+- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). `folder.uidvalidity` ist der Wert, mit dem `message_sync` die Orte zuletzt synchronisiert hat – nur `message_sync` schreibt ihn, `folder_sync` nicht (sonst bliebe eine Änderung unbemerkt). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners mit anderer `uidvalidity` verworfen, die Nachrichten unter ihren neuen UIDs neu geholt (per Message-ID wieder verknüpft) und Nachrichten ohne verbleibenden Ort gelöscht. Inhalte werden immer per UID (`UID FETCH`) geholt, nie per Sequenznummer – ein paralleles EXPUNGE könnte sonst Inhalte vertauschen.
 
 ### Nachrichten
 
 Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server**:
 
-- **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs).
+- **`message`**: Header-Metadaten, einmal pro Konto. Dedupliziert über `message_id_header` (Fallback: Hash aus Datum, Größe und HMAC des Betreffs). `metadata_version` gibt an, mit welchem Stand der Sync-Logik die Metadaten abgeleitet wurden; veraltete Zeilen leitet der Sync in begrenzten Batches neu ab (bevorzugt aus der gespeicherten Rohmail, sonst per IMAP).
 - **`message_location`**: `(folder_id, uidvalidity, uid)`, eindeutig. Eine Nachricht kann in mehreren Ordnern liegen (Gmail-Labels, Kopien). **Flags liegen hier**, so wie IMAP sie pro Mailbox führt. Kein zusätzliches aggregiertes Feld; die Ansicht zeigt die Flags des Ordners, in dem man gerade ist.
-- **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Sanitisiertes HTML und Plaintext für die Anzeige liegen verschlüsselt in der DB, damit das Öffnen schnell ist.
+- **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)). Rohmails über `MAX_RAW_MESSAGE_BYTES` (Standard 20 MB) oder leere werden nicht gespeichert; sie bekommen eine `message_body`-Zeile ohne `storage_ref` mit `skip_reason` (`too_large`/`empty`), damit der Sync sie nicht bei jedem Lauf erneut lädt.
 - **`attachment`**: Metadaten aus `BODYSTRUCTURE`, Inhalt als verschlüsselte Datei im Volume.
 - **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 
@@ -210,7 +237,11 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
 ### Threads
 
-- **`thread`**: **pro Konto**. Gebildet über `References`/`In-Reply-To`, Fallback über den normalisierten Betreff innerhalb eines Zeitfensters (Roadmap 2.5). Weil der Betreff verschlüsselt ist, wird für den Fallback ein HMAC des normalisierten Betreffs (`subject_hash`) gespeichert. Der Anzeige-Betreff kommt aus der neuesten Nachricht.
+- **`thread`**: **pro Konto**. Gebildet über `References`/`In-Reply-To`, Fallback über den normalisierten Betreff innerhalb eines Zeitfensters (Roadmap 2.5). Weil der Betreff verschlüsselt ist, wird für den Fallback ein HMAC des normalisierten Betreffs (`message.subject_hash`, pro Nachricht, weil das Zeitfenster pro Nachricht gilt) gespeichert. Der Anzeige-Betreff kommt aus der neuesten Nachricht.
+- **Algorithmus** (vereinfachtes JWZ, reine Funktion `groupThreads` in `@fma/shared`):
+  1. Eine Nachricht gehört zum Thread jeder Message-ID, die sie in `In-Reply-To`/`References` nennt. Fehlende Nachrichten wirken als gemeinsamer Platzhalter-Elternteil; kommt der Elternteil später (z. B. die eigene Antwort in „Gesendet"), werden die Threads zusammengeführt.
+  2. Betreff-Fallback nur für Nachrichten **ohne** Referenz-Header mit Antwort-Präfix (Re/AW/Sv …): Anschluss an die nächstgelegene Nachricht mit gleichem normalisiertem Betreff (Präfixe Re/AW/Fwd/WG entfernt) innerhalb von 30 Tagen, frühere bevorzugt. Gleichlautende Mails ohne Antwort-Präfix („Ihre Rechnung") bleiben getrennt.
+- Der Worker vergibt `thread_id` nach jedem `message_sync` (älteste zuerst, begrenzt pro Lauf, Advisory-Lock pro Konto) für neue und per Backfill aktualisierte Nachrichten; leere Threads werden beim Entfernen von Nachrichten gelöscht.
 
 ### Ansichten
 
@@ -219,24 +250,26 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
 ### Versand und Jobs
 
-- **`outbox_message`**: Versandauftrag mit Status und Retry-Zähler (Roadmap 2.7). Die verschlüsselte RFC-822-Nachricht wird nach erfolgreichem Versand und Ablage in „Gesendet" gelöscht.
+- **`outbox_message`**: Versandauftrag mit Status und Retry-Zähler (Roadmap 2.7). Gespeichert wird der verschlüsselte Nachrichteninhalt (Absender, Empfänger inkl. Bcc, Betreff, Text als JSON, `content_enc`); der Worker baut daraus bei jedem Versuch die RFC-822-Nachricht mit der einmalig vergebenen `Message-ID`. Der Inhalt wird nach erfolgreichem Versand und Ablage in „Gesendet" gelöscht. `sent_at` markiert die Annahme durch den SMTP-Server – danach wird nie erneut gesendet, nur die Ablage in „Gesendet" wiederholt. `client_id` (optional, UUID des Clients, eindeutig je Konto) macht `POST /api/outbox` wiederholbar: Die Offline-Queue reicht den Versand mit derselben ID nach, ohne doppelt zu senden (Roadmap 4.6).
+- **`draft`**: Entwürfe (Roadmap 2.8) liegen auf dem Server, damit sie Reload und Gerätewechsel überstehen. Eigene Tabelle statt `outbox_message` mit Status `draft`: Entwürfe werden oft gespeichert, dürfen unvollständig sein (ohne Empfänger, halbe Adressen) und lösen keinen Versand aus. Die ID erzeugt der Client, Speichern ist ein idempotentes `PUT /api/drafts/:id` (auch aus der Offline-Queue). Inhalt (An/Cc/Bcc als getippter Text, Betreff, Text) mit dem Konto-DEK verschlüsselt (`content_enc`, AAD `draft.content:<id>`), `In-Reply-To`/`References` im Klartext wie bei `message`. `version` steigt bei jedem Speichern; ein Speichern auf Basis einer veralteten Version (anderes Gerät hat inzwischen gespeichert) wird mit `409` und der aktuellen Fassung beantwortet, außer mit `force` (letzter Schreiber gewinnt, nach Rückfrage im UI). Der Worker-Job `draft_sync` spiegelt den Entwurf in den Entwürfe-Ordner des Kontos (APPEND mit `\Draft`, je Version eine neue Message-ID `<draft-id>.<version>@domain`, ältere Kopien per UID gelöscht – gefunden über die Entwurfs-ID in der Message-ID); Autosaves werden dafür 15 s gesammelt. `source_*` zeigt auf den Entwurf eines anderen Programms, der hier zum Bearbeiten geöffnet wurde und beim ersten Hochladen ersetzt wird. Verwerfen und Senden (`POST /api/outbox` mit `draftId`) setzen `deleted_at` und leeren den Inhalt; der Worker entfernt die IMAP-Kopie und löscht dann die Zeile.
 - **`job`**: **eine eigene, einfache Tabelle** (Vorschlag in ADR-0003). Worker holen Jobs mit `SELECT … FOR UPDATE SKIP LOCKED`. `account_id` dient der Isolation und den Rate Limits. **Der Payload enthält nur IDs, keine Inhalte**, und `last_error` wird vor dem Speichern redacted.
 
 ## Verschlüsselung
 
 Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt nur, was Sync, Threading und Sortierung technisch brauchen.**
 
-| Klartext                                     | Verschlüsselt                           |
-| -------------------------------------------- | --------------------------------------- |
-| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet   |
-| `Message-ID`, `In-Reply-To`, `References`    | Body, Anhang-Dateinamen, Anhang-Inhalte |
-| Kontoserver (Host/Port), Kontostatus         | Zugangsdaten, Outbox-Nachrichten        |
-|                                              | TOTP-Secret, Push-Subscription-Keys     |
+| Klartext                                     | Verschlüsselt                              |
+| -------------------------------------------- | ------------------------------------------ |
+| IDs, Zeitstempel, Größen, Flags, Ordnerpfade | Betreff, Absender, Empfänger, Snippet      |
+| `Message-ID`, `In-Reply-To`, `References`    | Body, Anhang-Dateinamen, Anhang-Inhalte    |
+| Kontoserver (Host/Port), Kontostatus         | Zugangsdaten, Outbox-Nachrichten, Entwürfe |
+|                                              | TOTP-Secret, Push-Subscription-Keys        |
 
 **Verfahren, einfach gehalten:**
 
 - **Ein Data Key (DEK) pro Mailkonto**, gespeichert als `mail_account.wrapped_dek` und mit dem Master-Key aus der Umgebung gewrappt (`key_id` = Master-Key-Version). Damit werden Zugangsdaten und alle Inhalte des Kontos verschlüsselt (AEAD, z. B. AES-256-GCM, eigener Nonce pro Feld).
 - Für benutzerbezogene Secrets (TOTP, Push-Keys) gibt es analog einen DEK pro Benutzer.
+- **Formate:** DB-Felder als Text-Envelope `fma.f1.` + base64(Nonce | Ciphertext | Tag); Dateien im Volume (Rohmails) binär als `fma.b1.` | Nonce | Ciphertext | Tag – ohne base64-/UTF-8-Aufblähung, gleiche AAD-Bindung (`message.body:<id>`). Vor dem Binärformat geschriebene Rohmail-Dateien (Text-Envelope) bleiben lesbar (`decryptBytes` erkennt beide).
 - **Master-Key-Rotation** wrappt nur die DEKs neu; die Inhalte selbst müssen nicht neu verschlüsselt werden.
 - **Konto löschen** heißt den DEK löschen. Übrig gebliebene Ciphertexte, etwa in Backups, sind damit nicht mehr lesbar (Crypto-Shredding).
 - `subject_hash` ist ein HMAC mit einem aus dem Konto-DEK abgeleiteten Schlüssel, also kein ungesalzener Hash.
@@ -261,7 +294,7 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 - `message_location (folder_id, uid)` unique: Sync-Abgleich
 - `message_location (folder_id)` + `message (received_at desc)`: Ordnerliste
 - `message (account_id, message_id_header)`: Deduplizierung, Threading
-- `thread (account_id, subject_hash)`: Fallback-Threading
+- `message (account_id, subject_hash)`, `message (account_id, in_reply_to)`, GIN auf `message (references)`, `message (thread_id)`: Threading
 - `mail_account (status, next_retry_at)`: Scheduler für Sync und Backoff
 - `job (state, run_at)`: Job-Abholung
 - `push_subscription (device_id) where disabled_at is null`

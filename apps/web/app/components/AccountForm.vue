@@ -1,18 +1,34 @@
 <script setup lang="ts">
-// Account creation form with live connection test (roadmap 2.1).
-const emit = defineEmits<{ created: [] }>()
+// Account form with live connection test: create (roadmap 2.1) and edit
+// (roadmap 3.1, `account` prop). Stored credentials are never sent to the
+// client; in edit mode empty user/password fields keep the stored values.
+interface EditableAccount {
+  id: string
+  displayName: string
+  emailAddress: string
+  imap: { host: string; port: number }
+  smtp: { host: string; port: number }
+  sortOrder?: number
+}
 
-const displayName = ref('')
-const emailAddress = ref('')
-const imapHost = ref('')
-const imapPort = ref(993)
+const props = defineProps<{ account?: EditableAccount }>()
+const emit = defineEmits<{ created: []; saved: []; cancel: [] }>()
+const editing = computed(() => !!props.account)
+
+const displayName = ref(props.account?.displayName ?? '')
+const emailAddress = ref(props.account?.emailAddress ?? '')
+const sortOrder = ref(props.account?.sortOrder ?? 0)
+const imapHost = ref(props.account?.imap.host ?? '')
+const imapPort = ref(props.account?.imap.port ?? 993)
 const imapUser = ref('')
 const imapPassword = ref('')
-const smtpHost = ref('')
-const smtpPort = ref(465)
+const smtpHost = ref(props.account?.smtp.host ?? '')
+const smtpPort = ref(props.account?.smtp.port ?? 465)
 const smtpUser = ref('')
 const smtpPassword = ref('')
-const samePassword = ref(true)
+// Edit mode: no checkbox; empty SMTP fields keep the stored credentials, and
+// SMTP credentials that matched IMAP follow IMAP changes (api).
+const samePassword = ref(!props.account)
 
 const busy = ref(false)
 const error = ref('')
@@ -34,12 +50,80 @@ function testErrorText(stage: 'imap' | 'smtp', test: { code?: string; message?: 
   return `${stage.toUpperCase()}: ${test.message ?? 'Verbindungstest fehlgeschlagen.'}`
 }
 
+/** PATCH body: only changed fields; connection data triggers a re-test. */
+function updateBody(account: EditableAccount): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  if (displayName.value.trim() && displayName.value.trim() !== account.displayName) {
+    body.displayName = displayName.value.trim()
+  }
+  if (sortOrder.value !== (account.sortOrder ?? 0)) body.sortOrder = sortOrder.value
+  const imapChanged =
+    imapHost.value !== account.imap.host ||
+    imapPort.value !== account.imap.port ||
+    !!imapUser.value ||
+    !!imapPassword.value
+  if (imapChanged) {
+    body.imap = {
+      host: imapHost.value,
+      port: imapPort.value,
+      user: imapUser.value,
+      password: imapPassword.value,
+    }
+  }
+  const smtpChanged =
+    smtpHost.value !== account.smtp.host ||
+    smtpPort.value !== account.smtp.port ||
+    (!samePassword.value && (!!smtpUser.value || !!smtpPassword.value))
+  if (smtpChanged) {
+    body.smtp = {
+      host: smtpHost.value,
+      port: smtpPort.value,
+      user: samePassword.value ? '' : smtpUser.value,
+      password: samePassword.value ? '' : smtpPassword.value,
+    }
+  }
+  return body
+}
+
+async function save(account: EditableAccount): Promise<void> {
+  const body = updateBody(account)
+  if (Object.keys(body).length === 0) {
+    emit('saved')
+    return
+  }
+  const res = await fetch(`/api/accounts/${account.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 422) {
+    const failed = (await res.json()) as {
+      stage: 'imap' | 'smtp'
+      test: { code?: string; message?: string }
+    }
+    error.value = testErrorText(failed.stage, failed.test)
+    return
+  }
+  if (!res.ok) {
+    const failed = (await res.json().catch(() => null)) as { message?: string } | null
+    error.value = failed?.message ?? `Fehler ${res.status}`
+    return
+  }
+  imapPassword.value = ''
+  smtpPassword.value = ''
+  emit('saved')
+}
+
 async function submit(): Promise<void> {
   if (busy.value) return
   busy.value = true
   error.value = ''
   success.value = ''
   try {
+    if (props.account) {
+      await save(props.account)
+      return
+    }
     const res = await fetch('/api/accounts', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -92,17 +176,27 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <form class="form" @submit.prevent="submit">
-    <h2>Konto hinzufügen</h2>
-    <p class="hint">Verbindung wird vor dem Speichern getestet (IMAP + SMTP).</p>
+  <form class="form" :class="{ embedded: editing }" @submit.prevent="submit">
+    <h2>{{ editing ? 'Konto bearbeiten' : 'Konto hinzufügen' }}</h2>
+    <p class="hint">
+      <template v-if="editing">
+        Geänderte Verbindungsdaten werden vor dem Speichern getestet. Leere Benutzer-/Passwortfelder
+        behalten die gespeicherten Zugangsdaten.
+      </template>
+      <template v-else>Verbindung wird vor dem Speichern getestet (IMAP + SMTP).</template>
+    </p>
 
-    <label
+    <label v-if="!editing"
       >E-Mail-Adresse des Kontos
       <input v-model="emailAddress" type="email" required placeholder="ich@provider.de" />
     </label>
     <label
-      >Anzeigename (optional)
-      <input v-model="displayName" type="text" placeholder="z. B. Privatisch" />
+      >{{ editing ? 'Anzeigename' : 'Anzeigename (optional)' }}
+      <input v-model="displayName" type="text" placeholder="z. B. Privat" :required="editing" />
+    </label>
+    <label v-if="editing"
+      >Reihenfolge (kleinere Zahl zuerst)
+      <input v-model.number="sortOrder" type="number" step="1" />
     </label>
 
     <fieldset>
@@ -115,9 +209,21 @@ async function submit(): Promise<void> {
           >Port<input v-model.number="imapPort" type="number" min="1" max="65535" required
         /></label>
       </div>
-      <label>Benutzer<input v-model="imapUser" type="text" required autocomplete="off" /></label>
       <label
-        >Passwort<input v-model="imapPassword" type="password" required autocomplete="new-password"
+        >Benutzer<input
+          v-model="imapUser"
+          type="text"
+          :required="!editing"
+          :placeholder="editing ? 'unverändert' : ''"
+          autocomplete="off"
+      /></label>
+      <label
+        >Passwort<input
+          v-model="imapPassword"
+          type="password"
+          :required="!editing"
+          :placeholder="editing ? 'unverändert' : ''"
+          autocomplete="new-password"
       /></label>
     </fieldset>
 
@@ -131,21 +237,36 @@ async function submit(): Promise<void> {
           >Port<input v-model.number="smtpPort" type="number" min="1" max="65535" required
         /></label>
       </div>
-      <label class="checkbox">
-        <input v-model="samePassword" type="checkbox" checked />
+      <label v-if="!editing" class="checkbox">
+        <input v-model="samePassword" type="checkbox" />
         Gleiche Zugangsdaten wie IMAP
       </label>
       <template v-if="!samePassword">
-        <label>Benutzer<input v-model="smtpUser" type="text" autocomplete="off" /></label>
         <label
-          >Passwort<input v-model="smtpPassword" type="password" autocomplete="new-password"
+          >Benutzer<input
+            v-model="smtpUser"
+            type="text"
+            :placeholder="editing ? 'unverändert bzw. wie IMAP' : ''"
+            autocomplete="off"
+        /></label>
+        <label
+          >Passwort<input
+            v-model="smtpPassword"
+            type="password"
+            :placeholder="editing ? 'unverändert bzw. wie IMAP' : ''"
+            autocomplete="new-password"
         /></label>
       </template>
     </fieldset>
 
-    <button type="submit" :disabled="busy">
-      {{ busy ? 'Teste Verbindung …' : 'Verbinden' }}
-    </button>
+    <span class="buttons">
+      <button type="submit" :disabled="busy">
+        {{ busy ? 'Teste Verbindung …' : editing ? 'Speichern' : 'Verbinden' }}
+      </button>
+      <button v-if="editing" type="button" class="secondary" @click="emit('cancel')">
+        Abbrechen
+      </button>
+    </span>
 
     <p v-if="error" class="msg error">{{ error }}</p>
     <p v-else-if="success" class="msg success">{{ success }}</p>
@@ -165,6 +286,12 @@ async function submit(): Promise<void> {
 h2 {
   margin: 0 0 0.25rem;
   font-size: 1.1rem;
+}
+
+.form.embedded {
+  width: 100%;
+  margin: 0.5rem 0 0;
+  background: #fff;
 }
 
 .hint {
@@ -236,6 +363,16 @@ button {
   color: #fff;
   font: inherit;
   cursor: pointer;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+button.secondary {
+  background: #e4e9ee;
+  color: #1f2933;
 }
 
 button:disabled {

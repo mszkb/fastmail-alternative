@@ -61,15 +61,20 @@ services:
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 192m
+    volumes:
+      # Read-only: the api decrypts raw mails on demand (HTML view, 2.9);
+      # only the worker writes the volume.
+      - mail-data:/app/mail-data:ro
     environment:
       NODE_ENV: production
       DOMAIN: ${DOMAIN:-:80}
+      MAIL_DATA_DIR: /app/mail-data
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
+      # Public key only: the api hands it to browsers; sending is the worker's job.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -98,14 +103,25 @@ services:
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     logging: *default-logging
-    # Headroom for IMAP initial sync + encryption peaks.
-    mem_limit: 256m
+    # Headroom for IMAP sync peaks: a large body costs up to ~5x its size
+    # while it is downloaded, encrypted and parsed (MAX_RAW_MESSAGE_BYTES,
+    # default 20 MB -> ~100 MB), at most one per job slot (WORKER_CONCURRENCY).
+    mem_limit: 384m
+    volumes:
+      # Encrypted raw mails and attachments (ADR-0001).
+      - mail-data:/app/mail-data
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MAIL_DATA_DIR: /app/mail-data
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      MAX_RAW_MESSAGE_BYTES: ${MAX_RAW_MESSAGE_BYTES:-20971520}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-mail}

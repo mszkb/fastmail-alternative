@@ -4,11 +4,24 @@ import { registerAuth } from './auth/routes'
 import { pool } from './db'
 import { buildLoggerOptions } from './logging'
 import { accountRoutes } from './mail/accounts'
+import { configTransferRoutes } from './mail/config-transfer'
+import { draftRoutes } from './mail/drafts'
+import { folderRoutes } from './mail/folders'
+import { identityRoutes } from './mail/identities'
+import { messageActionRoutes } from './mail/message-actions'
+import { messageHtmlRoutes } from './mail/message-html'
+import { messageRoutes } from './mail/messages'
+import { outboxRoutes } from './mail/outbox'
+import { searchRoutes } from './mail/search'
+import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
+import { pushRoutes } from './push/routes'
 
 export interface AppOptions {
   /** Logging can be disabled to keep test output clean. */
   logger?: boolean
+  /** Destination of the log lines (tests inspect them); default stdout. */
+  logStream?: NodeJS.WritableStream
 }
 
 /**
@@ -18,9 +31,11 @@ export interface AppOptions {
  * All routes live under /api/* (caddy forwards /api/* as-is; native clients
  * later use the same paths, see ADR-0010).
  */
-export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
+export function buildApp({ logger = true, logStream }: AppOptions = {}): FastifyInstance {
   const app = Fastify({
-    logger: logger ? buildLoggerOptions() : false,
+    logger: logger
+      ? { ...buildLoggerOptions(), ...(logStream ? { stream: logStream } : {}) }
+      : false,
     trustProxy: true,
   })
 
@@ -72,6 +87,17 @@ export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
 
   registerAuth(app, pool)
   app.register(accountRoutes)
+  app.register(messageRoutes)
+  app.register(folderRoutes)
+  app.register(messageActionRoutes)
+  app.register(messageHtmlRoutes)
+  app.register(outboxRoutes)
+  app.register(draftRoutes)
+  app.register(searchRoutes)
+  app.register(identityRoutes)
+  app.register(syncRoutes)
+  app.register(pushRoutes)
+  app.register(configTransferRoutes)
 
   return app
 }

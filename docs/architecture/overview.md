@@ -55,12 +55,32 @@
 2. Die API persistiert die Absicht und erzeugt einen Job.
 3. Der Worker führt das IMAP-Kommando aus. Bei einem Fehler wird der Zustand zurückgesetzt und der Client informiert.
 
+## PWA-Shell und Service Worker (Roadmap 4.1)
+
+- `apps/web/public/manifest.webmanifest` (standalone, `start_url`/`scope` `/`, Icons 192/512 „any“ und „maskable“) plus iOS-Meta-Tags und `apple-touch-icon` (`nuxt.config.ts`). Die Icons erzeugt `apps/web/scripts/generate-icons.mjs` ohne Bildbibliothek; die PNGs sind eingecheckt.
+- Handgeschriebener Service Worker (`apps/web/service-worker/sw.js`) statt `@vite-pwa/nuxt`: wenige Zeilen, keine Workbox-Abhängigkeit, volle Kontrolle darüber, was gecacht wird. Nach `nuxt generate` schreibt `apps/web/scripts/build-sw.mjs` die Precache-Liste (index.html, gehashte Assets, Manifest, Icons) und einen Inhalts-Hash als Cache-Version in `/sw.js`.
+- **Nur die App-Shell wird gecacht.** Navigationen bekommen die gecachte `index.html`, Shell-Dateien kommen cache-first. `/api/*` geht immer ans Netz und landet nie im Cache Storage; Maildaten für offline liegen verschlüsselt in IndexedDB (siehe unten, 4.6).
+- Updates: Eine neue Version wird im Hintergrund installiert und wartet. Die App zeigt „Neue Version verfügbar – Neu laden“; erst der Klick aktiviert sie (`SKIP_WAITING`) und lädt neu. Damit geht kein offener Entwurf durch einen erzwungenen Reload verloren. Geöffnete PWAs suchen beim Wiederanzeigen (höchstens alle 10 min) nach Updates.
+- nginx: `sw.js`, `manifest.webmanifest` und `index.html` mit `no-cache`, `/_nuxt/` (gehasht) `immutable`.
+
+## Offline-first (Roadmap 4.6)
+
+Die Regeln gelten für jeden Client gleich (ADR-0010); die Logik liegt testbar in `@fma/shared` (`offline.ts`), die PWA setzt sie in `apps/web/app/utils/offline-store.ts` und `offline-queue.ts` um. Sicherheit des lokalen Speichers: [security.md](security.md#offline-cache-im-client).
+
+- **Lesen (stale-while-revalidate):** Kontoliste, Ordner, die ersten Listenseiten je Ordner, geöffnete Nachrichten, Unterhaltungen, HTML-Body und Identitäten werden zuerst aus dem lokalen Cache angezeigt und dann aus dem Netz aktualisiert; die Netzantwort ersetzt den Cache-Stand. Was nie geöffnet wurde, ist offline nicht da.
+- **Start ohne Server:** Ist `GET /api/auth/status` nicht erreichbar, startet die App mit den Daten der letzten Sitzung und zeigt „Offline“. Sobald sie wieder online ist (`online`, Fokus, Minuten-Takt), prüft sie zuerst die Sitzung; ohne gültige Sitzung wird alles Lokale gelöscht.
+- **Offline-Queue:** Aktionen (gelesen/ungelesen, markieren, archivieren, löschen, verschieben) und der Versand werden lokal sofort angewendet. Ohne Verbindung (`navigator.onLine` false oder Netzwerkfehler beim Senden) – oder solange ältere Einträge warten, damit die Reihenfolge stimmt – landen sie in der Queue. Neue Flag-Aktionen ersetzen ältere derselben Art auf derselben Nachricht (gelesen → ungelesen → gelesen wird einmal „gelesen“), nicht aber über ein Verschieben hinweg. Wartende Aktionen werden über neu geladene Listen gelegt, bis sie nachgereicht sind. Die App zeigt „N Aktionen ausstehend“.
+- **Nachreichen:** beim Start, bei `online` und bei Fokus, streng in Reihenfolge, über Tabs hinweg per Web Lock serialisiert. Antwort 2xx → erledigt; Netzwerkfehler → später erneut (zählt nicht als Versuch); 409 (z. B. Nachricht nach Verschieben noch ohne UID) bis zu 3 Versuche, 5xx/429 bis zu 10, danach verworfen; andere 4xx (z. B. Nachricht inzwischen weg) → verworfen mit Hinweis; 401 → Abbruch, lokale Daten werden gelöscht. Danach lädt die Ansicht neu.
+- **Entwürfe (Roadmap 2.8):** Das Verfassen-Formular speichert Änderungen nach 2 s automatisch auf dem Server (`PUT /api/drafts/:id`, Client-ID). Offline – oder solange ältere Einträge warten – landet das Speichern in der Queue (nur der neueste Stand je Entwurf bleibt, mit `force`; ein Versand mit `draftId` verwirft wartende Speicherungen seines Entwurfs). Die Entwurfsliste wird gecacht und mit wartenden Speicherungen überlagert, so dass offline geschriebene Entwürfe auch nach einem Reload sichtbar sind.
+- **Versand ohne Doppelung:** Jedes Verfassen-Formular erzeugt eine `clientId` (UUID). `POST /api/outbox` mit einer schon bekannten `clientId` desselben Kontos legt nichts neu an und antwortet `200` mit dem vorhandenen Eintrag (eindeutiger Index `(account_id, client_id)`, Migration 0015); das gilt auch für gleichzeitige Wiederholungen.
+
 ## Fehlerisolierung
 
 - Jedes Konto hat einen eigenen Sync-Zustand, eigene Fehlerzähler und eigenen Backoff.
 - Circuit Breaker pro Konto/Provider: Ein ausgefallener Provider blockiert keine Worker-Slots anderer Konten.
 - Ein abgelaufener OAuth-Token setzt nur dieses Konto auf `auth_error` (ADR-0011).
 - Der Kontostatus (ok / Auth-Fehler / Provider nicht erreichbar) ist in der UI sichtbar.
+- Umsetzung (Roadmap 3.4): Der Worker führt mehrere Jobs parallel aus (`WORKER_CONCURRENCY`, Standard 4), aber höchstens einen pro Konto; jeder Job hat ein hartes Timeout je Typ (z. B. `folder_sync` 3 min, `message_sync` 15 min), danach werden seine Verbindungen geschlossen. Verbindungsfehler werden als Code klassifiziert: Auth-Fehler → `auth_error` ohne automatische Wiederholung, bis die Zugangsdaten per `PATCH /api/accounts/:id` aktualisiert sind; Netzwerk-/TLS-/Timeout-Fehler → exponentieller Backoff über `next_retry_at` (1 min, verdoppelnd bis 1 h), ab 3 Fehlern in Folge Status `unreachable`. Solange der Circuit offen ist, werden keine Jobs des Kontos geholt. Ein erfolgreicher Sync setzt Status und Zähler zurück. Absturz-Erholung: Beim Start reiht der Worker alle noch als `running` markierten Jobs sofort neu ein (es gibt genau eine Worker-Instanz, sie gehören also zum abgestürzten Prozess); im Betrieb gilt das für Jobs, die länger als 30 min laufen. Jobs, die ihre Versuche (`MAX_JOB_ATTEMPTS`) bereits aufgebraucht haben, gehen dabei auf `failed` (`WORKER_LOST`) statt endlos neu zu starten – ein abgebrochener Versand wird als fehlgeschlagen angezeigt.
 
 ## Deployment
 

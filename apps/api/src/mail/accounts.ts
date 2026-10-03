@@ -1,6 +1,6 @@
 /**
- * Mail account management (roadmap 2.1): create with connection test,
- * list, delete (crypto-shredding via DEK removal).
+ * Mail account management (roadmap 2.1, 3.1): create with connection test,
+ * list, edit, delete (crypto-shredding via DEK removal plus volume cleanup).
  *
  * Security rules from the data model:
  * - IMAP/SMTP credentials are encrypted with the account DEK and never
@@ -8,13 +8,35 @@
  * - The DEK is wrapped with the instance master key (MASTER_KEY env);
  *   `key_id` records the master key version for later rotation.
  * - Deleting an account deletes its DEK: remaining ciphertexts (e.g. in
- *   backups) become unreadable.
+ *   backups) become unreadable. All account rows (folders, messages,
+ *   locations, bodies, threads, outbox, jobs, identities) go with it via
+ *   ON DELETE CASCADE; the encrypted files in the mail-data volume are
+ *   removed by the worker (`account_cleanup` job), because the api only
+ *   mounts the volume read-only.
+ * - Editing connection data re-runs the connection test before anything is
+ *   saved; credentials stay encrypted with the same DEK and are never sent
+ *   back to the client (empty user/password fields mean "unchanged").
  */
 import { randomUUID } from 'node:crypto'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
+import type { FastifyInstance } from 'fastify'
+import { enqueueJob } from '@fma/db/job-queue'
+import type {
+  AccountErrorCode,
+  AccountListResponse,
+  AccountStatus,
+  AccountSummary,
+} from '@fma/shared'
+import {
+  decryptField,
+  encryptField,
+  generateDataKey,
+  loadMasterKey,
+  unwrapAccountKey,
+  wrapDataKey,
+} from '@fma/crypto'
 import { requireAuth } from '../auth/routes'
-import { testImap, testSmtp, type HostConfig } from '../mail/connection-test'
+import { SYNCING_COLUMN } from './sync'
+import { testImap, testSmtp, type HostConfig, type TestResult } from '../mail/connection-test'
 
 interface MailAccountRow {
   id: string
@@ -24,10 +46,15 @@ interface MailAccountRow {
   imap_port: number
   smtp_host: string
   smtp_port: number
-  status: string
+  status: AccountStatus
+  last_error_code: AccountErrorCode | null
+  next_retry_at: Date | null
   capabilities: string[]
   sort_order: number
   last_sync_at: string | null
+  /** Only selected by the list query. */
+  unread_count?: number
+  syncing?: boolean
 }
 
 interface CreateAccountBody {
@@ -44,13 +71,41 @@ interface ParsedAccount {
   smtp: HostConfig
 }
 
+interface UpdateAccountBody {
+  displayName?: unknown
+  sortOrder?: unknown
+  imap?: { host?: unknown; port?: unknown; user?: unknown; password?: unknown }
+  smtp?: { host?: unknown; port?: unknown; user?: unknown; password?: unknown }
+}
+
+/** Decrypted credential blob (`mail_account.credential_enc`). */
+interface StoredCredentials {
+  imapUser: string
+  imapPassword: string
+  smtpUser?: string
+  smtpPassword?: string
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Explicit column select: credential_enc and wrapped_dek must never leak. */
+const PUBLIC_COLUMNS = `id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
+  status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at`
+
+function credentialAad(accountId: string): string {
+  return `mail_account.credential:${accountId}`
+}
+
+function encryptCredentials(dek: Buffer, accountId: string, creds: StoredCredentials): Buffer {
+  return Buffer.from(encryptField(dek, JSON.stringify(creds), credentialAad(accountId)), 'utf8')
+}
 
 function isSecurePort(port: number): boolean {
   return port === 993 || port === 465
 }
 
-function isValidPort(port: number | undefined): boolean {
+function isValidPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
@@ -85,7 +140,7 @@ function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | n
 }
 
 /** Public account shape: never includes credentials or the DEK. */
-function toPublicAccount(row: MailAccountRow): Record<string, unknown> {
+function toPublicAccount(row: MailAccountRow): AccountSummary {
   return {
     id: row.id,
     displayName: row.display_name,
@@ -93,9 +148,13 @@ function toPublicAccount(row: MailAccountRow): Record<string, unknown> {
     imap: { host: row.imap_host, port: row.imap_port },
     smtp: { host: row.smtp_host, port: row.smtp_port },
     status: row.status,
+    lastErrorCode: row.last_error_code,
+    nextRetryAt: row.next_retry_at ? row.next_retry_at.toISOString() : null,
     capabilities: row.capabilities,
     sortOrder: row.sort_order,
     lastSyncAt: row.last_sync_at,
+    unreadCount: row.unread_count ?? 0,
+    syncing: row.syncing ?? false,
   }
 }
 
@@ -105,7 +164,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateAccountBody }>(
     '/api/accounts',
     { preHandler: requireAuth },
-    async (request: FastifyRequest, reply) => {
+    async (request, reply) => {
       const parsed = parseCreateBody(request.body)
       if (!parsed) {
         await reply.code(400).send({
@@ -146,19 +205,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       const accountId = randomUUID()
       const dek = generateDataKey()
       const wrappedDek = wrapDataKey(masterKey, dek, keyId)
-      const credentialEnc = Buffer.from(
-        encryptField(
-          dek,
-          JSON.stringify({
-            imapUser: parsed.imap.user,
-            imapPassword: parsed.imap.password,
-            smtpUser: parsed.smtp.user,
-            smtpPassword: parsed.smtp.password,
-          }),
-          `mail_account.credential:${accountId}`,
-        ),
-        'utf8',
-      )
+      const credentialEnc = encryptCredentials(dek, accountId, {
+        imapUser: parsed.imap.user,
+        imapPassword: parsed.imap.password,
+        smtpUser: parsed.smtp.user,
+        smtpPassword: parsed.smtp.password,
+      })
 
       const inserted = await pool.query<{ id: string }>(
         `INSERT INTO mail_account
@@ -183,16 +235,21 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       )
       if (!inserted.rows[0]) throw new Error('account insert returned no id')
 
-      // Default identity from the account email address (data model).
+      // Default identity from the account email address (data model, 3.6).
       await pool.query(
-        `INSERT INTO identity (account_id, name, email_address) VALUES ($1, $2, $3)`,
+        `WITH created AS (
+           INSERT INTO identity (account_id, name, email_address) VALUES ($1, $2, $3)
+           RETURNING id
+         )
+         UPDATE mail_account SET default_identity_id = created.id FROM created WHERE mail_account.id = $1`,
         [accountId, parsed.displayName, parsed.emailAddress],
       )
 
+      // Kick off the initial folder sync in the worker (roadmap 2.2).
+      await enqueueJob(pool, { type: 'folder_sync', accountId })
+
       const account = await pool.query<MailAccountRow>(
-        `SELECT id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
-                status, capabilities, sort_order, last_sync_at
-         FROM mail_account WHERE id = $1`,
+        `SELECT ${PUBLIC_COLUMNS} FROM mail_account WHERE id = $1`,
         [accountId],
       )
       await reply.code(201).send({
@@ -203,32 +260,255 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   )
 
   app.get('/api/accounts', { preHandler: requireAuth }, async (request, reply) => {
-    // Explicit column select: credential_enc and wrapped_dek must never leak.
+    // Unread count per account: INBOX only, computed from the synced
+    // locations like the folder counts (optimistic read/unread included).
+    // `syncing` lets clients poll briefly after a sync request (4.5).
     const { rows } = await pool.query<MailAccountRow>(
-      `SELECT id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
-              status, capabilities, sort_order, last_sync_at
+      `SELECT ${PUBLIC_COLUMNS},
+         (SELECT count(*)::int FROM folder f
+          JOIN message_location ml ON ml.folder_id = f.id
+          WHERE f.account_id = mail_account.id AND f.special_use = 'inbox'
+            AND NOT ('\\Seen' = ANY(ml.flags))) AS unread_count,
+         ${SYNCING_COLUMN}
        FROM mail_account WHERE user_id = $1
        ORDER BY sort_order, created_at`,
       [request.auth!.userId],
     )
-    await reply.send({ accounts: rows.map(toPublicAccount) })
+    const body: AccountListResponse = { accounts: rows.map(toPublicAccount) }
+    await reply.send(body)
   })
+
+  app.patch<{ Params: { id: string }; Body: UpdateAccountBody }>(
+    '/api/accounts/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const accountId = request.params.id
+      if (!UUID_RE.test(accountId)) {
+        await reply.code(404).send({ message: 'Konto nicht gefunden.' })
+        return
+      }
+      const update = parseUpdateBody(request.body)
+      if (!update) {
+        await reply.code(400).send({
+          message: 'Ungültige Kontodaten (Name, Host, Port, Benutzer, Passwort prüfen).',
+        })
+        return
+      }
+
+      const { rows } = await pool.query<{
+        imap_host: string
+        imap_port: number
+        smtp_host: string
+        smtp_port: number
+        wrapped_dek: Buffer
+        credential_enc: Buffer
+      }>(
+        `SELECT imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc
+         FROM mail_account WHERE id = $1 AND user_id = $2`,
+        [accountId, request.auth!.userId],
+      )
+      const current = rows[0]
+      if (!current) {
+        await reply.code(404).send({ message: 'Konto nicht gefunden.' })
+        return
+      }
+
+      const sets: string[] = []
+      const values: unknown[] = [accountId]
+      const set = (column: string, value: unknown): void => {
+        values.push(value)
+        sets.push(`${column} = $${values.length}`)
+      }
+      if (update.displayName !== undefined) set('display_name', update.displayName)
+      if (update.sortOrder !== undefined) set('sort_order', update.sortOrder)
+
+      let test: { imap: TestResult; smtp: TestResult } | undefined
+      if (update.imap || update.smtp) {
+        const dek = unwrapAccountKey(process.env.MASTER_KEY ?? '', current.wrapped_dek)
+        const stored = JSON.parse(
+          decryptField(dek, current.credential_enc.toString('utf8'), credentialAad(accountId)),
+        ) as StoredCredentials
+        const merged = mergeConnection(current, stored, update)
+
+        // Connection test FIRST: nothing is saved when the new data fails.
+        const imapResult = await testImap(merged.imap)
+        if (!imapResult.ok) {
+          await reply.code(422).send({ stage: 'imap', test: imapResult })
+          return
+        }
+        const smtpResult = await testSmtp(merged.smtp)
+        if (!smtpResult.ok) {
+          await reply.code(422).send({ stage: 'smtp', test: smtpResult })
+          return
+        }
+        test = { imap: imapResult, smtp: smtpResult }
+
+        set('imap_host', merged.imap.host)
+        set('imap_port', merged.imap.port)
+        set('smtp_host', merged.smtp.host)
+        set('smtp_port', merged.smtp.port)
+        set(
+          'credential_enc',
+          encryptCredentials(dek, accountId, {
+            imapUser: merged.imap.user,
+            imapPassword: merged.imap.password,
+            smtpUser: merged.smtp.user,
+            smtpPassword: merged.smtp.password,
+          }),
+        )
+        set('capabilities', imapResult.capabilities ?? [])
+        // Working credentials: clear the error state (roadmap 3.4).
+        sets.push(
+          `status = 'ok'`,
+          'error_count = 0',
+          'next_retry_at = NULL',
+          'last_error_code = NULL',
+        )
+      }
+
+      if (sets.length > 0) {
+        await pool.query(`UPDATE mail_account SET ${sets.join(', ')} WHERE id = $1`, values)
+      }
+      // Re-sync right away with the new connection data.
+      if (test) await enqueueJob(pool, { type: 'folder_sync', accountId })
+
+      const account = await pool.query<MailAccountRow>(
+        `SELECT ${PUBLIC_COLUMNS} FROM mail_account WHERE id = $1`,
+        [accountId],
+      )
+      await reply.send({ account: toPublicAccount(account.rows[0]!), ...(test ? { test } : {}) })
+    },
+  )
 
   app.delete<{ Params: { id: string } }>(
     '/api/accounts/:id',
     { preHandler: requireAuth },
     async (request, reply) => {
-      const result = await pool.query('DELETE FROM mail_account WHERE id = $1 AND user_id = $2', [
-        request.params.id,
-        request.auth!.userId,
-      ])
-      if (result.rowCount === 0) {
+      const accountId = request.params.id
+      if (!UUID_RE.test(accountId)) {
         await reply.code(404).send({ message: 'Konto nicht gefunden.' })
         return
       }
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        // Cascades to identities, folders, messages, locations, bodies,
+        // threads, outbox and jobs of the account.
+        const result = await client.query(
+          'DELETE FROM mail_account WHERE id = $1 AND user_id = $2',
+          [accountId, request.auth!.userId],
+        )
+        if (result.rowCount === 0) {
+          await client.query('ROLLBACK')
+          await reply.code(404).send({ message: 'Konto nicht gefunden.' })
+          return
+        }
+        // The encrypted files in the mail-data volume are removed by the
+        // worker. The job carries the id in its payload only: job.account_id
+        // would cascade-delete the job together with the account.
+        await enqueueJob(client, { type: 'account_cleanup', payload: { accountId } })
+        await client.query('COMMIT')
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {})
+        throw err
+      } finally {
+        client.release()
+      }
       // Crypto-shredding: the wrapped DEK row is gone, orphaned ciphertexts
-      // (e.g. in backups) stay unreadable. Volume cleanup follows in 5.5.
+      // (e.g. in backups) stay unreadable.
       await reply.code(204).send()
     },
   )
+}
+
+interface ParsedUpdate {
+  displayName?: string
+  sortOrder?: number
+  imap?: { host?: string; port?: number; user?: string; password?: string }
+  smtp?: { host?: string; port?: number; user?: string; password?: string }
+}
+
+/**
+ * Validates a PATCH body. Every field is optional; empty user/password
+ * strings mean "unchanged" (the client never sees stored credentials).
+ * Returns null for invalid input.
+ */
+function parseUpdateBody(body: UpdateAccountBody | undefined): ParsedUpdate | null {
+  if (!body || typeof body !== 'object') return null
+  const result: ParsedUpdate = {}
+  if (body.displayName !== undefined) {
+    if (typeof body.displayName !== 'string') return null
+    const name = body.displayName.trim().slice(0, 100)
+    if (!name) return null
+    result.displayName = name
+  }
+  if (body.sortOrder !== undefined) {
+    const order = body.sortOrder
+    if (typeof order !== 'number' || !Number.isInteger(order) || Math.abs(order) > 1_000_000) {
+      return null
+    }
+    result.sortOrder = order
+  }
+  for (const stage of ['imap', 'smtp'] as const) {
+    const input = body[stage]
+    if (input === undefined) continue
+    if (!input || typeof input !== 'object') return null
+    const parsed: NonNullable<ParsedUpdate['imap']> = {}
+    if (input.host !== undefined) {
+      if (typeof input.host !== 'string' || !input.host.trim()) return null
+      parsed.host = input.host.trim().toLowerCase().slice(0, 253)
+    }
+    if (input.port !== undefined) {
+      if (!isValidPort(input.port)) return null
+      parsed.port = input.port
+    }
+    if (input.user !== undefined && input.user !== null) {
+      if (typeof input.user !== 'string') return null
+      if (input.user.trim()) parsed.user = input.user.trim().slice(0, 320)
+    }
+    if (input.password !== undefined && input.password !== null) {
+      if (typeof input.password !== 'string') return null
+      if (input.password) parsed.password = input.password
+    }
+    if (Object.keys(parsed).length > 0) result[stage] = parsed
+  }
+  return result
+}
+
+/**
+ * Merges the stored connection data with an update. SMTP credentials that
+ * were identical to the IMAP ones follow IMAP changes (the common "password
+ * changed at the provider" case) unless SMTP credentials are given
+ * explicitly.
+ */
+function mergeConnection(
+  current: { imap_host: string; imap_port: number; smtp_host: string; smtp_port: number },
+  stored: StoredCredentials,
+  update: ParsedUpdate,
+): { imap: HostConfig; smtp: HostConfig } {
+  const storedSmtpUser = stored.smtpUser || stored.imapUser
+  const storedSmtpPassword = stored.smtpPassword || stored.imapPassword
+  const smtpFollowsImap =
+    storedSmtpUser === stored.imapUser && storedSmtpPassword === stored.imapPassword
+
+  const imapPort = update.imap?.port ?? current.imap_port
+  const imapUser = update.imap?.user ?? stored.imapUser
+  const imapPassword = update.imap?.password ?? stored.imapPassword
+  const smtpPort = update.smtp?.port ?? current.smtp_port
+  return {
+    imap: {
+      host: update.imap?.host ?? current.imap_host,
+      port: imapPort,
+      secure: isSecurePort(imapPort),
+      user: imapUser,
+      password: imapPassword,
+    },
+    smtp: {
+      host: update.smtp?.host ?? current.smtp_host,
+      port: smtpPort,
+      secure: isSecurePort(smtpPort),
+      user: update.smtp?.user ?? (smtpFollowsImap ? imapUser : storedSmtpUser),
+      password: update.smtp?.password ?? (smtpFollowsImap ? imapPassword : storedSmtpPassword),
+    },
+  }
 }

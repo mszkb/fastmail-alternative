@@ -1,16 +1,18 @@
 /**
  * Integration tests for mail account management (roadmap 2.1): create with
  * connection test against a local GreenMail container, list without
- * credential leakage, delete with crypto-shredding.
+ * credential leakage, edit with re-test (roadmap 3.1), delete with
+ * crypto-shredding and removal of all account rows.
  *
  * Requires DATABASE_URL (Postgres) and a GreenMail instance:
  *   GREENMAIL_HOST, GREENMAIL_IMAP_PORT, GREENMAIL_SMTP_PORT,
  *   GREENMAIL_USER, GREENMAIL_PASSWORD, MAIL_ALLOW_PRIVATE_HOSTS=1
  * CI provides both as service containers; skipped when unset.
  */
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
+import { decryptField, unwrapAccountKey } from '@fma/crypto'
 import { runMigrations } from '@fma/db/migrate'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
@@ -23,7 +25,7 @@ let app: FastifyInstance
 let authToken: string
 
 async function inject(
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   opts: { payload?: object; token?: string } = {},
 ) {
@@ -42,7 +44,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
   beforeAll(async () => {
     app = buildApp({ logger: false })
     await runMigrations(pool)
-    await pool.query('TRUNCATE session, device, "user", mail_account, identity CASCADE')
+    await pool.query('TRUNCATE session, device, "user", mail_account, identity, job CASCADE')
 
     // Register the single user and grab a session.
     const setup = await inject('POST', '/api/auth/setup', {
@@ -52,7 +54,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
   })
 
   afterAll(async () => {
-    await pool.query('TRUNCATE session, device, "user", mail_account, identity CASCADE')
+    await pool.query('TRUNCATE session, device, "user", mail_account, identity, job CASCADE')
     await pool.end()
   })
 
@@ -162,6 +164,44 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     expect(accounts[0]).not.toHaveProperty('wrappedDek')
   })
 
+  it('lists the INBOX unread count per account', async () => {
+    const list = await inject('GET', '/api/accounts', { token: authToken })
+    const id = list.json().accounts[0].id as string
+    expect(list.json().accounts[0].unreadCount).toBe(0)
+
+    const inbox = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path, special_use) VALUES ($1, 'INBOX', 'inbox') RETURNING id`,
+      [id],
+    )
+    const other = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path) VALUES ($1, 'Projekte') RETURNING id`,
+      [id],
+    )
+    const flagsList = [[], ['\\Seen'], [], ['\\Flagged']]
+    for (const [index, flags] of flagsList.entries()) {
+      for (const folderId of [inbox.rows[0]!.id, other.rows[0]!.id]) {
+        const messageId = randomUUID()
+        await pool.query(
+          `INSERT INTO message (id, account_id, message_id_header, subject_enc, from_enc,
+             recipients_enc, snippet_enc)
+           VALUES ($1, $2, $3, '\\x00', '\\x00', '\\x00', '\\x00')`,
+          [messageId, id, `<${messageId}@x>`],
+        )
+        await pool.query(
+          `INSERT INTO message_location (message_id, folder_id, uidvalidity, uid, flags)
+           VALUES ($1, $2, 1, $3, $4)`,
+          [messageId, folderId, index + 1, flags],
+        )
+      }
+    }
+
+    const after = await inject('GET', '/api/accounts', { token: authToken })
+    // 3 unread in INBOX; unread mail in other folders does not count.
+    expect(after.json().accounts[0].unreadCount).toBe(3)
+    await pool.query('DELETE FROM message WHERE account_id = $1', [id])
+    await pool.query('DELETE FROM folder WHERE account_id = $1', [id])
+  })
+
   it('stores the DEK wrapped and credentials encrypted in the database', async () => {
     const { rows } = await pool.query<{
       wrapped_dek: Buffer
@@ -169,6 +209,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
       key_id: string
     }>('SELECT wrapped_dek, credential_enc, key_id FROM mail_account LIMIT 1')
     const row = rows[0]
+    if (!row) throw new Error('no mail_account row found')
     expect(row.key_id).toBe(process.env.MASTER_KEY_ID ?? 'v1')
     expect(row.wrapped_dek.toString('utf8')).toContain('fma.k1.')
     expect(row.credential_enc.toString('utf8')).toContain('fma.f1.')
@@ -182,9 +223,177 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     expect(rows[0]?.email_address).toBe('testuser@example.com')
   })
 
-  it('deletes the account (crypto-shredding)', async () => {
+  async function accountId(): Promise<string> {
     const list = await inject('GET', '/api/accounts', { token: authToken })
-    const id = list.json().accounts[0].id as string
+    return list.json().accounts[0].id as string
+  }
+
+  async function storedCredentials(id: string): Promise<Record<string, string>> {
+    const { rows } = await pool.query<{ wrapped_dek: Buffer; credential_enc: Buffer }>(
+      'SELECT wrapped_dek, credential_enc FROM mail_account WHERE id = $1',
+      [id],
+    )
+    const dek = unwrapAccountKey(process.env.MASTER_KEY!, rows[0]!.wrapped_dek)
+    return JSON.parse(
+      decryptField(dek, rows[0]!.credential_enc.toString('utf8'), `mail_account.credential:${id}`),
+    ) as Record<string, string>
+  }
+
+  async function folderSyncJobCount(id: string): Promise<number> {
+    const { rows } = await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM job WHERE type = 'folder_sync' AND account_id = $1`,
+      [id],
+    )
+    return rows[0]!.count
+  }
+
+  it('edits display name and sort order without a connection test', async () => {
+    const id = await accountId()
+    const jobsBefore = await folderSyncJobCount(id)
+    const res = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { displayName: '  Arbeit  ', sortOrder: 3 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().account.displayName).toBe('Arbeit')
+    expect(res.json().account.sortOrder).toBe(3)
+    expect(res.json().test).toBeUndefined()
+    expect(await folderSyncJobCount(id)).toBe(jobsBefore)
+  })
+
+  it('rejects invalid edits and unknown accounts', async () => {
+    const id = await accountId()
+    const bad = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { imap: { port: 70000 } },
+    })
+    expect(bad.statusCode).toBe(400)
+    const empty = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { displayName: '   ' },
+    })
+    expect(empty.statusCode).toBe(400)
+    const unknown = await inject('PATCH', `/api/accounts/${randomUUID()}`, {
+      token: authToken,
+      payload: { displayName: 'x' },
+    })
+    expect(unknown.statusCode).toBe(404)
+    const invalid = await inject('PATCH', '/api/accounts/not-a-uuid', {
+      token: authToken,
+      payload: { displayName: 'x' },
+    })
+    expect(invalid.statusCode).toBe(404)
+  })
+
+  it('re-tests changed connection data and saves nothing on failure', async () => {
+    const id = await accountId()
+    const before = await pool.query<{ credential_enc: Buffer; imap_port: number }>(
+      'SELECT credential_enc, imap_port FROM mail_account WHERE id = $1',
+      [id],
+    )
+    const res = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { imap: { password: 'wrong password 123' } },
+    })
+    expect(res.statusCode).toBe(422)
+    expect(res.json().stage).toBe('imap')
+    expect(res.json().test.code).toBe('AUTH_FAILED')
+
+    const after = await pool.query<{ credential_enc: Buffer; imap_port: number }>(
+      'SELECT credential_enc, imap_port FROM mail_account WHERE id = $1',
+      [id],
+    )
+    expect(after.rows[0]!.credential_enc.equals(before.rows[0]!.credential_enc)).toBe(true)
+    expect((await storedCredentials(id)).imapPassword).toBe(process.env.GREENMAIL_PASSWORD)
+  })
+
+  it('updates credentials, resets the error state and re-syncs', async () => {
+    const id = await accountId()
+    await pool.query(
+      `UPDATE mail_account SET status = 'auth_error', error_count = 4,
+         last_error_code = 'AUTH_FAILED', next_retry_at = now() + interval '1 hour'
+       WHERE id = $1`,
+      [id],
+    )
+    // The status display gets code and retry time, never server text.
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json().accounts[0]
+    expect(listed).toMatchObject({ status: 'auth_error', lastErrorCode: 'AUTH_FAILED' })
+    expect(Date.parse(listed.nextRetryAt)).toBeGreaterThan(Date.now())
+    const before = await pool.query<{ credential_enc: Buffer }>(
+      'SELECT credential_enc FROM mail_account WHERE id = $1',
+      [id],
+    )
+    const jobsBefore = await folderSyncJobCount(id)
+
+    const res = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: {
+        imap: {
+          host: greenmailHost,
+          port: Number(process.env.GREENMAIL_IMAP_PORT),
+          user: process.env.GREENMAIL_USER,
+          password: process.env.GREENMAIL_PASSWORD,
+        },
+        // Empty strings: keep the stored SMTP credentials.
+        smtp: { user: '', password: '' },
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.account).toMatchObject({ status: 'ok', lastErrorCode: null, nextRetryAt: null })
+    expect(body.test.imap.ok).toBe(true)
+    expect(body.test.smtp.ok).toBe(true)
+    expect(JSON.stringify(body)).not.toContain(process.env.GREENMAIL_PASSWORD!)
+
+    const { rows } = await pool.query<{
+      status: string
+      error_count: number
+      next_retry_at: Date | null
+      credential_enc: Buffer
+    }>(
+      'SELECT status, error_count, next_retry_at, credential_enc FROM mail_account WHERE id = $1',
+      [id],
+    )
+    expect(rows[0]).toMatchObject({ status: 'ok', error_count: 0, next_retry_at: null })
+    // Re-encrypted (fresh nonce), still the same plaintext.
+    expect(rows[0]!.credential_enc.equals(before.rows[0]!.credential_enc)).toBe(false)
+    expect(rows[0]!.credential_enc.toString('utf8')).not.toContain(process.env.GREENMAIL_PASSWORD!)
+    const creds = await storedCredentials(id)
+    expect(creds.imapPassword).toBe(process.env.GREENMAIL_PASSWORD)
+    expect(creds.smtpPassword).toBe(process.env.GREENMAIL_PASSWORD)
+    expect(await folderSyncJobCount(id)).toBe(jobsBefore + 1)
+  })
+
+  it('deletes the account with all its data (crypto-shredding)', async () => {
+    const id = await accountId()
+
+    // One row in every account-owned table.
+    const folder = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path) VALUES ($1, 'INBOX') RETURNING id`,
+      [id],
+    )
+    const threadId = randomUUID()
+    await pool.query('INSERT INTO thread (id, account_id) VALUES ($1, $2)', [threadId, id])
+    const messageId = randomUUID()
+    await pool.query(
+      `INSERT INTO message (id, account_id, message_id_header, subject_enc, from_enc,
+         recipients_enc, snippet_enc, thread_id)
+       VALUES ($1, $2, '<m@x>', '\\x00', '\\x00', '\\x00', '\\x00', $3)`,
+      [messageId, id, threadId],
+    )
+    await pool.query(
+      `INSERT INTO message_location (message_id, folder_id, uidvalidity, uid) VALUES ($1, $2, 1, 1)`,
+      [messageId, folder.rows[0]!.id],
+    )
+    await pool.query(`INSERT INTO message_body (message_id, storage_ref) VALUES ($1, $2)`, [
+      messageId,
+      `${id}/${messageId}/raw.eml.enc`,
+    ])
+    await pool.query(
+      `INSERT INTO outbox_message (id, account_id, message_id_header) VALUES ($1, $2, '<o@x>')`,
+      [randomUUID(), id],
+    )
+    await pool.query(`INSERT INTO job (type, account_id) VALUES ('message_sync', $1)`, [id])
 
     const res = await inject('DELETE', `/api/accounts/${id}`, { token: authToken })
     expect(res.statusCode).toBe(204)
@@ -192,10 +401,32 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     const after = await inject('GET', '/api/accounts', { token: authToken })
     expect(after.json().accounts).toHaveLength(0)
 
-    const identities = await pool.query('SELECT * FROM identity')
-    expect(identities.rowCount).toBe(0) // cascade
+    for (const [table, where] of [
+      ['mail_account', 'id = $1'],
+      ['identity', 'account_id = $1'],
+      ['folder', 'account_id = $1'],
+      ['thread', 'account_id = $1'],
+      ['message', 'account_id = $1'],
+      ['outbox_message', 'account_id = $1'],
+      ['job', 'account_id = $1'],
+    ] as const) {
+      const { rowCount } = await pool.query(`SELECT 1 FROM ${table} WHERE ${where}`, [id])
+      expect(rowCount, table).toBe(0)
+    }
+    const locations = await pool.query('SELECT 1 FROM message_location WHERE message_id = $1', [
+      messageId,
+    ])
+    expect(locations.rowCount).toBe(0)
+    const bodies = await pool.query('SELECT 1 FROM message_body WHERE message_id = $1', [messageId])
+    expect(bodies.rowCount).toBe(0)
 
-    const wrongUser = await inject('DELETE', `/api/accounts/${id}`, { token: authToken })
-    expect(wrongUser.statusCode).toBe(404)
+    // Volume cleanup is handed to the worker with the id only.
+    const cleanup = await pool.query<{ account_id: string | null; payload: unknown }>(
+      `SELECT account_id, payload FROM job WHERE type = 'account_cleanup'`,
+    )
+    expect(cleanup.rows).toEqual([{ account_id: null, payload: { accountId: id } }])
+
+    const again = await inject('DELETE', `/api/accounts/${id}`, { token: authToken })
+    expect(again.statusCode).toBe(404)
   })
 })

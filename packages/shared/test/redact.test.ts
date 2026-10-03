@@ -22,14 +22,14 @@ describe('redactForLog', () => {
 
   it('censors nested keys and inside arrays', () => {
     const redacted = redactForLog({
-      account: { credentials: { password: 'x', imap: { host: 'imap.example.com' } } },
+      account: { settings: { password: 'x', imap: { host: 'imap.example.com' } } },
       jobs: [{ token: 't1' }, { subject: 's1' }],
     }) as {
-      account: { credentials: { password: string; imap: { host: string } } }
+      account: { settings: { password: string; imap: { host: string } } }
       jobs: { token?: string; subject?: string }[]
     }
-    expect(redacted.account.credentials.password).toBe('[REDACTED]')
-    expect(redacted.account.credentials.imap.host).toBe('imap.example.com') // host stays
+    expect(redacted.account.settings.password).toBe('[REDACTED]')
+    expect(redacted.account.settings.imap.host).toBe('imap.example.com') // host stays
     expect(redacted.jobs[0]?.token).toBe('[REDACTED]')
     expect(redacted.jobs[1]?.subject).toBe('[REDACTED]')
   })

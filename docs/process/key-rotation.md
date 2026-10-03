@@ -7,6 +7,7 @@ Der `MASTER_KEY` (32 Byte, base64, siehe `.env`) verschlüsselt alle Data Keys (
 ## Design-Grundlage
 
 - Ein **DEK pro Mailkonto** liegt als `mail_account.wrapped_dek` (verschlüsselt mit dem Master-Key) in der DB. Das Feld `mail_account.key_id` trägt die Master-Key-Version (z. B. `v1`).
+- Ebenso ein **DEK pro Benutzer** für benutzerbezogene Secrets (Push-Subscription-Keys) in `"user".wrapped_dek` / `"user".key_id`; er wird bei der Rotation genauso neu verpackt.
 - Inhalte (Betreff, Body, Zugangsdaten, …) sind **mit dem DEK** verschlüsselt, nicht direkt mit dem Master-Key.
 - Eine Rotation ändert daher **nur die Wrapper**: DEKs werden mit dem neuen Master-Key neu verpackt. Die Inhalte selbst bleiben unangetastet.
 
@@ -29,6 +30,7 @@ Implementierung: `packages/crypto` (`wrapDataKey` / `unwrapDataKey`, AES-256-GCM
    -- Re-Wrap geschieht in der Anwendung: unwrap mit altem Key
    -- (key_id aus der Zeile lesen), wrap mit dem neuen Key und neuer key_id.
    UPDATE mail_account SET wrapped_dek = :new_wrapped, key_id = 'v2' WHERE id = :id;
+   UPDATE "user" SET wrapped_dek = :new_wrapped, key_id = 'v2' WHERE id = :id;
    ```
 
    Ein Hilfsskript dafür folgt mit Epic 2.1 (erst dann gibt es Konten mit DEKs).
@@ -37,6 +39,7 @@ Implementierung: `packages/crypto` (`wrapDataKey` / `unwrapDataKey`, AES-256-GCM
 
    ```sql
    SELECT count(*) FROM mail_account WHERE key_id <> 'v2';  -- muss 0 sein
+   SELECT count(*) FROM "user" WHERE key_id <> 'v2';        -- muss 0 sein
    ```
 
 5. **Aufräumen:** `MASTER_KEY_PREVIOUS` aus der `.env` entfernen, Instanz neu starten. Den alten Master-Key sicher vernichten; das Backup der `.env` entsprechend aktualisieren (neuer Master-Key, getrennt sichern!).

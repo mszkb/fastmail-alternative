@@ -82,8 +82,23 @@ export async function rotateSession(pool: Pool, sessionId: string): Promise<stri
   return token
 }
 
+/**
+ * Logout. A device without sessions is never used again (every login
+ * creates a new device), so its push subscriptions go as well: a logged-out
+ * browser gets no more notifications.
+ */
 export async function deleteSession(pool: Pool, sessionId: string): Promise<void> {
-  await pool.query('DELETE FROM session WHERE id = $1', [sessionId])
+  const { rows } = await pool.query<{ device_id: string }>(
+    'DELETE FROM session WHERE id = $1 RETURNING device_id',
+    [sessionId],
+  )
+  const deviceId = rows[0]?.device_id
+  if (!deviceId) return
+  await pool.query(
+    `DELETE FROM push_subscription
+     WHERE device_id = $1 AND NOT EXISTS (SELECT 1 FROM session WHERE device_id = $1)`,
+    [deviceId],
+  )
 }
 
 export interface DeviceInfo {
@@ -128,6 +143,7 @@ export async function revokeDevice(pool: Pool, userId: string, deviceId: string)
   )
   if (result.rowCount === 0) return false
   await pool.query('DELETE FROM session WHERE device_id = $1', [deviceId])
+  await pool.query('DELETE FROM push_subscription WHERE device_id = $1', [deviceId])
   return true
 }
 
@@ -141,5 +157,5 @@ export function maybeTouchDevice(pool: Pool, deviceId: string): void {
   const last = lastSeenWrites.get(deviceId) ?? 0
   if (now - last < LAST_SEEN_THROTTLE_MS) return
   lastSeenWrites.set(deviceId, now)
-  pool.query('UPDATE device SET last_seen_at = now() WHERE id = $1').catch(() => {})
+  pool.query('UPDATE device SET last_seen_at = now() WHERE id = $1', [deviceId]).catch(() => {})
 }

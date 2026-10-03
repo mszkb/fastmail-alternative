@@ -12,6 +12,20 @@
 import type pg from 'pg'
 import { migration0001 } from './migrations/0001_users_devices_sessions'
 import { migration0002 } from './migrations/0002_mail_accounts'
+import { migration0003 } from './migrations/0003_jobs_folders'
+import { migration0004 } from './migrations/0004_messages'
+import { migration0005 } from './migrations/0005_message_actions'
+import { migration0006 } from './migrations/0006_outbox'
+import { migration0007 } from './migrations/0007_message_metadata_version'
+import { migration0008 } from './migrations/0008_threads'
+import { migration0009 } from './migrations/0009_account_health'
+import { migration0010 } from './migrations/0010_push'
+import { migration0011 } from './migrations/0011_folder_roles'
+import { migration0012 } from './migrations/0012_default_identity'
+import { migration0013 } from './migrations/0013_message_body_skip'
+import { migration0014 } from './migrations/0014_folder_selectable'
+import { migration0015 } from './migrations/0015_outbox_client_id'
+import { migration0016 } from './migrations/0016_drafts'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -24,7 +38,24 @@ export interface Migration {
 const MIGRATION_LOCK_ID = 0x2f6d61n // "fma"
 
 /** Ordered list of all migrations. Append new ones at the end. */
-export const migrations: Migration[] = [migration0001, migration0002]
+export const migrations: Migration[] = [
+  migration0001,
+  migration0002,
+  migration0003,
+  migration0004,
+  migration0005,
+  migration0006,
+  migration0007,
+  migration0008,
+  migration0009,
+  migration0010,
+  migration0011,
+  migration0012,
+  migration0013,
+  migration0014,
+  migration0015,
+  migration0016,
+]
 
 /**
  * Runs all pending migrations. Returns the names of newly applied

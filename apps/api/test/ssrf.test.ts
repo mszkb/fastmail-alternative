@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPublicIp, assertPublicHost, PrivateHostError } from '../src/mail/ssrf'
+import { isPublicIp, assertPublicHost, PrivateHostError } from '@fma/shared/ssrf'
 
 describe('isPublicIp (IPv4)', () => {
   it('allows public addresses', () => {
@@ -55,12 +55,22 @@ describe('isPublicIp (IPv6)', () => {
     ['::ffff:127.0.0.1', 'ipv4-mapped loopback'],
     ['::ffff:10.0.0.1', 'ipv4-mapped private'],
     ['2001:db8::1', 'documentation'],
+    ['2002:a00:1::1', '6to4 of 10.0.0.1'],
+    ['2002:7f00:1::', '6to4 of 127.0.0.1'],
+    ['2002:c0a8:101::1', '6to4 of 192.168.1.1'],
+    ['2002:a9fe:a9fe::1', '6to4 of 169.254.169.254'],
+    ['2002::1', '6to4 of 0.0.0.0'],
   ])('blocks %s (%s)', (address) => {
     expect(isPublicIp(address)).toBe(false)
   })
 
   it('allows ipv4-mapped public addresses', () => {
     expect(isPublicIp('::ffff:8.8.8.8')).toBe(true)
+  })
+
+  it('allows 6to4 addresses of public IPv4 addresses', () => {
+    expect(isPublicIp('2002:808:808::1')).toBe(true) // 8.8.8.8
+    expect(isPublicIp('2002:5db8:d822::1')).toBe(true) // 93.184.216.34
   })
 })
 

@@ -5,7 +5,20 @@
  * `@fma` scope once the project has a final product name.
  */
 
+export * from './badge'
+export * from './compose'
+export * from './config-export'
+export * from './drafts'
+export * from './folders'
+export * from './foreground-sync'
+export * from './install'
+export * from './mail'
+export * from './offline'
+export * from './push'
 export * from './redact'
+export * from './request-scope'
+export * from './search'
+export * from './threading'
 
 export type ServiceName = 'api' | 'worker' | 'web'
 

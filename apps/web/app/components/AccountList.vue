@@ -1,24 +1,40 @@
 <script setup lang="ts">
-interface Account {
-  id: string
-  displayName: string
-  emailAddress: string
-  imap: { host: string; port: number }
-  smtp: { host: string; port: number }
-  status: string
-}
+// Account list in the settings (roadmap 2.1/3.1): edit, identities (3.6), folder
+// mapping (3.3), remove;
+// connection problems (3.4) are explained in German with the edit action.
+import { accountStatusInfo, type AccountSummary } from '@fma/shared'
+
+type Account = Pick<
+  AccountSummary,
+  'id' | 'displayName' | 'emailAddress' | 'imap' | 'smtp' | 'status' | 'lastErrorCode'
+> & { sortOrder?: number }
 
 defineProps<{ accounts: Account[] }>()
-const emit = defineEmits<{ deleted: [id: string] }>()
+const emit = defineEmits<{ deleted: [id: string]; changed: [id: string] }>()
 
 const busy = ref(false)
 const error = ref('')
+// Account whose identity settings (signature, aliases, default) are open.
+const editing = ref('')
+// Account whose folder mapping (3.3) is open.
+const mapping = ref('')
+// Account whose edit form is open (also opened from the mail view, e.g.
+// "Zugangsdaten aktualisieren").
+const editingAccount = defineModel<string>('edit', { default: '' })
+
+function onSaved(id: string): void {
+  editingAccount.value = ''
+  emit('changed', id)
+}
 
 async function remove(account: Account): Promise<void> {
   if (busy.value) return
   if (
     !confirm(
-      `Konto „${account.displayName}“ wirklich entfernen? Gespeicherte Zugangsdaten werden gelöscht.`,
+      `Konto „${account.displayName}“ wirklich entfernen?\n\n` +
+        'Zugangsdaten, Ordner, zwischengespeicherte Nachrichten und der Postausgang dieses ' +
+        'Kontos werden auf diesem Server gelöscht. Die Nachrichten beim Mailanbieter bleiben ' +
+        'unverändert.',
     )
   )
     return
@@ -49,9 +65,49 @@ async function remove(account: Account): Promise<void> {
         <span>
           <strong>{{ account.displayName }}</strong>
           <span class="mail">{{ account.emailAddress }}</span>
-          <span class="tag">{{ account.status }}</span>
+          <span v-if="accountStatusInfo(account)" class="tag problem">{{
+            accountStatusInfo(account)!.label
+          }}</span>
+          <span v-else class="tag">verbunden</span>
         </span>
-        <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
+        <span class="actions">
+          <button
+            type="button"
+            class="neutral"
+            :aria-expanded="editingAccount === account.id"
+            @click="editingAccount = editingAccount === account.id ? '' : account.id"
+          >
+            Bearbeiten
+          </button>
+          <button
+            type="button"
+            class="neutral"
+            :aria-expanded="editing === account.id"
+            @click="editing = editing === account.id ? '' : account.id"
+          >
+            Identitäten
+          </button>
+          <button
+            type="button"
+            class="neutral"
+            :aria-expanded="mapping === account.id"
+            @click="mapping = mapping === account.id ? '' : account.id"
+          >
+            Ordner
+          </button>
+          <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
+        </span>
+        <p v-if="accountStatusInfo(account)" class="status-text">
+          {{ accountStatusInfo(account)!.description }}
+        </p>
+        <AccountForm
+          v-if="editingAccount === account.id"
+          :account="account"
+          @saved="onSaved(account.id)"
+          @cancel="editingAccount = ''"
+        />
+        <IdentitySettings v-if="editing === account.id" :account-id="account.id" />
+        <FolderRoles v-if="mapping === account.id" :account-id="account.id" />
       </li>
     </ul>
     <p v-if="error" class="error">{{ error }}</p>
@@ -87,6 +143,7 @@ h2 {
 .accounts li {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
@@ -101,6 +158,18 @@ h2 {
   display: block;
   font-size: 0.8rem;
   color: #52606d;
+}
+
+.tag.problem {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.status-text {
+  width: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #7c2d12;
 }
 
 .tag {
@@ -121,6 +190,16 @@ button {
   color: #cf1124;
   font: inherit;
   cursor: pointer;
+}
+
+button.neutral {
+  border-color: #1273de;
+  color: #1273de;
+}
+
+.actions {
+  display: flex;
+  gap: 0.4rem;
 }
 
 button:disabled {
