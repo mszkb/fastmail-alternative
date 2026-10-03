@@ -62,7 +62,7 @@ interface FolderRow {
   total: number
 }
 
-interface ListRow {
+export interface ListRow {
   location_id: string
   id: string
   subject_enc: Buffer
@@ -109,6 +109,19 @@ const DETAIL_SELECT = /* sql */ `
   FROM message m
   JOIN mail_account a ON a.id = m.account_id
   LEFT JOIN message_body mb ON mb.message_id = m.id`
+
+/**
+ * List columns of a message location (alias `ml`) joined with its message
+ * (alias `m`); shared with the search (./search).
+ */
+export const LIST_COLUMNS = /* sql */ `
+  ml.id AS location_id, m.id, m.subject_enc, m.from_enc, m.snippet_enc,
+  m.has_attachments, ml.flags,
+  ${SORT_AT} AS sort_at, (${SORT_AT})::text AS sort_key,
+  m.thread_id::text AS thread_id,
+  CASE WHEN m.thread_id IS NULL THEN 1
+       ELSE (SELECT count(*)::int FROM message t WHERE t.thread_id = m.thread_id)
+  END AS thread_count`
 
 /** Decrypts one message field; corrupt ciphertexts degrade to null (logged without content). */
 function decrypt(
@@ -168,6 +181,21 @@ function toMessageDetail(log: FastifyBaseLogger, dek: Buffer, row: DetailRow): M
     references: row.references,
     text: decrypt(log, dek, row.text_plain_enc, 'text', row.id),
     threadId: row.thread_id,
+  }
+}
+
+/** Decrypted list entry of a ListRow (see LIST_COLUMNS). */
+export function toListItem(log: FastifyBaseLogger, dek: Buffer, row: ListRow): MessageListItem {
+  return {
+    id: row.id,
+    subject: decrypt(log, dek, row.subject_enc, 'subject', row.id) ?? '',
+    from: toPeople(parseJson(decrypt(log, dek, row.from_enc, 'from', row.id)))[0] ?? null,
+    date: row.sort_at.toISOString(),
+    snippet: decrypt(log, dek, row.snippet_enc, 'snippet', row.id) ?? '',
+    flags: toFlags(row.flags),
+    hasAttachments: row.has_attachments,
+    threadId: row.thread_id,
+    threadCount: row.thread_count,
   }
 }
 
@@ -330,13 +358,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       // Keyset pagination: the cursor carries the exact (microsecond) sort
       // key as text plus the location id as tie-breaker.
       const { rows } = await pool.query<ListRow>(
-        `SELECT ml.id AS location_id, m.id, m.subject_enc, m.from_enc, m.snippet_enc,
-                m.has_attachments, ml.flags,
-                ${SORT_AT} AS sort_at, (${SORT_AT})::text AS sort_key,
-                m.thread_id::text AS thread_id,
-                CASE WHEN m.thread_id IS NULL THEN 1
-                     ELSE (SELECT count(*)::int FROM message t WHERE t.thread_id = m.thread_id)
-                END AS thread_count
+        `SELECT ${LIST_COLUMNS}
          FROM message_location ml
          JOIN message m ON m.id = ml.message_id
          WHERE ml.folder_id = $1
@@ -348,18 +370,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
       const dek = unwrapAccountKey(masterKey(), folderRow.wrapped_dek)
       const page = rows.slice(0, limit)
-      const messages: MessageListItem[] = page.map((row) => ({
-        id: row.id,
-        subject: decrypt(request.log, dek, row.subject_enc, 'subject', row.id) ?? '',
-        from:
-          toPeople(parseJson(decrypt(request.log, dek, row.from_enc, 'from', row.id)))[0] ?? null,
-        date: row.sort_at.toISOString(),
-        snippet: decrypt(request.log, dek, row.snippet_enc, 'snippet', row.id) ?? '',
-        flags: toFlags(row.flags),
-        hasAttachments: row.has_attachments,
-        threadId: row.thread_id,
-        threadCount: row.thread_count,
-      }))
+      const messages: MessageListItem[] = page.map((row) => toListItem(request.log, dek, row))
       const last = page[page.length - 1]
       const body: MessageListResponse = {
         messages,

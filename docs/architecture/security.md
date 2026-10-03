@@ -22,13 +22,13 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 
 | Bedrohung                      | Maßnahme                                                                                                                                                                |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brute Force / Missbrauch       | Rate Limits auf Login, Konto-Test, Versand                                                                                                                              |
+| Brute Force / Missbrauch       | Rate Limits auf Login, Konto-Test, Versand, Suche beim Provider                                                                                                         |
 | CSRF                           | CSRF-Token bzw. SameSite + Origin-Prüfung                                                                                                                               |
 | Session-Diebstahl              | Rotation, Gerätebindung, Widerruf                                                                                                                                       |
 | SSRF über Mailserver-Hostnamen | Auflösung prüfen, private/Loopback/Link-Local-Adressen standardmäßig blockieren (für Self-Hoster mit internem Mailserver konfigurierbar freigebbar), nur erlaubte Ports |
 | Bösartige HTML-Mails           | Sanitizing, strikte CSP, Rendering in sandboxed iframe, Remote-Content opt-in                                                                                           |
 | Bösartige Anhänge              | Auslieferung mit `Content-Disposition: attachment`, eigener Origin/Sandbox, Größenlimits                                                                                |
-| Datenabfluss über Logs         | Zentrale Redaction, Tests dafür                                                                                                                                         |
+| Datenabfluss über Logs         | Zentrale Redaction, Tests dafür; Request-URLs ohne Query-String (Suchbegriffe, ADR-0006)                                                                                |
 | Datenabfluss über Push         | Inhaltsfreie Payloads (siehe [push.md](push.md))                                                                                                                        |
 
 ## HTML-Mails

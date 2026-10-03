@@ -35,6 +35,11 @@
 // copies are hidden there) and continued by clicking them. A message of
 // the Drafts folder (e.g. written in another client) gets "Bearbeiten",
 // which opens it as a draft. Switching accounts saves an open draft.
+// Search (5.1): a search field above the list searches the active account
+// at the provider (IMAP SEARCH via GET /api/accounts/:id/search, online
+// only). Hits replace the list (same rendering, with their folder); actions
+// on a hit run in the folder it was found in. Clearing the search reloads
+// the folder. Matches without a local copy are only counted.
 import {
   RequestScope,
   accountDataChanged,
@@ -43,6 +48,8 @@ import {
   isStaleResponse,
   mergeFirstPage,
   overlayPendingActions,
+  parseSearchQuery,
+  searchQueryString,
 } from '@fma/shared'
 import type {
   AccountSummary,
@@ -61,6 +68,7 @@ import type {
   MessageListResponse,
   IdentityListResponse,
   OutboxMessage,
+  SearchResponse,
   ThreadDetail,
 } from '@fma/shared'
 import type ComposeForm from './ComposeForm.vue'
@@ -125,6 +133,20 @@ const compose = ref<{
   saved?: Draft
 } | null>(null)
 const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
+// Search (5.1): criteria of the form and the shown result (null = folder view).
+const searchForm = reactive({
+  q: '',
+  from: '',
+  subject: '',
+  since: '',
+  before: '',
+  onlyFolder: false,
+})
+const showSearchOptions = ref(false)
+const search = ref<SearchResponse | null>(null)
+const searchLoading = ref(false)
+const searchError = ref('')
+let searchRequest = 0
 const draftList = ref<InstanceType<typeof DraftList> | null>(null)
 let composeCounter = 0
 const composeKey = ref(0)
@@ -173,7 +195,18 @@ function statusInfo(account: AccountOption) {
 
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
-const inTrash = computed(() => currentFolder.value?.specialUse === 'trash')
+// Folder the actions of the open message apply to: the current folder, or
+// the folder a search hit was found in.
+const actionFolder = computed(() => {
+  const hitFolder = search.value?.messages.find((m) => m.id === selectedId.value)?.folderId
+  return hitFolder ? (folders.value.find((f) => f.id === hitFolder) ?? null) : currentFolder.value
+})
+const inTrash = computed(() => actionFolder.value?.specialUse === 'trash')
+const hasSearchCriteria = computed(() =>
+  Boolean(
+    searchForm.q || searchForm.from || searchForm.subject || searchForm.since || searchForm.before,
+  ),
+)
 const draftsFolder = computed(
   () => folders.value.find((f) => f.specialUse === 'drafts' && f.selectable) ?? null,
 )
@@ -182,7 +215,7 @@ const inDraftsFolder = computed(
 )
 // Drafts folder: the IMAP copies of drafts listed by DraftList are hidden.
 const visibleMessages = computed(() => {
-  const hidden = inDraftsFolder.value ? draftList.value?.messageIds : undefined
+  const hidden = inDraftsFolder.value && !search.value ? draftList.value?.messageIds : undefined
   if (!hidden || hidden.size === 0) return messages.value
   return messages.value.filter((m) => !hidden.has(m.id))
 })
@@ -193,7 +226,7 @@ const detailIsDraft = computed(
     detail.value.folderIds.includes(draftsFolder.value.id),
 )
 const moveTargets = computed(() =>
-  folders.value.filter((f) => f.selectable && f.id !== folderId.value),
+  folders.value.filter((f) => f.selectable && f.id !== (actionFolder.value?.id ?? folderId.value)),
 )
 // Messages shown in the detail pane: the conversation (with the opened
 // message's live object, so optimistic flag changes show) or just the detail.
@@ -453,7 +486,73 @@ function defaultFolder(list: FolderSummary[]): FolderSummary | undefined {
   return list.find((f) => f.specialUse === 'inbox') ?? list.find((f) => f.selectable)
 }
 
+/** Leaves the search result (without reloading); in-flight searches are dropped. */
+function resetSearch(): void {
+  searchRequest++
+  search.value = null
+  searchLoading.value = false
+  searchError.value = ''
+}
+
+/** Searches the active account at the provider; the hits replace the list. */
+async function runSearch(): Promise<void> {
+  const query = parseSearchQuery({
+    q: searchForm.q,
+    from: searchForm.from,
+    subject: searchForm.subject,
+    since: searchForm.since,
+    before: searchForm.before,
+    folderId: searchForm.onlyFolder ? folderId.value : undefined,
+  })
+  if (typeof query === 'string') {
+    searchError.value = query
+    return
+  }
+  if (navigator.onLine === false) {
+    searchError.value = 'Die Suche ist nur online möglich.'
+    return
+  }
+  const account = accountId.value
+  const request = ++searchRequest
+  // Drop folder loads still in flight; the result is never cached offline.
+  listRequest++
+  listCacheFolder = ''
+  listLoading.value = false
+  searchLoading.value = true
+  searchError.value = ''
+  closeDetail()
+  try {
+    const res = await getJson<SearchResponse>(
+      `/api/accounts/${account}/search?${searchQueryString(query)}`,
+    )
+    if (request !== searchRequest || account !== accountId.value) return
+    search.value = res
+    messages.value = res.messages
+    nextCursor.value = null
+  } catch (err) {
+    if (request !== searchRequest || isStaleResponse(err)) return
+    searchError.value = err instanceof Error ? err.message : 'Die Suche ist fehlgeschlagen.'
+  } finally {
+    if (request === searchRequest) searchLoading.value = false
+  }
+}
+
+/** Ends the search and shows the current folder again. */
+function clearSearch(): void {
+  const wasActive = search.value !== null
+  Object.assign(searchForm, { q: '', from: '', subject: '', since: '', before: '' })
+  resetSearch()
+  if (wasActive && folderId.value) void selectFolder(folderId.value)
+}
+
+function hitFolderLabel(message: MessageListItem): string {
+  const id = (message as { folderId?: string }).folderId
+  const folder = id ? folders.value.find((f) => f.id === id) : undefined
+  return folder ? folderLabel(folder) : ''
+}
+
 async function selectFolder(id: string): Promise<void> {
+  resetSearch()
   folderId.value = id
   messages.value = []
   nextCursor.value = null
@@ -584,10 +683,15 @@ async function loadThread(threadId: string, request: number): Promise<void> {
 }
 
 /** Optimistic local effect of an action on list, detail and folder counts. */
-function applyLocally(action: MessageAction, ids: string[], targetFolderId?: string): void {
+function applyLocally(
+  action: MessageAction,
+  ids: string[],
+  sourceFolderId: string,
+  targetFolderId?: string,
+): void {
   const idSet = new Set(ids)
   const affected = messages.value.filter((m) => idSet.has(m.id))
-  const source = currentFolder.value
+  const source = folders.value.find((f) => f.id === sourceFolderId) ?? null
   const target = folders.value.find((f) => f.id === targetFolderId) ?? null
 
   if (action === 'read' || action === 'unread') {
@@ -635,7 +739,9 @@ async function runAction(
   ids: string[],
   targetFolderId?: string,
 ): Promise<void> {
-  if (!folderId.value || ids.length === 0) return
+  // A search hit is acted on in the folder it was found in.
+  const sourceFolderId = actionFolder.value?.id ?? folderId.value
+  if (!sourceFolderId || ids.length === 0) return
   if (action === 'delete' && inTrash.value) {
     const ok = window.confirm(
       ids.length === 1
@@ -649,14 +755,16 @@ async function runAction(
   actionEpoch++
   // Snapshot for rollback (plain copies, the list is small).
   const snapshot = {
-    folderId: folderId.value,
+    folderId: sourceFolderId,
+    listFolderId: folderId.value,
+    search: search.value,
     messages: messages.value.map((m) => ({ ...m, flags: { ...m.flags } })),
     folders: folders.value.map((f) => ({ ...f })),
     detailId: detail.value?.id ?? '',
     detailFlags: detail.value ? { ...detail.value.flags } : null,
   }
   error.value = ''
-  applyLocally(action, ids, actionTarget(action, targetFolderId))
+  applyLocally(action, ids, sourceFolderId, actionTarget(action, targetFolderId))
 
   const body: MessageActionRequest = { folderId: snapshot.folderId, messageIds: ids, action }
   if (targetFolderId) body.targetFolderId = targetFolderId
@@ -691,7 +799,7 @@ async function runAction(
     // Another account is shown by now: nothing of this one to roll back.
     if (!accountScope.isCurrent(scope)) return
     // Roll back only if the user is still looking at the same folder.
-    if (folderId.value === snapshot.folderId) {
+    if (folderId.value === snapshot.listFolderId && search.value === snapshot.search) {
       messages.value = snapshot.messages
       folders.value = snapshot.folders
       if (detail.value?.id === snapshot.detailId && snapshot.detailFlags) {
@@ -714,7 +822,8 @@ async function runAction(
  */
 async function refreshView(): Promise<void> {
   const requestedAccount = accountId.value
-  if (!requestedAccount || !folderId.value) return
+  // A shown search result stays as it is (no folder list to merge).
+  if (!requestedAccount || !folderId.value || search.value || searchLoading.value) return
   if (pendingActions > 0 || listLoading.value) {
     refreshDeferred = true
     return
@@ -792,7 +901,7 @@ function onKeydown(event: KeyboardEvent): void {
       void runAction(detail.value.flags.flagged ? 'unflag' : 'flag', [id])
       break
     case 'e':
-      if (archiveFolder.value && currentFolder.value?.specialUse !== 'archive') {
+      if (archiveFolder.value && actionFolder.value?.specialUse !== 'archive') {
         void runAction('archive', [id])
       }
       break
@@ -826,6 +935,8 @@ function closeDetail(): void {
 }
 
 watch(accountId, (id) => {
+  resetSearch()
+  Object.assign(searchForm, { q: '', from: '', subject: '', since: '', before: '' })
   // New scope: abort and ignore everything still in flight for the previous
   // account; its selection, thread and compose state are dropped.
   accountScope.reset()
@@ -990,8 +1101,76 @@ onBeforeUnmount(() => {
             {{ folder.unreadCount > 0 ? `(${folder.unreadCount})` : '' }}
           </option>
         </select>
-        <h2 class="desktop-title">{{ currentFolder ? folderLabel(currentFolder) : 'Ordner' }}</h2>
+        <h2 class="desktop-title">
+          {{ search ? 'Suchergebnisse' : currentFolder ? folderLabel(currentFolder) : 'Ordner' }}
+        </h2>
       </header>
+
+      <form v-if="accountId" class="search" role="search" @submit.prevent="runSearch">
+        <div class="search-row">
+          <input
+            v-model="searchForm.q"
+            type="search"
+            enterkeyhint="search"
+            :placeholder="`In ${activeAccount?.displayName ?? 'diesem Konto'} suchen …`"
+            aria-label="Suchbegriff"
+            @keydown.esc.prevent="clearSearch"
+          />
+          <button
+            type="button"
+            class="link"
+            :aria-expanded="showSearchOptions"
+            @click="showSearchOptions = !showSearchOptions"
+          >
+            Filter
+          </button>
+          <button
+            v-if="search || searchError || hasSearchCriteria"
+            type="button"
+            class="link"
+            title="Suche beenden"
+            aria-label="Suche beenden"
+            @click="clearSearch"
+          >
+            &times;
+          </button>
+        </div>
+        <div v-if="showSearchOptions" class="search-options">
+          <label>
+            <span>Von</span>
+            <input v-model="searchForm.from" type="text" autocomplete="off" />
+          </label>
+          <label>
+            <span>Betreff</span>
+            <input v-model="searchForm.subject" type="text" autocomplete="off" />
+          </label>
+          <label>
+            <span>Ab</span>
+            <input v-model="searchForm.since" type="date" />
+          </label>
+          <label>
+            <span>Vor dem</span>
+            <input v-model="searchForm.before" type="date" />
+          </label>
+          <label class="check">
+            <input v-model="searchForm.onlyFolder" type="checkbox" />
+            Nur in „{{ currentFolder ? folderLabel(currentFolder) : 'diesem Ordner' }}“
+          </label>
+          <button type="submit" class="secondary">Suchen</button>
+        </div>
+      </form>
+      <p v-if="searchLoading" class="hint">Suche beim Anbieter &hellip;</p>
+      <p v-if="searchError" class="error">{{ searchError }}</p>
+      <p v-if="search && !searchLoading" class="search-summary" role="status">
+        {{ search.messages.length === 1 ? '1 Treffer' : `${search.messages.length} Treffer`
+        }}{{ search.truncated ? ' (weitere vorhanden, Suche eingrenzen)' : '' }}
+        <span v-if="search.notSynced > 0">
+          &middot; {{ search.notSynced }} weitere Treffer beim Anbieter (noch nicht synchronisiert)
+        </span>
+        <span v-if="search.foldersFailed > 0">
+          &middot; {{ search.foldersFailed }} Ordner konnten nicht durchsucht werden
+        </span>
+      </p>
 
       <div v-if="activeAccount && activeStatus" class="account-status" role="status">
         <strong>{{ activeStatus.label }}</strong>
@@ -1007,13 +1186,16 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="error" class="error">{{ error }}</p>
       <DraftList
-        v-if="accountId && inDraftsFolder"
+        v-if="accountId && inDraftsFolder && !search"
         ref="draftList"
         :account-id="accountId"
         @open="openSavedDraft"
       />
-      <p v-if="!listLoading && folderId && visibleMessages.length === 0" class="hint">
-        Keine Nachrichten in diesem Ordner.
+      <p
+        v-if="!listLoading && !searchLoading && folderId && visibleMessages.length === 0"
+        class="hint"
+      >
+        {{ search ? 'Keine Treffer.' : 'Keine Nachrichten in diesem Ordner.' }}
       </p>
       <p v-if="folders.length === 0 && !error" class="hint">
         Noch keine Ordner synchronisiert &ndash; der Abgleich läuft im Hintergrund.
@@ -1045,7 +1227,10 @@ onBeforeUnmount(() => {
                 <span v-if="message.flags.flagged" class="flagged" title="Markiert">&#9873;</span>
               </span>
             </span>
-            <span class="snippet">{{ message.snippet }}</span>
+            <span class="snippet">
+              <span v-if="search" class="hit-folder">{{ hitFolderLabel(message) }}</span>
+              {{ message.snippet }}
+            </span>
           </button>
         </li>
       </ul>
@@ -1114,7 +1299,7 @@ onBeforeUnmount(() => {
             {{ detail.flags.flagged ? 'Markierung entfernen' : 'Markieren' }}
           </button>
           <button
-            v-if="archiveFolder && currentFolder?.specialUse !== 'archive'"
+            v-if="archiveFolder && actionFolder?.specialUse !== 'archive'"
             type="button"
             class="secondary"
             title="Tastenkürzel: e"
@@ -1500,6 +1685,86 @@ button.secondary {
   margin-bottom: 0.75rem;
 }
 
+.search {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e4e9ee;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.search input[type='search'] {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 0.375rem;
+  font: inherit;
+}
+
+.search button.link {
+  border: none;
+  background: transparent;
+  color: #1273de;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.search-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.6rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.search-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: #52606d;
+}
+
+.search-options label.check {
+  flex-direction: row;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.search-options input[type='text'],
+.search-options input[type='date'] {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 0.375rem;
+  font: inherit;
+}
+
+.search-options button {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.search-summary {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #e4e9ee;
+  font-size: 0.85rem;
+  color: #52606d;
+}
+
+.hit-folder {
+  margin-right: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  background: #eef2f6;
+  font-size: 0.75rem;
+  color: #323f4b;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1625,6 +1890,11 @@ button.secondary {
 
 /* Mobile: account + folder pickers above the list, list -> detail navigation. */
 @media (max-width: 760px) {
+  /* 16px avoids the automatic zoom on focus in iOS Safari. */
+  .search input {
+    font-size: 16px;
+  }
+
   .mail {
     display: block;
     height: auto;
