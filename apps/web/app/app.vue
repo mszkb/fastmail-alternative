@@ -9,7 +9,9 @@
 // @fma/shared); MailView reloads its data when the active account changed.
 // Push (4.3): opt-in in the settings (PushSettings); a click on a
 // notification focuses the app and the service worker asks it to sync.
-import { ForegroundSyncPolicy } from '@fma/shared'
+// Badge (4.4): the unread INBOX total of all accounts goes to the app icon
+// (Badging API) or the title prefix whenever the account list refreshes.
+import { ForegroundSyncPolicy, unreadBadgeCount } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 
 interface AuthStatus {
@@ -44,6 +46,9 @@ const ACCOUNT_REFRESH_MS = 60_000
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
+
+// Logout empties the list, which clears the badge as well.
+watch(accounts, (list) => updateAppBadge(unreadBadgeCount(list)))
 
 async function loadAccounts(): Promise<void> {
   try {

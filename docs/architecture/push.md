@@ -27,6 +27,14 @@ Die Regeln (Drosselung, Polling-Fenster, Änderungserkennung, Zusammenführen de
 - **Bereinigung:** HTTP 404/410 vom Push-Service → Subscription wird gelöscht. Andere Fehler zählen `failure_count` hoch, der Job wird mit Backoff wiederholt (doppelte Zustellung ist harmlos, siehe unten).
 - **Logs:** Endpoints sind Capability-URLs und erscheinen nie im Log, nur Host des Push-Dienstes und ein kurzer Hash.
 
+## Badge (Roadmap 4.4)
+
+- **Zahl:** Summe der ungelesenen Nachrichten im INBOX aller Konten – dieselbe Zahl, die der Worker als `badge` in den Push-Payload schreibt (`unreadBadgeCount` in `@fma/shared`, `badge.ts`).
+- **App:** Bei jeder Aktualisierung der Kontoliste (Start, Fokus, Polling, minütlich) setzt die App `navigator.setAppBadge(n)` bzw. `clearAppBadge()` bei 0, sofern die Badging API vorhanden ist. Auf iOS wirkt das nur in der installierten App mit erteilter Benachrichtigungs-Berechtigung; ein Fehler wird ignoriert.
+- **Service Worker:** setzt das Badge aus dem Push-Payload, auch wenn die App geschlossen ist.
+- **Fallback:** Im Browser-Tab (nicht installiert) steht die Zahl vor dem Seitentitel, z. B. „(3) fastmail-alternative“, ab 1000 als „999+“. Abmelden leert die Kontoliste und damit Badge und Titel.
+- Lokale Änderungen in der Mailansicht (als gelesen markieren) erscheinen mit der nächsten Aktualisierung der Kontoliste im Badge.
+
 ## Optionales Hosted Push Relay (Phase 8)
 
 - Kostenpflichtige Komfortfunktion, z. B. für Instanzen ohne öffentliche Erreichbarkeit oder für einen späteren nativen iOS-Client mit APNs.
