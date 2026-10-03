@@ -2,7 +2,7 @@
  * Integration tests for the job queue (ADR-0003). Requires DATABASE_URL;
  * skipped otherwise. Uses the configured test database exclusively.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import pg from 'pg'
 import { runMigrations } from '../src/migrate'
 import { claimNextJob, completeJob, enqueueJob, failJob, MAX_JOB_ATTEMPTS } from '../src/job-queue'
@@ -99,5 +99,82 @@ describe.skipIf(!databaseUrl)('job queue', () => {
     await pool.query('DELETE FROM job WHERE id = $1', [id])
     const { rowCount } = await pool.query('SELECT 1 FROM job WHERE id = $1', [id])
     expect(rowCount).toBe(0)
+  })
+})
+
+describe.skipIf(!databaseUrl)('job queue: per-account isolation (roadmap 3.4)', () => {
+  let pool: pg.Pool
+  let userId: string
+
+  async function createAccount(status = 'ok', nextRetryAt: Date | null = null): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO mail_account
+         (id, user_id, display_name, email_address, imap_host, imap_port,
+          smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, status, next_retry_at)
+       VALUES (gen_random_uuid(), $1, 'Q', 'q@example.com', 'imap.test', 993,
+         'smtp.test', 465, '\\x00', 'v1', '\\x00', $2, $3)
+       RETURNING id`,
+      [userId, status, nextRetryAt],
+    )
+    return rows[0]!.id
+  }
+
+  beforeAll(async () => {
+    pool = new pg.Pool({ connectionString: databaseUrl })
+    await runMigrations(pool)
+  })
+
+  beforeEach(async () => {
+    await pool.query('TRUNCATE "user", mail_account, job CASCADE')
+    const user = await pool.query<{ id: string }>(
+      `INSERT INTO "user" (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+      [`queue-${Date.now()}@example.com`],
+    )
+    userId = user.rows[0]!.id
+  })
+
+  afterAll(async () => {
+    await pool.query('TRUNCATE "user", mail_account, job CASCADE')
+    await pool.end()
+  })
+
+  it('runs at most one job per account at a time', async () => {
+    const a = await createAccount()
+    const b = await createAccount()
+    await enqueueJob(pool, { type: 'message_sync', accountId: a })
+    await enqueueJob(pool, { type: 'message_sync', accountId: a })
+    await enqueueJob(pool, { type: 'message_sync', accountId: b })
+
+    const first = await claimNextJob(pool, ['message_sync'])
+    expect(first?.accountId).toBe(a)
+    // a is busy: b's job is next although a's second job is older.
+    const second = await claimNextJob(pool, ['message_sync'])
+    expect(second?.accountId).toBe(b)
+    expect(await claimNextJob(pool, ['message_sync'])).toBeNull()
+
+    await completeJob(pool, first!.id)
+    expect((await claimNextJob(pool, ['message_sync']))?.accountId).toBe(a)
+  })
+
+  it('skips accounts with an open circuit, auth error or exclusion', async () => {
+    const backoff = await createAccount('unreachable', new Date(Date.now() + 60_000))
+    const auth = await createAccount('auth_error')
+    const disabled = await createAccount('disabled')
+    const excluded = await createAccount()
+    for (const accountId of [backoff, auth, disabled, excluded]) {
+      await enqueueJob(pool, { type: 'folder_sync', accountId })
+    }
+    // Jobs without an account are not affected.
+    const cleanup = await enqueueJob(pool, { type: 'account_cleanup' })
+
+    const options = { excludeAccountIds: [excluded] }
+    expect((await claimNextJob(pool, ['folder_sync', 'account_cleanup'], options))?.id).toBe(
+      cleanup,
+    )
+    expect(await claimNextJob(pool, ['folder_sync'], options)).toBeNull()
+
+    // Backoff over: the account is eligible again (half-open probe).
+    await pool.query(`UPDATE mail_account SET next_retry_at = now() WHERE id = $1`, [backoff])
+    expect((await claimNextJob(pool, ['folder_sync'], options))?.accountId).toBe(backoff)
   })
 })

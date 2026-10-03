@@ -18,7 +18,9 @@
 // Switching closes message, thread and compose of the previous account,
 // aborts its in-flight requests and drops late responses (RequestScope from
 // @fma/shared), so the view never mixes data of two accounts.
-import { RequestScope, createDraft, isStaleResponse } from '@fma/shared'
+// Account health (3.4): broken accounts get a badge in the switcher and a
+// banner with a German explanation and a link to the account settings.
+import { RequestScope, accountStatusInfo, createDraft, isStaleResponse } from '@fma/shared'
 import type {
   AccountSummary,
   ComposeDraft,
@@ -39,9 +41,10 @@ import type {
 import type OutboxPanel from './OutboxPanel.vue'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
-  Partial<Pick<AccountSummary, 'unreadCount' | 'status'>>
+  Partial<Pick<AccountSummary, 'unreadCount' | 'status' | 'lastErrorCode' | 'nextRetryAt'>>
 
 const props = defineProps<{ accounts: AccountOption[] }>()
+const emit = defineEmits<{ editAccount: [id: string] }>()
 
 const SPECIAL_USE_LABELS: Record<string, string> = {
   inbox: 'Posteingang',
@@ -86,6 +89,16 @@ let observer: IntersectionObserver | null = null
 // account are aborted, and responses arriving late are dropped (getJson
 // rejects with StaleResponseError), so they never land in the new view.
 const accountScope = new RequestScope()
+
+const activeAccount = computed(() => props.accounts.find((a) => a.id === accountId.value) ?? null)
+const activeStatus = computed(() => (activeAccount.value ? statusInfo(activeAccount.value) : null))
+
+function statusInfo(account: AccountOption) {
+  return accountStatusInfo({
+    status: account.status ?? 'ok',
+    lastErrorCode: account.lastErrorCode ?? null,
+  })
+}
 
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
@@ -137,6 +150,12 @@ const dateFormat = new Intl.DateTimeFormat('de-DE', {
   year: '2-digit',
 })
 const fullFormat = new Intl.DateTimeFormat('de-DE', { dateStyle: 'full', timeStyle: 'short' })
+
+function retryText(account: AccountOption): string {
+  if (account.status !== 'unreachable' || !account.nextRetryAt) return ''
+  const at = new Date(account.nextRetryAt)
+  return at.getTime() > Date.now() ? ` Nächster Versuch: ${timeFormat.format(at)} Uhr.` : ''
+}
 
 function shortDate(iso: string): string {
   const date = new Date(iso)
@@ -569,6 +588,15 @@ onBeforeUnmount(() => {
         >
           <span class="account-name">{{ account.displayName }}</span>
           <span
+            v-if="statusInfo(account)"
+            class="status-badge"
+            :class="account.status"
+            :title="statusInfo(account)!.label"
+            role="img"
+            :aria-label="statusInfo(account)!.label"
+            >!</span
+          >
+          <span
             v-if="accountUnread(account) > 0"
             class="count"
             :aria-label="`${accountUnread(account)} ungelesen`"
@@ -582,7 +610,8 @@ onBeforeUnmount(() => {
         <select :value="accountId" @change="onAccountSelect">
           <option v-for="account in accounts" :key="account.id" :value="account.id">
             {{ account.displayName
-            }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : '' }}
+            }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : ''
+            }}{{ statusInfo(account) ? ` – ${statusInfo(account)!.label}` : '' }}
           </option>
         </select>
       </label>
@@ -619,6 +648,18 @@ onBeforeUnmount(() => {
         <h2 class="desktop-title">{{ currentFolder ? folderLabel(currentFolder) : 'Ordner' }}</h2>
       </header>
 
+      <div v-if="activeAccount && activeStatus" class="account-status" role="status">
+        <strong>{{ activeStatus.label }}</strong>
+        <span>{{ activeStatus.description }}{{ retryText(activeAccount) }}</span>
+        <button
+          v-if="activeStatus.action"
+          type="button"
+          class="secondary"
+          @click="emit('editAccount', activeAccount.id)"
+        >
+          {{ activeStatus.action }}
+        </button>
+      </div>
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="!listLoading && folderId && messages.length === 0" class="hint">
         Keine Nachrichten in diesem Ordner.
@@ -866,6 +907,43 @@ select {
 .account.active {
   background: #1f2933;
   color: #fff;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 0.3rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.status-badge.auth_error {
+  background: #cf1124;
+}
+
+.account-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #f5c26b;
+  border-radius: 0.375rem;
+  background: #fffbeb;
+  color: #7c2d12;
+  font-size: 0.85rem;
+}
+
+.account-status button.secondary {
+  padding: 0.25rem 0.6rem;
+  border-color: #7c2d12;
+  color: #7c2d12;
+  font-size: 0.85rem;
 }
 
 .account-name {

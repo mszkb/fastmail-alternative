@@ -26,6 +26,7 @@ import type { MailboxLockObject } from 'imapflow'
 import type { Pool } from '@fma/db'
 import type { MessageActionJobPayload, MessageActionOperation } from '@fma/shared'
 import { loadAccountContext, type AccountContext } from '../accounts'
+import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
 import { enqueueMessageSync } from '../scheduler'
@@ -167,6 +168,7 @@ export async function runMessageAction(
     ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
+  const unregister = closeOnJobAbort(() => client.close())
   let lock: MailboxLockObject | null = null
   let outcome: MessageActionOutcome = 'done'
   try {
@@ -226,6 +228,7 @@ export async function runMessageAction(
     }
   } finally {
     lock?.release()
+    unregister()
     await client.logout().catch(() => client.close())
   }
 

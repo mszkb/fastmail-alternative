@@ -7,6 +7,10 @@
  *   MAX_ATTEMPTS the job goes to state 'failed'.
  * - Payloads contain only ids; error messages are truncated (and should be
  *   redacted by callers, see @fma/shared redaction rules).
+ * - Per-account isolation (roadmap 3.4): at most one running job per mail
+ *   account, and no jobs of an account whose circuit is open (status
+ *   auth_error/disabled, or next_retry_at in the future). Jobs without an
+ *   account (e.g. account_cleanup) are always eligible.
  */
 import type pg from 'pg'
 
@@ -44,12 +48,24 @@ export async function enqueueJob(
   return String(id)
 }
 
+export interface ClaimOptions {
+  /**
+   * Accounts the caller is still busy with (e.g. a job that timed out but
+   * has not settled yet); their jobs are skipped.
+   */
+  excludeAccountIds?: string[]
+}
+
 /**
- * Atomically claims the oldest queued job of the given types. Returns null
- * when no job is eligible. The claimed job is marked 'running' and its
- * attempt counter incremented.
+ * Atomically claims the oldest eligible queued job of the given types.
+ * Returns null when no job is eligible. The claimed job is marked 'running'
+ * and its attempt counter incremented.
  */
-export async function claimNextJob(pool: pg.Pool, types: string[]): Promise<Job | null> {
+export async function claimNextJob(
+  pool: pg.Pool,
+  types: string[],
+  options: ClaimOptions = {},
+): Promise<Job | null> {
   if (types.length === 0) return null
   const client = await pool.connect()
   try {
@@ -57,10 +73,25 @@ export async function claimNextJob(pool: pg.Pool, types: string[]): Promise<Job 
     const { rows } = await client.query(
       `SELECT id, type, account_id, payload, attempts FROM job
        WHERE state = 'queued' AND run_at <= now() AND type = ANY($1)
+         AND (account_id IS NULL OR (
+           account_id <> ALL($2::uuid[])
+           -- One running job per account: a slow provider occupies at most
+           -- one worker slot.
+           AND NOT EXISTS (
+             SELECT 1 FROM job r WHERE r.account_id = job.account_id AND r.state = 'running'
+           )
+           -- Circuit breaker: skip accounts in backoff or with an auth error.
+           AND EXISTS (
+             SELECT 1 FROM mail_account a
+             WHERE a.id = job.account_id
+               AND a.status NOT IN ('auth_error', 'disabled')
+               AND (a.next_retry_at IS NULL OR a.next_retry_at <= now())
+           )
+         ))
        ORDER BY run_at, id
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
-      [types],
+      [types, options.excludeAccountIds ?? []],
     )
     const row = rows[0]
     if (!row) {

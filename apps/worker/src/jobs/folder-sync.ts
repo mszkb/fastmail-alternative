@@ -9,6 +9,7 @@
 import { ImapFlow } from 'imapflow'
 import type { Pool } from '@fma/db'
 import { loadAccountContext } from '../accounts'
+import { closeOnJobAbort } from '../job-context'
 import { mailTestMode } from '../ports'
 
 const KNOWN_SPECIAL_USE = new Set(['inbox', 'sent', 'drafts', 'trash', 'archive', 'junk'])
@@ -47,6 +48,7 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
     ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
+  const unregister = closeOnJobAbort(() => client.close())
   try {
     await client.connect()
     const mailboxes = (await client.list()) as unknown as ListedMailbox[]
@@ -97,6 +99,7 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
       paths,
     ])
   } finally {
+    unregister()
     client.close()
   }
 }

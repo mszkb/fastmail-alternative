@@ -9,16 +9,20 @@
  *   @fma/db/job-queue), so retries are respected automatically.
  * - Per-account isolation: every account is evaluated independently; an
  *   account whose last folder_sync failed terminally is retried only after
- *   FAILED_RETRY_INTERVAL, accounts with status 'disabled' or a future
- *   next_retry_at are skipped.
+ *   FAILED_RETRY_INTERVAL. Accounts with status 'disabled' or 'auth_error'
+ *   (no automatic retry until the credentials are updated) or a future
+ *   next_retry_at (circuit breaker backoff, ./account-health) are skipped.
  */
 import type { Pool } from '@fma/db'
 
 const DEFAULT_SYNC_INTERVAL_SECONDS = 120
 /** Retry interval after a folder_sync ran out of attempts (state 'failed'). */
 const FAILED_RETRY_INTERVAL_SECONDS = 60 * 60
-/** A job 'running' longer than this is assumed lost (worker crash). */
-const STALE_RUNNING_SECONDS = 60 * 60
+/**
+ * A job 'running' longer than this is assumed lost (worker crash); longer
+ * than the hard job timeout of the runner (max. 15 min).
+ */
+const STALE_RUNNING_SECONDS = 30 * 60
 
 /** Sync interval per account from SYNC_INTERVAL_SECONDS (default 120). */
 export function syncIntervalSeconds(): number {
@@ -51,7 +55,7 @@ export async function enqueueDueSyncs(
   const { rows } = await pool.query<{ account_id: string }>(
     `INSERT INTO job (type, account_id)
      SELECT 'folder_sync', ma.id FROM mail_account ma
-     WHERE ma.status <> 'disabled'
+     WHERE ma.status NOT IN ('disabled', 'auth_error')
        AND (ma.next_retry_at IS NULL OR ma.next_retry_at <= now())
        -- No pile-up: nothing queued (incl. backoff) or running.
        AND NOT EXISTS (

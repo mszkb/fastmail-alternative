@@ -113,6 +113,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       MAIL_DATA_DIR: /app/mail-data
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}

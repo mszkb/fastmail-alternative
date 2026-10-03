@@ -87,6 +87,7 @@ erDiagram
         text status "ok | auth_error | unreachable | disabled"
         int error_count
         timestamptz next_retry_at
+        text last_error_code "nur Fehlercode, nie Servertext"
         timestamptz last_sync_at
         text[] capabilities "IDLE, CONDSTORE, QRESYNC, MOVE, ..."
     }

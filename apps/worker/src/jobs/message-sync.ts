@@ -41,6 +41,7 @@ import {
   messageFieldAad as aad,
 } from '@fma/crypto'
 import { loadAccountContext, type AccountContext } from '../accounts'
+import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
 import { assignThreads, removeEmptyThreads } from '../threading'
@@ -225,6 +226,7 @@ export async function runMessageSync(
     ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
+  const unregister = closeOnJobAbort(() => client.close())
   let lock: MailboxLockObject | null = null
   try {
     await client.connect()
@@ -472,6 +474,7 @@ export async function runMessageSync(
       [folderId, serverUidvalidity.toString(), String(selected.uidNext ?? 0)],
     )
   } finally {
+    unregister()
     lock?.release()
     client.close()
   }

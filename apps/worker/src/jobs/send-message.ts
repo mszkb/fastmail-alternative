@@ -38,6 +38,7 @@ import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 import type { OutboxContent, OutboxErrorCode, OutboxStatus, SentCopyStatus } from '@fma/shared'
 import { assertPublicHost } from '@fma/shared/ssrf'
 import { loadAccountContext, type AccountContext } from '../accounts'
+import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
 import { enqueueMessageSync } from '../scheduler'
@@ -56,6 +57,11 @@ export interface SendMessageOptions {
   attempt?: number
   maxAttempts?: number
   context?: AccountContext
+  /**
+   * Called with the error code when sending fails for good without throwing
+   * (the account health tracking needs e.g. AUTH_FAILED, roadmap 3.4).
+   */
+  onFailed?: (code: OutboxErrorCode) => void
 }
 
 interface OutboxRow {
@@ -155,9 +161,11 @@ async function sendViaSmtp(
     tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
     ignoreTLS: mailTestMode(),
   })
+  const unregister = closeOnJobAbort(() => transporter.close())
   try {
     await transporter.sendMail({ envelope, raw })
   } finally {
+    unregister()
     transporter.close()
   }
 }
@@ -174,10 +182,12 @@ async function appendToSent(ctx: AccountContext, path: string, raw: Buffer, date
     tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
     ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
+  const unregister = closeOnJobAbort(() => client.close())
   try {
     await client.connect()
     await client.append(path, raw, ['\\Seen'], date)
   } finally {
+    unregister()
     await client.logout().catch(() => client.close())
   }
 }
@@ -237,6 +247,7 @@ export async function runSendMessage(
       if (permanent || finalAttempt) {
         await setStatus(pool, row.id, { status: 'failed', last_error_code: code })
         log.warn({ accountId, outboxId, code, permanent }, 'send_message failed')
+        options.onFailed?.(code)
         return 'failed'
       }
       await setStatus(pool, row.id, { status: 'queued', last_error_code: code })

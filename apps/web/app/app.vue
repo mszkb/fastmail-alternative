@@ -47,6 +47,12 @@ async function loadAccounts(): Promise<void> {
   }
 }
 
+/** Opens the edit form of an account in the settings (e.g. new credentials). */
+function editAccount(id: string): void {
+  editAccountId.value = id
+  section.value = 'settings'
+}
+
 /** Unread counts and status of all accounts; quiet background refresh. */
 function refreshAccounts(): void {
   if (view.value === 'app' && document.visibilityState === 'visible') void loadAccounts()
@@ -235,7 +241,7 @@ onBeforeUnmount(() => {
       </nav>
 
       <template v-if="section === 'mail'">
-        <MailView v-if="accounts.length > 0" :accounts="accounts" />
+        <MailView v-if="accounts.length > 0" :accounts="accounts" @edit-account="editAccount" />
         <div v-else class="card">
           <p>Noch kein E-Mail-Konto verbunden.</p>
           <button type="button" @click="section = 'settings'">Konto hinzufügen</button>

@@ -1,121 +1,28 @@
 /**
- * Worker entrypoint (roadmap 2.2): polls the job table and dispatches jobs.
+ * Worker entrypoint (roadmap 2.2): runs the scheduler and the job runner.
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
- * worker-managed connections added in a later step. This loop only processes
- * short-lived jobs (folder sync, message sync, message actions, SMTP send,
- * account cleanup; later: push).
+ * worker-managed connections added in a later step. The runner (./runner)
+ * only processes short-lived jobs (folder sync, message sync, message
+ * actions, SMTP send, account cleanup; later: push), several in parallel
+ * but at most one per account, each with a hard timeout (roadmap 3.4).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.
  *
  * Logging: structured JSON via pino with the central redaction rules
  * (roadmap 1.7).
  */
-import { setTimeout as sleep } from 'node:timers/promises'
-import { MAX_JOB_ATTEMPTS, claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
-import { createPool, type Pool } from '@fma/db'
-import { runAccountCleanup } from './jobs/account-cleanup'
-import { runFolderSync } from './jobs/folder-sync'
-import { runMessageAction } from './jobs/message-action'
-import { runMessageSync } from './jobs/message-sync'
-import { markSendGivenUp, runSendMessage } from './jobs/send-message'
+import { createPool } from '@fma/db'
 import { log } from './log'
-import {
-  enqueueDueSyncs,
-  enqueueMessageSync,
-  requeueStaleJobs,
-  syncIntervalSeconds,
-} from './scheduler'
+import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
+import { enqueueDueSyncs, requeueStaleJobs, syncIntervalSeconds } from './scheduler'
 
 const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
 const SCHEDULER_TICK_MS = 15_000
-/** Job types this worker instance processes. */
-const JOB_TYPES = [
-  'folder_sync',
-  'message_sync',
-  'message_action',
-  'send_message',
-  'account_cleanup',
-]
-/**
- * Claimed before all other types: user actions are small and interactive,
- * and writing them back before the next sync keeps the sync from briefly
- * reverting optimistic changes (see jobs/message-action). Sending is
- * user-facing too and must not wait behind a long initial sync.
- */
-const PRIORITY_JOB_TYPES = ['message_action', 'send_message']
 
 let shuttingDown = false
-
-async function processJob(
-  pool: Pool,
-  job: {
-    id: string
-    type: string
-    accountId: string | null
-    payload: Record<string, unknown>
-    attempts: number
-  },
-): Promise<void> {
-  const jobId = job.id
-  const type = job.type
-  const accountId = job.accountId
-  switch (type) {
-    case 'folder_sync': {
-      if (!accountId) throw new Error('folder_sync job without account_id')
-      await runFolderSync(pool, accountId)
-      // Chain: one message_sync job per synced folder (deduplicated).
-      const { rows } = await pool.query<{ id: string }>(
-        'SELECT id FROM folder WHERE account_id = $1',
-        [accountId],
-      )
-      for (const row of rows) {
-        await enqueueMessageSync(pool, accountId, String(row.id))
-      }
-      await completeJob(pool, jobId)
-      log.info({ jobId, accountId }, 'folder_sync done')
-      break
-    }
-    case 'message_sync': {
-      if (!accountId) throw new Error('message_sync job without account_id')
-      const folderId = typeof job.payload.folderId === 'string' ? job.payload.folderId : null
-      if (!folderId) throw new Error('message_sync job without folder_id')
-      await runMessageSync(pool, accountId, folderId)
-      await completeJob(pool, jobId)
-      log.info({ jobId, accountId, folderId }, 'message_sync done')
-      break
-    }
-    case 'message_action': {
-      if (!accountId) throw new Error('message_action job without account_id')
-      const outcome = await runMessageAction(pool, accountId, job.payload)
-      await completeJob(pool, jobId)
-      log.info({ jobId, accountId, outcome }, 'message_action done')
-      break
-    }
-    case 'send_message': {
-      if (!accountId) throw new Error('send_message job without account_id')
-      const outcome = await runSendMessage(pool, accountId, job.payload, {
-        attempt: job.attempts,
-        maxAttempts: MAX_JOB_ATTEMPTS,
-      })
-      await completeJob(pool, jobId)
-      log.info({ jobId, accountId, outcome }, 'send_message done')
-      break
-    }
-    case 'account_cleanup': {
-      const outcome = await runAccountCleanup(pool, job.payload)
-      await completeJob(pool, jobId)
-      log.info({ jobId, outcome }, 'account_cleanup done')
-      break
-    }
-    default:
-      // Unknown type: complete it, otherwise it would retry forever.
-      log.warn({ jobId, type }, 'unknown job type, marking done')
-      await completeJob(pool, jobId)
-  }
-}
 
 async function main(): Promise<void> {
   const pool = createPool()
@@ -126,7 +33,7 @@ async function main(): Promise<void> {
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
-      log.info({ signal }, 'shutting down after current job')
+      log.info({ signal }, 'shutting down after running jobs')
       shuttingDown = true
     })
   }
@@ -148,55 +55,21 @@ async function main(): Promise<void> {
     }
   }
 
-  log.info({ jobTypes: JOB_TYPES, syncIntervalSeconds: intervalSeconds }, 'worker started')
+  const concurrency = workerConcurrency()
+  const runner = new JobRunner(pool, { concurrency })
+  log.info(
+    { jobTypes: JOB_TYPES, concurrency, syncIntervalSeconds: intervalSeconds },
+    'worker started',
+  )
 
   while (!shuttingDown) {
     await schedulerTick()
-
-    let job: Awaited<ReturnType<typeof claimNextJob>> = null
-    try {
-      job = (await claimNextJob(pool, PRIORITY_JOB_TYPES)) ?? (await claimNextJob(pool, JOB_TYPES))
-    } catch (err) {
-      log.error({ err: (err as Error).message }, 'claim failed')
-    }
-
-    if (!job) {
-      await sleep(POLL_INTERVAL_MS)
-      continue
-    }
-
-    log.info(
-      { jobId: job.id, type: job.type, accountId: job.accountId, attempts: job.attempts },
-      'job started',
-    )
-    try {
-      await processJob(pool, job)
-    } catch (err) {
-      const error = err as Error & { response?: string; code?: string }
-      const message = error.message ?? String(err)
-      await failJob(pool, job.id, job.attempts, message).catch((dbErr) => {
-        log.error({ err: dbErr.message }, 'failJob failed')
-      })
-      if (job.type === 'send_message' && job.attempts >= MAX_JOB_ATTEMPTS) {
-        // Unexpected error on the last attempt: make the failure visible.
-        await markSendGivenUp(pool, job.payload).catch((dbErr) => {
-          log.error({ err: dbErr.message }, 'markSendGivenUp failed')
-        })
-      }
-      log.warn(
-        {
-          jobId: job.id,
-          type: job.type,
-          err: message,
-          imapResponse: error.response,
-          imapCode: error.code,
-          stack: error.stack,
-        },
-        'job failed',
-      )
-    }
+    await runner.fill()
+    // Wake up when a slot frees up, at the latest after the poll interval.
+    await runner.waitForSlot(POLL_INTERVAL_MS)
   }
 
+  await runner.stop()
   log.info('worker stopped')
   await pool.end().catch(() => {})
 }

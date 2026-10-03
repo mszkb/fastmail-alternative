@@ -20,7 +20,12 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { enqueueJob } from '@fma/db/job-queue'
-import type { AccountListResponse, AccountSummary } from '@fma/shared'
+import type {
+  AccountErrorCode,
+  AccountListResponse,
+  AccountStatus,
+  AccountSummary,
+} from '@fma/shared'
 import {
   decryptField,
   encryptField,
@@ -40,7 +45,9 @@ interface MailAccountRow {
   imap_port: number
   smtp_host: string
   smtp_port: number
-  status: string
+  status: AccountStatus
+  last_error_code: AccountErrorCode | null
+  next_retry_at: Date | null
   capabilities: string[]
   sort_order: number
   last_sync_at: string | null
@@ -82,7 +89,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Explicit column select: credential_enc and wrapped_dek must never leak. */
 const PUBLIC_COLUMNS = `id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
-  status, capabilities, sort_order, last_sync_at`
+  status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at`
 
 function credentialAad(accountId: string): string {
   return `mail_account.credential:${accountId}`
@@ -139,6 +146,8 @@ function toPublicAccount(row: MailAccountRow): AccountSummary {
     imap: { host: row.imap_host, port: row.imap_port },
     smtp: { host: row.smtp_host, port: row.smtp_port },
     status: row.status,
+    lastErrorCode: row.last_error_code,
+    nextRetryAt: row.next_retry_at ? row.next_retry_at.toISOString() : null,
     capabilities: row.capabilities,
     sortOrder: row.sort_order,
     lastSyncAt: row.last_sync_at,
@@ -340,7 +349,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         )
         set('capabilities', imapResult.capabilities ?? [])
         // Working credentials: clear the error state (roadmap 3.4).
-        sets.push(`status = 'ok'`, 'error_count = 0', 'next_retry_at = NULL')
+        sets.push(
+          `status = 'ok'`,
+          'error_count = 0',
+          'next_retry_at = NULL',
+          'last_error_code = NULL',
+        )
       }
 
       if (sets.length > 0) {

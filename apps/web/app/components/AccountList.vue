@@ -1,14 +1,12 @@
 <script setup lang="ts">
-// Account list in the settings (roadmap 2.1/3.1): edit, signature, remove.
-interface Account {
-  id: string
-  displayName: string
-  emailAddress: string
-  imap: { host: string; port: number }
-  smtp: { host: string; port: number }
-  status: string
-  sortOrder?: number
-}
+// Account list in the settings (roadmap 2.1/3.1): edit, signature, remove;
+// connection problems (3.4) are explained in German with the edit action.
+import { accountStatusInfo, type AccountSummary } from '@fma/shared'
+
+type Account = Pick<
+  AccountSummary,
+  'id' | 'displayName' | 'emailAddress' | 'imap' | 'smtp' | 'status' | 'lastErrorCode'
+> & { sortOrder?: number }
 
 defineProps<{ accounts: Account[] }>()
 const emit = defineEmits<{ deleted: [id: string]; changed: [id: string] }>()
@@ -64,7 +62,10 @@ async function remove(account: Account): Promise<void> {
         <span>
           <strong>{{ account.displayName }}</strong>
           <span class="mail">{{ account.emailAddress }}</span>
-          <span class="tag">{{ account.status }}</span>
+          <span v-if="accountStatusInfo(account)" class="tag problem">{{
+            accountStatusInfo(account)!.label
+          }}</span>
+          <span v-else class="tag">verbunden</span>
         </span>
         <span class="actions">
           <button
@@ -85,6 +86,9 @@ async function remove(account: Account): Promise<void> {
           </button>
           <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
         </span>
+        <p v-if="accountStatusInfo(account)" class="status-text">
+          {{ accountStatusInfo(account)!.description }}
+        </p>
         <AccountForm
           v-if="editingAccount === account.id"
           :account="account"
@@ -142,6 +146,18 @@ h2 {
   display: block;
   font-size: 0.8rem;
   color: #52606d;
+}
+
+.tag.problem {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.status-text {
+  width: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #7c2d12;
 }
 
 .tag {

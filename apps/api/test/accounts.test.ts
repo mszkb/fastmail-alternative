@@ -311,9 +311,14 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     const id = await accountId()
     await pool.query(
       `UPDATE mail_account SET status = 'auth_error', error_count = 4,
-         next_retry_at = now() + interval '1 hour' WHERE id = $1`,
+         last_error_code = 'AUTH_FAILED', next_retry_at = now() + interval '1 hour'
+       WHERE id = $1`,
       [id],
     )
+    // The status display gets code and retry time, never server text.
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json().accounts[0]
+    expect(listed).toMatchObject({ status: 'auth_error', lastErrorCode: 'AUTH_FAILED' })
+    expect(Date.parse(listed.nextRetryAt)).toBeGreaterThan(Date.now())
     const before = await pool.query<{ credential_enc: Buffer }>(
       'SELECT credential_enc FROM mail_account WHERE id = $1',
       [id],
@@ -335,7 +340,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     })
     expect(res.statusCode).toBe(200)
     const body = res.json()
-    expect(body.account.status).toBe('ok')
+    expect(body.account).toMatchObject({ status: 'ok', lastErrorCode: null, nextRetryAt: null })
     expect(body.test.imap.ok).toBe(true)
     expect(body.test.smtp.ok).toBe(true)
     expect(JSON.stringify(body)).not.toContain(process.env.GREENMAIL_PASSWORD!)

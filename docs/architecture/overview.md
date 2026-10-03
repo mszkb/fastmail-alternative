@@ -61,6 +61,7 @@
 - Circuit Breaker pro Konto/Provider: Ein ausgefallener Provider blockiert keine Worker-Slots anderer Konten.
 - Ein abgelaufener OAuth-Token setzt nur dieses Konto auf `auth_error` (ADR-0011).
 - Der Kontostatus (ok / Auth-Fehler / Provider nicht erreichbar) ist in der UI sichtbar.
+- Umsetzung (Roadmap 3.4): Der Worker führt mehrere Jobs parallel aus (`WORKER_CONCURRENCY`, Standard 4), aber höchstens einen pro Konto; jeder Job hat ein hartes Timeout je Typ (z. B. `folder_sync` 3 min, `message_sync` 15 min), danach werden seine Verbindungen geschlossen. Verbindungsfehler werden als Code klassifiziert: Auth-Fehler → `auth_error` ohne automatische Wiederholung, bis die Zugangsdaten per `PATCH /api/accounts/:id` aktualisiert sind; Netzwerk-/TLS-/Timeout-Fehler → exponentieller Backoff über `next_retry_at` (1 min, verdoppelnd bis 1 h), ab 3 Fehlern in Folge Status `unreachable`. Solange der Circuit offen ist, werden keine Jobs des Kontos geholt. Ein erfolgreicher Sync setzt Status und Zähler zurück.
 
 ## Deployment
 

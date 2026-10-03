@@ -268,7 +268,11 @@ export interface AccountSummary {
   emailAddress: string
   imap: { host: string; port: number }
   smtp: { host: string; port: number }
-  status: string
+  status: AccountStatus
+  /** Last connection error (machine code only), null when healthy. */
+  lastErrorCode: AccountErrorCode | null
+  /** Next automatic connection attempt while the circuit is open. */
+  nextRetryAt: string | null
   capabilities: string[]
   sortOrder: number
   lastSyncAt: string | null
@@ -282,4 +286,74 @@ export interface AccountSummary {
 /** `GET /api/accounts` */
 export interface AccountListResponse {
   accounts: AccountSummary[]
+}
+
+/**
+ * Account health (roadmap 3.4): `auth_error` waits for new credentials,
+ * `unreachable` retries automatically with backoff (circuit breaker).
+ */
+export type AccountStatus = 'ok' | 'auth_error' | 'unreachable' | 'disabled'
+
+/** Stable connection error codes of an account (worker, roadmap 3.4). */
+export type AccountErrorCode =
+  | 'AUTH_FAILED'
+  | 'HOST_NOT_FOUND'
+  | 'CONNECTION_REFUSED'
+  | 'CONNECTION_LOST'
+  | 'TIMEOUT'
+  | 'TLS_ERROR'
+  | 'BLOCKED_HOST'
+  | 'JOB_TIMEOUT'
+
+export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
+  AUTH_FAILED: 'Der Mailserver hat die Zugangsdaten abgelehnt.',
+  HOST_NOT_FOUND: 'Der Mailserver wurde nicht gefunden – bitte Hostnamen prüfen.',
+  CONNECTION_REFUSED: 'Der Mailserver hat die Verbindung abgelehnt – Host und Port prüfen.',
+  CONNECTION_LOST: 'Die Verbindung zum Mailserver ist abgebrochen.',
+  TIMEOUT: 'Der Mailserver antwortet nicht (Zeitüberschreitung).',
+  TLS_ERROR: 'TLS-Fehler – das Zertifikat des Mailservers konnte nicht verifiziert werden.',
+  BLOCKED_HOST: 'Interner Host ist blockiert (SSRF-Schutz).',
+  JOB_TIMEOUT: 'Der Mailserver hat zu lange gebraucht; der Abgleich wurde abgebrochen.',
+}
+
+export interface AccountStatusInfo {
+  /** Short label for the badge. */
+  label: string
+  /** German explanation for the user. */
+  description: string
+  /** Label of the button that opens the account settings, if helpful. */
+  action: string | null
+}
+
+/** Status explanation for the UI; null for a healthy account. */
+export function accountStatusInfo(
+  account: Pick<AccountSummary, 'status' | 'lastErrorCode'>,
+): AccountStatusInfo | null {
+  const reason = account.lastErrorCode ? ACCOUNT_ERROR_MESSAGES[account.lastErrorCode] : ''
+  switch (account.status) {
+    case 'auth_error':
+      return {
+        label: 'Anmeldung fehlgeschlagen',
+        description:
+          `${reason || ACCOUNT_ERROR_MESSAGES.AUTH_FAILED} Der Abgleich dieses Kontos ist ` +
+          'angehalten, bis die Zugangsdaten aktualisiert sind. Andere Konten sind nicht betroffen.',
+        action: 'Zugangsdaten aktualisieren',
+      }
+    case 'unreachable':
+      return {
+        label: 'Server nicht erreichbar',
+        description:
+          `${reason || 'Der Mailserver ist nicht erreichbar.'} Neue Versuche erfolgen ` +
+          'automatisch in wachsenden Abständen. Andere Konten sind nicht betroffen.',
+        action: 'Verbindungsdaten prüfen',
+      }
+    case 'disabled':
+      return {
+        label: 'Deaktiviert',
+        description: 'Dieses Konto wird nicht abgeglichen.',
+        action: null,
+      }
+    default:
+      return null
+  }
 }
