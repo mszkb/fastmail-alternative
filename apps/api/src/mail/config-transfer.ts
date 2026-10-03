@@ -222,7 +222,7 @@ export function parseConfigImport(body: unknown): ConfigExportAccount[] | Invali
 export async function configTransferRoutes(app: FastifyInstance): Promise<void> {
   const pool = app.authPool
 
-  app.get('/api/export/config', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/api/export/config', { onRequest: requireAuth }, async (request, reply) => {
     const userId = request.auth!.userId
     const { rows: accounts } = await pool.query<AccountRow>(
       `SELECT id, display_name, email_address, sort_order, credential_kind, sync_since,
@@ -302,7 +302,7 @@ export async function configTransferRoutes(app: FastifyInstance): Promise<void> 
 
   app.post<{ Body: unknown }>(
     '/api/import/config',
-    { preHandler: requireAuth, bodyLimit: IMPORT_BODY_LIMIT_BYTES },
+    { onRequest: requireAuth, bodyLimit: IMPORT_BODY_LIMIT_BYTES },
     async (request, reply) => {
       const parsed = parseConfigImport(request.body)
       if ('error' in parsed) {

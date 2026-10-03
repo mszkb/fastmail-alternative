@@ -34,6 +34,24 @@ export interface UploadedAttachment {
   size: number
 }
 
+/**
+ * `POST /api/outbox` answers 410 with this code when an `attachmentIds`
+ * entry is gone (removed, already sent, or expired: uploads not bound to a
+ * message are deleted after UPLOAD_RETENTION_HOURS, default 7 days).
+ * Nothing is sent; the client keeps the text and asks for the files again.
+ */
+export const ATTACHMENT_MISSING = 'ATTACHMENT_MISSING'
+
+export const ATTACHMENT_MISSING_MESSAGE =
+  'Ein Anhang ist nicht mehr vorhanden (abgelaufen oder entfernt). Bitte erneut hinzufügen.'
+
+export interface AttachmentMissingResponse {
+  code: typeof ATTACHMENT_MISSING
+  message: string
+  /** Requested upload ids that were not found. */
+  missingIds: string[]
+}
+
 /** Default limits (bytes); the api reads overrides from the environment. */
 export const ATTACHMENT_LIMIT_DEFAULTS = {
   /** One uploaded file (`MAX_ATTACHMENT_BYTES`). */

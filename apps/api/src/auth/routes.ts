@@ -71,7 +71,11 @@ async function resolveWithRotation(
   return session
 }
 
-/** Middleware for authenticated routes. */
+/**
+ * Middleware for authenticated routes. Registered as `onRequest` hook (not
+ * preHandler), so requests without a valid session are answered with 401
+ * before their body is read or parsed.
+ */
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const session = await resolveWithRotation(request, reply)
   if (!session) {
@@ -229,20 +233,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await reply.send({ email: credentials.email })
   })
 
-  app.delete('/api/auth/session', { preHandler: requireAuth }, async (request, reply) => {
+  app.delete('/api/auth/session', { onRequest: requireAuth }, async (request, reply) => {
     await deleteSession(pool, request.auth!.sessionId)
     clearSessionCookie(reply)
     await reply.code(204).send()
   })
 
-  app.get('/api/auth/devices', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/api/auth/devices', { onRequest: requireAuth }, async (request, reply) => {
     const devices = await listDevices(pool, request.auth!.userId, request.auth!.deviceId)
     await reply.send({ devices })
   })
 
   app.delete<{ Params: { id: string } }>(
     '/api/auth/devices/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       if (request.params.id === request.auth!.deviceId) {
         await reply.code(409).send({ message: 'Cannot revoke the current device; log out instead' })

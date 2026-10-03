@@ -56,12 +56,17 @@ function positiveNumber(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
-/** Settings from the environment (defaults: 7 d, 30 d, 24 h, 30 d, 24 h). */
+/**
+ * Settings from the environment (defaults: 7 d, 30 d, 7 d, 30 d, 24 h).
+ * Uploads are kept 7 days so a message written offline with attachments
+ * (offline queue, roadmap 4.6) can still be sent after a longer offline
+ * phase; a later send answers ATTACHMENT_MISSING and keeps the text.
+ */
 export function cleanupSettings(): CleanupSettings {
   return {
     jobRetentionMs: positiveNumber('JOB_RETENTION_DAYS', 7) * DAY_MS,
     failedJobRetentionMs: positiveNumber('FAILED_JOB_RETENTION_DAYS', 30) * DAY_MS,
-    uploadRetentionMs: positiveNumber('UPLOAD_RETENTION_HOURS', 24) * HOUR_MS,
+    uploadRetentionMs: positiveNumber('UPLOAD_RETENTION_HOURS', 7 * 24) * HOUR_MS,
     outboxRetentionMs: positiveNumber('OUTBOX_RETENTION_DAYS', 30) * DAY_MS,
     orphanFileGraceMs: positiveNumber('ORPHAN_FILE_GRACE_HOURS', 24) * HOUR_MS,
   }
@@ -281,58 +286,79 @@ export async function runCleanup(
     }
   }
 
+  // Every batched DELETE repeats its conditions in the outer WHERE: under
+  // READ COMMITTED a row changed by a concurrent transaction (an upload
+  // just bound by POST /api/outbox, a failed message re-queued by a retry,
+  // a re-enabled push subscription) is re-checked against the outer
+  // conditions after the lock wait, not against the subquery's. Rows
+  // locked right now are skipped (SKIP LOCKED) and handled next run.
+
   // 2. Uploads never bound to a message, and uploads of settled messages.
   let uploads = await deleteInBatches(
     pool,
-    `DELETE FROM attachment_upload WHERE id IN (
-       SELECT id FROM attachment_upload
-       WHERE outbox_id IS NULL AND created_at < now() - $2::interval
-       LIMIT $1)`,
+    `DELETE FROM attachment_upload
+     WHERE outbox_id IS NULL AND created_at < now() - $2::interval
+       AND id IN (
+         SELECT id FROM attachment_upload
+         WHERE outbox_id IS NULL AND created_at < now() - $2::interval
+         LIMIT $1 FOR UPDATE SKIP LOCKED)`,
     [interval(settings.uploadRetentionMs)],
   )
   uploads += await deleteInBatches(
     pool,
-    `DELETE FROM attachment_upload WHERE id IN (
-       SELECT u.id FROM attachment_upload u
-       JOIN outbox_message o ON o.id = u.outbox_id
-       WHERE o.status = 'sent' AND o.content_enc IS NULL
-       LIMIT $1)`,
+    `DELETE FROM attachment_upload
+     WHERE outbox_id IS NOT NULL
+       AND id IN (
+         SELECT u.id FROM attachment_upload u
+         JOIN outbox_message o ON o.id = u.outbox_id
+         WHERE o.status = 'sent' AND o.content_enc IS NULL
+         LIMIT $1 FOR UPDATE OF u SKIP LOCKED)`,
   )
 
   // 3. Settled or abandoned outbox entries (uploads cascade).
   const outbox = await deleteInBatches(
     pool,
-    `DELETE FROM outbox_message WHERE id IN (
-       SELECT id FROM outbox_message
-       WHERE updated_at < now() - $2::interval
-         AND ((status = 'sent' AND content_enc IS NULL) OR status = 'failed')
-       LIMIT $1)`,
+    `DELETE FROM outbox_message
+     WHERE updated_at < now() - $2::interval
+       AND ((status = 'sent' AND content_enc IS NULL) OR status = 'failed')
+       AND id IN (
+         SELECT id FROM outbox_message
+         WHERE updated_at < now() - $2::interval
+           AND ((status = 'sent' AND content_enc IS NULL) OR status = 'failed')
+         LIMIT $1 FOR UPDATE SKIP LOCKED)`,
     [interval(settings.outboxRetentionMs)],
   )
 
   // 4. Sessions past their absolute timeout; long-disabled push subscriptions.
   const sessions = await deleteInBatches(
     pool,
-    `DELETE FROM session WHERE id IN (
-       SELECT id FROM session WHERE expires_at < now() LIMIT $1)`,
+    `DELETE FROM session
+     WHERE expires_at < now()
+       AND id IN (
+         SELECT id FROM session WHERE expires_at < now() LIMIT $1 FOR UPDATE SKIP LOCKED)`,
   )
   const pushSubscriptions = await deleteInBatches(
     pool,
-    `DELETE FROM push_subscription WHERE id IN (
-       SELECT id FROM push_subscription
-       WHERE disabled_at IS NOT NULL AND disabled_at < now() - $2::interval
-       LIMIT $1)`,
+    `DELETE FROM push_subscription
+     WHERE disabled_at IS NOT NULL AND disabled_at < now() - $2::interval
+       AND id IN (
+         SELECT id FROM push_subscription
+         WHERE disabled_at IS NOT NULL AND disabled_at < now() - $2::interval
+         LIMIT $1 FOR UPDATE SKIP LOCKED)`,
     [interval(DISABLED_PUSH_RETENTION_MS)],
   )
 
   // 5. Old jobs (index job (state, run_at)); queued/running stay.
   const jobs = await deleteInBatches(
     pool,
-    `DELETE FROM job WHERE id IN (
-       SELECT id FROM job
-       WHERE (state = 'done' AND run_at < now() - $2::interval)
-          OR (state = 'failed' AND run_at < now() - $3::interval)
-       LIMIT $1)`,
+    `DELETE FROM job
+     WHERE ((state = 'done' AND run_at < now() - $2::interval)
+         OR (state = 'failed' AND run_at < now() - $3::interval))
+       AND id IN (
+         SELECT id FROM job
+         WHERE (state = 'done' AND run_at < now() - $2::interval)
+            OR (state = 'failed' AND run_at < now() - $3::interval)
+         LIMIT $1 FOR UPDATE SKIP LOCKED)`,
     [interval(settings.jobRetentionMs), interval(settings.failedJobRetentionMs)],
   )
 

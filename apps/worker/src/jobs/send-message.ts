@@ -30,6 +30,9 @@
  * Attachments (roadmap 5.3): uploads bound to the message
  * (`attachment_upload.outbox_id`) are decrypted and added by MailComposer;
  * they are deleted together with the content once the message settled.
+ * `attachment_count` is the number bound by the api: when fewer uploads are
+ * found (removed meanwhile), the message fails for good with
+ * ATTACHMENT_MISSING instead of being sent without them.
  *
  * Never logged: content, addresses, server replies (may echo addresses).
  */
@@ -76,6 +79,7 @@ interface OutboxRow {
   references: string[]
   sent_copy: SentCopyStatus | null
   sent_at: Date | null
+  attachment_count: number
 }
 
 /** Error with a stable code; thrown to make the job queue retry. */
@@ -261,7 +265,7 @@ export async function runSendMessage(
 
   const { rows } = await pool.query<OutboxRow>(
     `SELECT id, status, content_enc, message_id_header, in_reply_to, "references", sent_copy,
-            sent_at
+            sent_at, attachment_count
      FROM outbox_message WHERE id = $1 AND account_id = $2`,
     [outboxId, accountId],
   )
@@ -278,6 +282,14 @@ export async function runSendMessage(
     decryptField(ctx.dek, row.content_enc.toString('utf8'), outboxContentAad(row.id)),
   ) as OutboxContent
   const attachments = await loadAttachments(pool, ctx.dek, row.id)
+  const attachmentsMissing = attachments.length < row.attachment_count
+  if (attachmentsMissing && !row.sent_at) {
+    // Never send without an attachment the user added.
+    await setStatus(pool, row.id, { status: 'failed', last_error_code: 'ATTACHMENT_MISSING' })
+    log.warn({ accountId, outboxId, code: 'ATTACHMENT_MISSING' }, 'send_message failed')
+    options.onFailed?.('ATTACHMENT_MISSING')
+    return 'failed'
+  }
 
   // Step 1: SMTP (only while not yet accepted).
   let sentAt = row.sent_at
@@ -322,6 +334,9 @@ export async function runSendMessage(
   let sentCopy: SentCopyStatus
   if (providerSavesSentCopy(ctx) || !sentFolder) {
     sentCopy = 'skipped'
+  } else if (attachmentsMissing) {
+    // The copy would differ from what was sent.
+    sentCopy = 'failed'
   } else {
     try {
       const { raw } = await buildMessage(row, content, attachments, sentAt, true)

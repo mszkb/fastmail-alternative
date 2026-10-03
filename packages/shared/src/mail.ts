@@ -232,6 +232,7 @@ export type OutboxErrorCode =
   | 'CONNECTION_REFUSED'
   | 'TIMEOUT'
   | 'TLS_ERROR'
+  | 'ATTACHMENT_MISSING'
   | 'UNKNOWN'
 
 export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
@@ -243,6 +244,8 @@ export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
   CONNECTION_REFUSED: 'Verbindung zum SMTP-Server abgelehnt - Host/Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden mit dem SMTP-Server.',
   TLS_ERROR: 'TLS-Fehler - Zertifikat des SMTP-Servers konnte nicht verifiziert werden.',
+  ATTACHMENT_MISSING:
+    'Ein Anhang ist nicht mehr vorhanden - bitte die Nachricht neu schreiben und den Anhang erneut hinzufügen.',
   UNKNOWN: 'Versand fehlgeschlagen.',
 }
 

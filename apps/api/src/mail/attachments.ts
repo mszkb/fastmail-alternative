@@ -18,6 +18,10 @@
  *   (`Content-Type: application/octet-stream`, name in `X-Filename`
  *   percent-encoded, type in `X-Content-Type`), limited to
  *   MAX_ATTACHMENT_BYTES, and stores it encrypted with the account DEK.
+ *   Session, account ownership and a global limit of uploads in progress
+ *   (MAX_CONCURRENT_UPLOADS, default 2, else 429) are checked in onRequest,
+ *   i.e. before the body is read: unauthenticated clients cannot make the
+ *   api buffer large bodies (memory limit of the container).
  * - `DELETE /api/uploads/:id` removes an upload not yet attached to a
  *   message. `POST /api/outbox` attaches uploads via `attachmentIds`
  *   (see ./outbox), the worker deletes them after sending.
@@ -26,7 +30,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { PassThrough, Readable } from 'node:stream'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { MailParser, type AttachmentStream, type MessageText } from 'mailparser'
 import { encryptBytes, encryptField, unwrapAccountKey, uploadFieldAad } from '@fma/crypto'
 import {
@@ -46,11 +50,17 @@ import { readRaw, slices } from './message-html'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Uploads not yet attached to a message, per account (bounded until cleanup, #55). */
 const MAX_PENDING_UPLOADS = 100
+/** Upload bodies buffered at the same time (MAX_CONCURRENT_UPLOADS), see admitUpload. */
+const DEFAULT_MAX_CONCURRENT_UPLOADS = 2
 const ATTACHMENT_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox"
 
 function envBytes(name: string, fallback: number): number {
   const value = Number(process.env[name])
   return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+function maxConcurrentUploads(): number {
+  return envBytes('MAX_CONCURRENT_UPLOADS', DEFAULT_MAX_CONCURRENT_UPLOADS)
 }
 
 /** Configured attachment limits (bytes), read per call so tests can override them. */
@@ -172,7 +182,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/messages/:id/attachments',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       void reply.header('cache-control', 'no-store')
       const raw = await loadRaw(request, request.params.id)
@@ -195,7 +205,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string; index: string }; Querystring: { inline?: string } }>(
     '/api/messages/:id/attachments/:index',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       void reply.header('cache-control', 'no-store')
       const index = Number(request.params.index)
@@ -239,10 +249,49 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
     (_request, body, done) => done(null, body),
   )
 
+  /** Uploads whose body is being received or processed right now (this process). */
+  let activeUploads = 0
+  /** Account resolved by admitUpload, per request. */
+  const uploadAccounts = new WeakMap<FastifyRequest, { id: string; wrapped_dek: Buffer }>()
+
+  /**
+   * Runs before the body is read (onRequest, after requireAuth): only an
+   * owner of the account may make the api buffer up to MAX_ATTACHMENT_BYTES,
+   * and at most MAX_CONCURRENT_UPLOADS bodies are in memory at once.
+   */
+  async function admitUpload(
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ): Promise<void> {
+    const accountId = request.params.id
+    const { rows } = UUID_RE.test(accountId)
+      ? await pool.query<{ id: string; wrapped_dek: Buffer }>(
+          'SELECT id, wrapped_dek FROM mail_account WHERE id = $1 AND user_id = $2',
+          [accountId, request.auth!.userId],
+        )
+      : { rows: [] }
+    const account = rows[0]
+    if (!account) {
+      await reply.code(404).send({ message: 'Konto nicht gefunden.' })
+      return
+    }
+    if (activeUploads >= maxConcurrentUploads()) {
+      await reply
+        .code(429)
+        .header('retry-after', '2')
+        .send({ message: 'Gerade laufen zu viele Uploads - bitte gleich erneut versuchen.' })
+      return
+    }
+    activeUploads++
+    // 'close' fires after the response was sent and when the client aborts.
+    reply.raw.once('close', () => activeUploads--)
+    uploadAccounts.set(request, account)
+  }
+
   app.post<{ Params: { id: string }; Body: Buffer }>(
     '/api/accounts/:id/uploads',
     {
-      preHandler: requireAuth,
+      onRequest: [requireAuth, admitUpload],
       bodyLimit: attachmentLimits().maxFileBytes,
       errorHandler: async (error, _request, reply) => {
         if ((error as { statusCode?: number }).statusCode === 413) {
@@ -255,18 +304,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
-      const accountId = request.params.id
-      const { rows: accounts } = UUID_RE.test(accountId)
-        ? await pool.query<{ id: string; wrapped_dek: Buffer }>(
-            'SELECT id, wrapped_dek FROM mail_account WHERE id = $1 AND user_id = $2',
-            [accountId, request.auth!.userId],
-          )
-        : { rows: [] }
-      const account = accounts[0]
-      if (!account) {
-        await reply.code(404).send({ message: 'Konto nicht gefunden.' })
-        return
-      }
+      const account = uploadAccounts.get(request)!
       const body = request.body
       if (!Buffer.isBuffer(body)) {
         await reply.code(415).send({ message: 'Erwartet: application/octet-stream.' })
@@ -319,7 +357,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete<{ Params: { id: string } }>(
     '/api/uploads/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const { rowCount } = UUID_RE.test(request.params.id)
         ? await pool.query(

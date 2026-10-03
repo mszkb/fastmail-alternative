@@ -1,3 +1,15 @@
+{
+	# Slow-client protection (roadmap 6.4): request headers and bodies (e.g.
+	# a 10 MB attachment upload) must arrive in time; the api enforces its
+	# own limit as well (REQUEST_TIMEOUT_MS).
+	servers {
+		timeouts {
+			read_header 30s
+			read_body 2m
+		}
+	}
+}
+
 {$DOMAIN} {
 	encode zstd gzip
 

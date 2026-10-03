@@ -143,7 +143,7 @@ export async function messageHtmlRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string }; Querystring: { remote?: string } }>(
     '/api/messages/:id/html',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       void reply.header('cache-control', 'no-store')
       const messageId = request.params.id

@@ -54,7 +54,7 @@ export async function folderRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{ Params: { id: string }; Body: unknown }>(
     '/api/folders/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const input = (request.body ?? {}) as { specialUse?: unknown }
       if (

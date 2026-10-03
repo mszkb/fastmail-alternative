@@ -324,6 +324,40 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
     expect(rows).toHaveLength(0)
   })
 
+  it('fails for good instead of sending without a vanished attachment', async () => {
+    const { id, messageId } = await createOutbox({ subject: 'Anhang fehlt' })
+    // The api bound two uploads; one is gone meanwhile.
+    await pool.query('UPDATE outbox_message SET attachment_count = 2 WHERE id = $1', [id])
+    const uploadId = randomUUID()
+    await pool.query(
+      `INSERT INTO attachment_upload
+         (id, account_id, outbox_id, filename_enc, content_type, size_bytes, content_enc)
+       VALUES ($1, $2, $3, $4, 'text/plain', 1, $5)`,
+      [
+        uploadId,
+        accountId,
+        id,
+        Buffer.from(encryptField(dek, 'a.txt', uploadFieldAad('filename', uploadId)), 'utf8'),
+        encryptBytes(dek, Buffer.from('a'), uploadFieldAad('content', uploadId)),
+      ],
+    )
+    const failed: string[] = []
+    expect(
+      await runSendMessage(
+        pool,
+        accountId,
+        { outboxId: id },
+        { onFailed: (code) => failed.push(code) },
+      ),
+    ).toBe('failed')
+    expect(failed).toEqual(['ATTACHMENT_MISSING'])
+    const row = await outbox(id)
+    expect(row.status).toBe('failed')
+    expect(row.last_error_code).toBe('ATTACHMENT_MISSING')
+    expect(row.attempts).toBe(0)
+    expect(await findByMessageId('INBOX', messageId)).toHaveLength(0)
+  })
+
   it('retries only the Sent copy when APPEND fails after SMTP succeeded', async () => {
     const { id, messageId } = await createOutbox({ subject: 'Append-Retry' })
     await pool.query(`UPDATE folder SET path = 'FmaDoesNotExist' WHERE id = $1`, [sentFolderId])

@@ -147,7 +147,8 @@ describe.skipIf(!databaseUrl)('cleanup job', () => {
   })
 
   it('has sensible defaults and reads the environment', () => {
-    expect(cleanupSettings()).toEqual(SETTINGS)
+    // Uploads: 7 days by default, so offline-queued sends keep their files.
+    expect(cleanupSettings()).toEqual({ ...SETTINGS, uploadRetentionMs: 7 * 24 * HOUR })
     process.env.UPLOAD_RETENTION_HOURS = '2'
     try {
       expect(cleanupSettings().uploadRetentionMs).toBe(2 * HOUR)
@@ -254,6 +255,53 @@ describe.skipIf(!databaseUrl)('cleanup job', () => {
     )
     expect(outbox.map((row) => row.id)).not.toContain(sentOld)
     expect(outcome.outbox).toBe(2)
+  })
+
+  it('keeps an upload bound and a message re-queued concurrently with the cleanup', async () => {
+    const outboxId = randomUUID()
+    await pool.query(
+      `INSERT INTO outbox_message (id, account_id, status, content_enc, message_id_header,
+         updated_at)
+       VALUES ($1, $2, 'failed', '\\x01', $3, now() - interval '40 days')`,
+      [outboxId, accountId, `<${outboxId}@example.org>`],
+    )
+    const uploadId = randomUUID()
+    await pool.query(
+      `INSERT INTO attachment_upload (id, account_id, filename_enc, content_type,
+         size_bytes, content_enc, created_at)
+       VALUES ($1, $2, '\\x00', 'text/plain', 1, '\\x00', now() - interval '10 days')`,
+      [uploadId, accountId],
+    )
+    // Another transaction binds the old upload (POST /api/outbox) and
+    // retries the old failed message while the cleanup runs.
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(
+        `UPDATE outbox_message SET status = 'queued', updated_at = now() WHERE id = $1`,
+        [outboxId],
+      )
+      await client.query(`UPDATE attachment_upload SET outbox_id = $1 WHERE id = $2`, [
+        outboxId,
+        uploadId,
+      ])
+      const cleanup = runCleanup(pool, SETTINGS)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await client.query('COMMIT')
+      await cleanup
+    } finally {
+      client.release()
+    }
+    const { rows: upload } = await pool.query('SELECT 1 FROM attachment_upload WHERE id = $1', [
+      uploadId,
+    ])
+    expect(upload).toHaveLength(1)
+    const { rows: outbox } = await pool.query<{ status: string }>(
+      'SELECT status FROM outbox_message WHERE id = $1',
+      [outboxId],
+    )
+    expect(outbox[0]?.status).toBe('queued')
+    await pool.query('DELETE FROM outbox_message WHERE id = $1', [outboxId])
   })
 
   it('removes old finished and failed jobs, never queued or running ones', async () => {

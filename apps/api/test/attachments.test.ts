@@ -7,6 +7,8 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { request } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -24,7 +26,11 @@ import {
   uploadFieldAad,
   wrapDataKey,
 } from '@fma/crypto'
-import type { MessageAttachmentListResponse, UploadedAttachment } from '@fma/shared'
+import type {
+  AttachmentMissingResponse,
+  MessageAttachmentListResponse,
+  UploadedAttachment,
+} from '@fma/shared'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
@@ -337,8 +343,32 @@ describe.skipIf(!databaseUrl)('attachments api', () => {
       [uploaded.id],
     )
     expect(bound[0]!.outbox_id).toBe(ok.json<{ id: string }>().id)
-    expect((await send([uploaded.id])).statusCode).toBe(400)
-    expect((await send([randomUUID()])).statusCode).toBe(400)
+    const { rows: counted } = await pool.query<{ attachment_count: number }>(
+      'SELECT attachment_count FROM outbox_message WHERE id = $1',
+      [ok.json<{ id: string }>().id],
+    )
+    expect(counted[0]!.attachment_count).toBe(1)
+
+    // Missing uploads (already sent, expired by the cleanup, unknown): a
+    // stable code with the missing ids, nothing is stored.
+    const { rows: before } = await pool.query('SELECT id FROM outbox_message')
+    const reused = await send([uploaded.id])
+    expect(reused.statusCode).toBe(410)
+    expect(reused.json<AttachmentMissingResponse>()).toMatchObject({
+      code: 'ATTACHMENT_MISSING',
+      missingIds: [uploaded.id],
+    })
+    const unknown = randomUUID()
+    const missing = await send([second.id, unknown])
+    expect(missing.statusCode).toBe(410)
+    expect(missing.json<AttachmentMissingResponse>().missingIds).toEqual([unknown])
+    const { rows: after } = await pool.query('SELECT id FROM outbox_message')
+    expect(after).toHaveLength(before.length)
+    const { rows: stillFree } = await pool.query<{ outbox_id: string | null }>(
+      'SELECT outbox_id FROM attachment_upload WHERE id = $1',
+      [second.id],
+    )
+    expect(stillFree[0]!.outbox_id).toBeNull()
 
     // Delete: only unbound uploads.
     const del = (id: string) =>
@@ -349,6 +379,72 @@ describe.skipIf(!databaseUrl)('attachments api', () => {
       })
     expect((await del(uploaded.id)).statusCode).toBe(404)
     expect((await del(second.id)).statusCode).toBe(204)
+  })
+
+  it('rejects unauthenticated uploads before reading the body, limits parallel uploads', async () => {
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const { port } = app.server.address() as AddressInfo
+    /** Starts an upload announcing 1 MB but sending only 1 KB (body never ends). */
+    const startUpload = (accountId: string, token?: string) => {
+      const req = request({
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path: `/api/accounts/${accountId}/uploads`,
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-length': String(1024 * 1024),
+          'x-filename': 'a.bin',
+          ...(token ? { cookie: `fma_session=${token}` } : {}),
+        },
+      })
+      const response = new Promise<{ status: number; body: string }>((resolve, reject) => {
+        req.once('response', (res) => {
+          let body = ''
+          res.setEncoding('utf8')
+          res.on('data', (chunk: string) => (body += chunk))
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body }))
+        })
+        req.once('error', reject)
+      })
+      req.write(randomBytes(1024))
+      return { req, response }
+    }
+
+    // No session: 401 right away although the body is incomplete.
+    const anonymous = startUpload(account.id)
+    expect((await anonymous.response).status).toBe(401)
+    anonymous.req.destroy()
+    // Foreign or unknown account: 404 before the body, too.
+    const foreign = startUpload(randomUUID(), authToken)
+    expect((await foreign.response).status).toBe(404)
+    foreign.req.destroy()
+
+    process.env.MAX_CONCURRENT_UPLOADS = '1'
+    try {
+      const first = startUpload(account.id, authToken)
+      first.response.catch(() => {}) // aborted below
+      // Wait until the first upload was admitted (its body is pending).
+      let second = { status: 0, body: '' }
+      for (let i = 0; i < 50 && second.status !== 429; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        const attempt = startUpload(account.id, authToken)
+        second = await attempt.response
+        attempt.req.destroy()
+      }
+      expect(second.status).toBe(429)
+      expect(JSON.parse(second.body).message).toContain('Uploads')
+      // The aborted upload frees its slot.
+      first.req.destroy()
+      let res = await upload(account.id, Buffer.from('x'), 'x.txt', 'text/plain')
+      for (let i = 0; i < 50 && res.statusCode === 429; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        res = await upload(account.id, Buffer.from('x'), 'x.txt', 'text/plain')
+      }
+      expect(res.statusCode).toBe(201)
+    } finally {
+      delete process.env.MAX_CONCURRENT_UPLOADS
+    }
   })
 
   it('rejects uploads to foreign accounts', async () => {

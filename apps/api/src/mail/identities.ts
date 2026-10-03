@@ -118,7 +118,7 @@ export async function identityRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/accounts/:id/identities',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       if (!(await ownsAccount(accountId, request.auth!.userId))) {
@@ -139,7 +139,7 @@ export async function identityRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { id: string }; Body: unknown }>(
     '/api/accounts/:id/identities',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const input = (request.body ?? {}) as Record<string, unknown>
       const email = parseEmail(input.emailAddress)
@@ -188,7 +188,7 @@ export async function identityRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{ Params: { id: string }; Body: unknown }>(
     '/api/identities/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const input = (request.body ?? {}) as Record<string, unknown>
       const name = 'name' in input ? parseName(input.name) : null
@@ -243,7 +243,7 @@ export async function identityRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete<{ Params: { id: string } }>(
     '/api/identities/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const identity = await loadIdentity(request.params.id, request.auth!.userId)
       if (!identity) {

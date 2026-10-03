@@ -22,6 +22,9 @@ import { registerCsrfProtection } from './security/csrf'
 import { registerSecurityHeaders } from './security/headers'
 import { DEFAULT_RATE_LIMITS, registerRateLimits, type RateLimitRule } from './security/rate-limit'
 
+/** Time to receive one complete request (also upload bodies on slow links). */
+export const REQUEST_TIMEOUT_MS = 120_000
+
 export interface AppOptions {
   /** Logging can be disabled to keep test output clean. */
   logger?: boolean
@@ -50,10 +53,15 @@ export function buildApp({
     // Only the reverse proxy in front of the api is trusted for
     // X-Forwarded-For (security/client-ip.ts).
     trustProxy: trustOnePrivateProxy,
+    // Slow-body protection: a request (headers and body, e.g. a 10 MB
+    // upload) must arrive within this time, else the socket is closed.
+    // Fastify's default (0) would switch off Node's own limit.
+    requestTimeout: REQUEST_TIMEOUT_MS,
   })
 
   // Hardening (roadmap 6.4): order matters - rejected requests are answered
-  // before authentication or body parsing.
+  // before authentication or body parsing. Protected routes authenticate in
+  // onRequest as well (requireAuth), i.e. before any body is read.
   registerSecurityHeaders(app)
   registerRateLimits(app, rateLimits)
   registerCsrfProtection(app)

@@ -33,6 +33,14 @@ Zwei unabhängige Schichten, ohne CSRF-Token (`apps/api/src/security/csrf.ts`):
 
 Beide Header sind „forbidden header names“, Skripte können sie nicht fälschen, und Browser senden sie bei jedem `fetch()`. Die PWA (inkl. Offline-Queue) braucht deshalb keinen eigenen Header und kein Token. `GET`-Routen dürfen keinen Zustand ändern.
 
+## Große Request-Bodies (Speicher-DoS)
+
+Die API läuft mit `mem_limit: 192m`. Damit unauthentifizierte Clients sie nicht durch große Bodies (Upload bis 10 MB, Versand/Entwurf bis 4 MB, Konfig-Import 2 MB) zum OOM bringen:
+
+- **Authentifizierung vor dem Body:** Geschützte Routen prüfen die Session im `onRequest`-Hook (`requireAuth`), also bevor der Body gelesen oder geparst wird; ohne gültige Session folgt sofort `401`. Der Upload prüft dort zusätzlich den Konto-Besitz (`404`).
+- **Gleichzeitige Uploads:** höchstens `MAX_CONCURRENT_UPLOADS` (Standard 2) Upload-Bodies gleichzeitig im Speicher, darüber `429` mit `Retry-After` (die PWA wartet und versucht es erneut).
+- **Slow-Body:** Eine Anfrage muss innerhalb von 120 s vollständig ankommen (Fastify `requestTimeout`), Caddy begrenzt Header (30 s) und Body (2 min) ebenfalls.
+
 ## Rate Limits
 
 In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-limit.ts`, eine API-Instanz, kein Redis; ein Neustart setzt die Zähler zurück). Antwort `429` mit `Retry-After`; die Offline-Queue wiederholt `429` automatisch.

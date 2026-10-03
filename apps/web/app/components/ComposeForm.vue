@@ -27,7 +27,9 @@ import {
   type SaveDraftRequest,
   type SendMessageRequest,
   type UploadedAttachment,
+  type AttachmentMissingResponse,
   ATTACHMENT_LIMIT_DEFAULTS,
+  ATTACHMENT_MISSING,
   formatByteSize,
 } from '@fma/shared'
 import {
@@ -88,6 +90,24 @@ const attachments = ref<UploadedAttachment[]>([])
 const uploading = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+/** Uploads one file; waits and retries a few times while the server is busy (429). */
+async function uploadFile(file: File): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`/api/accounts/${props.accountId}/uploads`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-filename': encodeURIComponent(file.name),
+        'x-content-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    })
+    if (res.status !== 429 || attempt >= 5) return res
+    const seconds = Number(res.headers.get('retry-after')) || 2
+    await new Promise((resolve) => setTimeout(resolve, Math.min(seconds, 10) * 1000))
+  }
+}
+
 async function addFiles(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const files = [...(input.files ?? [])]
@@ -100,15 +120,7 @@ async function addFiles(event: Event): Promise<void> {
     }
     uploading.value++
     try {
-      const res = await fetch(`/api/accounts/${props.accountId}/uploads`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/octet-stream',
-          'x-filename': encodeURIComponent(file.name),
-          'x-content-type': file.type || 'application/octet-stream',
-        },
-        body: file,
-      })
+      const res = await uploadFile(file)
       const payload = (await res.json().catch(() => null)) as
         (UploadedAttachment & { message?: string }) | null
       if (!res.ok || !payload) {
@@ -419,9 +431,22 @@ async function send(): Promise<void> {
       body: JSON.stringify(body),
     })
     const payload = (await res.json().catch(() => null)) as
-      (OutboxMessage & { message?: string }) | null
+      (OutboxMessage & Partial<AttachmentMissingResponse>) | null
     if (!res.ok || !payload) {
       finished = wasFinished
+      if (payload?.code === ATTACHMENT_MISSING && payload.missingIds) {
+        // Upload expired (form open for days) or removed: drop it from the
+        // list, the user adds the file again. Nothing was sent.
+        const missing = new Set(payload.missingIds)
+        const names = attachments.value.filter((a) => missing.has(a.id)).map((a) => a.filename)
+        attachments.value = attachments.value.filter((a) => !missing.has(a.id))
+        error.value =
+          `Nicht gesendet: ${names.length === 1 ? 'Der Anhang' : 'Die Anhänge'} ` +
+          `${names.map((name) => `„${name}“`).join(', ')} ` +
+          `${names.length === 1 ? 'ist' : 'sind'} nicht mehr vorhanden (abgelaufen). ` +
+          'Bitte erneut hinzufügen und dann senden.'
+        return
+      }
       error.value = payload?.message ?? `Senden fehlgeschlagen (Fehler ${res.status}).`
       return
     }

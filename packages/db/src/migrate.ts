@@ -28,6 +28,7 @@ import { migration0015 } from './migrations/0015_outbox_client_id'
 import { migration0016 } from './migrations/0016_drafts'
 import { migration0017 } from './migrations/0017_attachment_uploads'
 import { migration0018 } from './migrations/0018_cleanup_indexes'
+import { migration0019 } from './migrations/0019_outbox_attachment_count'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -59,6 +60,7 @@ export const migrations: Migration[] = [
   migration0016,
   migration0017,
   migration0018,
+  migration0019,
 ]
 
 /**
