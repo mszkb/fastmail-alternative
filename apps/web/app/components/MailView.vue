@@ -554,6 +554,7 @@ function hitFolderLabel(message: MessageListItem): string {
 async function selectFolder(id: string): Promise<void> {
   resetSearch()
   folderId.value = id
+  olderHint.value = ''
   messages.value = []
   nextCursor.value = null
   listCacheFolder = ''
@@ -614,6 +615,45 @@ async function loadMessages(): Promise<void> {
 
 function loadMore(): void {
   if (!listLoading.value && nextCursor.value) void loadMessages()
+}
+
+/** Loading older messages from the provider (roadmap 2.2) is in progress. */
+const olderLoading = ref(false)
+const olderHint = ref('')
+
+/**
+ * Asks the worker to fetch the next batch of older messages of the open
+ * folder, waits until the folder's message count grows (or gives up after
+ * about a minute) and reloads the list.
+ */
+async function loadOlder(): Promise<void> {
+  const folder = folderId.value
+  const requestedAccount = accountId.value
+  if (!folder || !requestedAccount || olderLoading.value) return
+  olderLoading.value = true
+  olderHint.value = ''
+  try {
+    const before = folders.value.find((f) => f.id === folder)?.total ?? 0
+    const res = await fetch(`/api/folders/${folder}/load-older`, { method: 'POST' })
+    if (res.status === 401) notifyUnauthorized()
+    if (!res.ok) throw new Error(`Fehler ${res.status}`)
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      if (folder !== folderId.value || requestedAccount !== accountId.value) return
+      const list = await getJson<FolderListResponse>(`/api/accounts/${requestedAccount}/folders`)
+      const total = list.folders.find((f) => f.id === folder)?.total ?? 0
+      if (total > before) {
+        folders.value = list.folders
+        await selectFolder(folder)
+        return
+      }
+    }
+    olderHint.value = 'Keine älteren Nachrichten gefunden.'
+  } catch {
+    olderHint.value = 'Ältere Nachrichten konnten nicht geladen werden.'
+  } finally {
+    olderLoading.value = false
+  }
 }
 
 async function openMessage(id: string): Promise<void> {
@@ -1239,6 +1279,12 @@ onBeforeUnmount(() => {
         <button type="button" class="secondary" :disabled="listLoading" @click="loadMore">
           Mehr laden
         </button>
+      </div>
+      <div v-else-if="folderId && !search && !listLoading" class="more">
+        <button type="button" class="secondary" :disabled="olderLoading" @click="loadOlder">
+          {{ olderLoading ? 'Ältere Mails werden geladen …' : 'Ältere Mails laden' }}
+        </button>
+        <p v-if="olderHint" class="hint center">{{ olderHint }}</p>
       </div>
       <p v-if="listLoading" class="hint center">Wird geladen &hellip;</p>
     </section>

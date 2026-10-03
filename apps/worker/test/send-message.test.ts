@@ -12,11 +12,14 @@ import pg from 'pg'
 import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
 import { failJob } from '@fma/db/job-queue'
+import { simpleParser } from 'mailparser'
 import {
+  encryptBytes,
   encryptField,
   generateDataKey,
   loadMasterKey,
   outboxContentAad,
+  uploadFieldAad,
   wrapDataKey,
 } from '@fma/crypto'
 import type { OutboxContent } from '@fma/shared'
@@ -37,7 +40,7 @@ const greenmailUser = process.env.GREENMAIL_USER ?? ''
 const greenmailPassword = process.env.GREENMAIL_PASSWORD ?? ''
 
 const TABLES =
-  'session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, outbox_message'
+  'session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, outbox_message, attachment_upload'
 const SENT = 'FmaSendSent'
 
 function imapClient(): ImapFlow {
@@ -279,6 +282,80 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
 
     // A duplicate job neither resends nor fails.
     expect(await runSendMessage(pool, accountId, { outboxId: id })).toBe('already_done')
+  })
+
+  it('sends uploaded attachments and deletes them afterwards', async () => {
+    const { id, messageId } = await createOutbox({ subject: 'Mit Anhang' })
+    const pdf = randomBytes(200_000)
+    for (const [filename, type, content] of [
+      ['Bericht März.pdf', 'application/pdf', pdf],
+      ['notiz.txt', 'text/plain', Buffer.from('Notiz äöü')],
+    ] as const) {
+      const uploadId = randomUUID()
+      await pool.query(
+        `INSERT INTO attachment_upload
+           (id, account_id, outbox_id, filename_enc, content_type, size_bytes, content_enc)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          uploadId,
+          accountId,
+          id,
+          Buffer.from(encryptField(dek, filename, uploadFieldAad('filename', uploadId)), 'utf8'),
+          type,
+          content.length,
+          encryptBytes(dek, content, uploadFieldAad('content', uploadId)),
+        ],
+      )
+    }
+    expect(await runSendMessage(pool, accountId, { outboxId: id })).toBe('sent')
+
+    const delivered = await waitForDelivery(messageId)
+    expect(delivered).toHaveLength(1)
+    const parsed = await simpleParser(delivered[0]!.slice(delivered[0]!.indexOf('\n') + 1))
+    expect(parsed.text?.trim()).toBe('Hallo aus dem Versand-Worker.')
+    expect(parsed.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['Bericht März.pdf', 'application/pdf'],
+      ['notiz.txt', 'text/plain'],
+    ])
+    expect(parsed.attachments[0]!.content.equals(pdf)).toBe(true)
+    expect(parsed.attachments[1]!.content.toString('utf8')).toBe('Notiz äöü')
+
+    const { rows } = await pool.query('SELECT 1 FROM attachment_upload WHERE outbox_id = $1', [id])
+    expect(rows).toHaveLength(0)
+  })
+
+  it('fails for good instead of sending without a vanished attachment', async () => {
+    const { id, messageId } = await createOutbox({ subject: 'Anhang fehlt' })
+    // The api bound two uploads; one is gone meanwhile.
+    await pool.query('UPDATE outbox_message SET attachment_count = 2 WHERE id = $1', [id])
+    const uploadId = randomUUID()
+    await pool.query(
+      `INSERT INTO attachment_upload
+         (id, account_id, outbox_id, filename_enc, content_type, size_bytes, content_enc)
+       VALUES ($1, $2, $3, $4, 'text/plain', 1, $5)`,
+      [
+        uploadId,
+        accountId,
+        id,
+        Buffer.from(encryptField(dek, 'a.txt', uploadFieldAad('filename', uploadId)), 'utf8'),
+        encryptBytes(dek, Buffer.from('a'), uploadFieldAad('content', uploadId)),
+      ],
+    )
+    const failed: string[] = []
+    expect(
+      await runSendMessage(
+        pool,
+        accountId,
+        { outboxId: id },
+        { onFailed: (code) => failed.push(code) },
+      ),
+    ).toBe('failed')
+    expect(failed).toEqual(['ATTACHMENT_MISSING'])
+    const row = await outbox(id)
+    expect(row.status).toBe('failed')
+    expect(row.last_error_code).toBe('ATTACHMENT_MISSING')
+    expect(row.attempts).toBe(0)
+    expect(await findByMessageId('INBOX', messageId)).toHaveLength(0)
   })
 
   it('retries only the Sent copy when APPEND fails after SMTP succeeded', async () => {

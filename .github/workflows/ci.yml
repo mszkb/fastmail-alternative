@@ -50,8 +50,18 @@ jobs:
       GREENMAIL_SMTP_PORT: '3025'
       GREENMAIL_USER: 'testuser@example.com'
       GREENMAIL_PASSWORD: 'secret123'
+      # Backup/restore test (roadmap 6.2): pg_dump must be >= the service's
+      # server version (postgres:17), the runner only ships an older client.
+      PG_BIN: /usr/lib/postgresql/17/bin
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-client-17
 
       - uses: pnpm/action-setup@v4
         # reads the pinned pnpm version from the packageManager field

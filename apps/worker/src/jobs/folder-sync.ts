@@ -10,14 +10,17 @@
  * override (never touched here), one folder per role (@fma/shared).
  *
  * Idempotent: re-running updates rows in place; folders that vanished on the
- * server are removed.
+ * server are removed, together with messages that lived only there and
+ * their raw files (roadmap 5.5).
  */
 import { ImapFlow } from 'imapflow'
 import type { Pool, PoolClient } from '@fma/db'
 import { detectFolderRoles, resolveFolderRoles } from '@fma/shared'
 import { loadAccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
+import { log } from '../log'
 import { assertMailHost, mailTestMode } from '../ports'
+import { purgeLocationlessMessages } from './cleanup'
 
 interface ListedMailbox {
   path: string
@@ -104,12 +107,19 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
       )
     }
 
-    // Remove folders that no longer exist on the server.
+    // Remove folders that no longer exist on the server. Their locations
+    // cascade; messages left without any location (not also in another
+    // folder) are deleted with their raw files. This job is the account's
+    // only running job, so no sync is relinking them meanwhile.
     const paths = mailboxes.map((mailbox) => mailbox.path)
-    await pool.query(`DELETE FROM folder WHERE account_id = $1 AND path <> ALL($2)`, [
-      accountId,
-      paths,
-    ])
+    const { rowCount: foldersRemoved } = await pool.query(
+      `DELETE FROM folder WHERE account_id = $1 AND path <> ALL($2)`,
+      [accountId, paths],
+    )
+    if ((foldersRemoved ?? 0) > 0) {
+      const messagesRemoved = await purgeLocationlessMessages(pool, accountId)
+      log.info({ accountId, foldersRemoved, messagesRemoved }, 'vanished folders removed')
+    }
     await applyFolderRoles(pool, accountId)
   } finally {
     unregister()

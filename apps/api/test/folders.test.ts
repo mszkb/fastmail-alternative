@@ -162,4 +162,28 @@ describe.skipIf(!databaseUrl)('folder role mapping api', () => {
       Gesendet: 'null',
     })
   })
+
+  it('load-older enqueues one message_sync with loadOlder per folder', async () => {
+    const post = (id: string, token: string | null = authToken) =>
+      app.inject({
+        method: 'POST',
+        url: `/api/folders/${id}/load-older`,
+        headers: token ? { cookie: `fma_session=${token}` } : {},
+      })
+    expect((await post(inboxId, null)).statusCode).toBe(401)
+    expect((await post(foreignFolderId)).statusCode).toBe(404)
+    expect((await post(randomUUID())).statusCode).toBe(404)
+    expect((await post('nope')).statusCode).toBe(404)
+    const first = await post(inboxId)
+    expect(first.statusCode).toBe(202)
+    expect(first.json()).toEqual({ queued: true })
+    // Deduplicated while queued.
+    expect((await post(inboxId)).json()).toEqual({ queued: false })
+    const { rows } = await pool.query(
+      `SELECT account_id, payload FROM job WHERE type = 'message_sync'`,
+    )
+    expect(rows).toEqual([
+      { account_id: accountId, payload: { folderId: inboxId, loadOlder: true } },
+    ])
+  })
 })

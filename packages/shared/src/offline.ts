@@ -11,13 +11,22 @@
  *   the newest save or delete of a draft is kept, a send drops the queued
  *   saves of its draft).
  * - replayDecision: what to do with a replayed operation given the HTTP
- *   status (done, retry later, drop with a notice, session gone).
+ *   status (done, retry later, drop with a notice, session gone, keep a
+ *   send whose attachments expired as a draft - see sendToDraft).
  * - applyMessageAction / overlayPendingActions: the optimistic effect of
  *   (queued) actions on a message list, also after a reload.
  * - selectEvictions: LRU eviction that keeps the cache within its limits.
  */
+import { ATTACHMENT_MISSING } from './attachments'
+import { formatAddressList } from './compose'
 import type { SaveDraftRequest } from './drafts'
-import type { MessageAction, MessageActionRequest, MessageFlags, SendMessageRequest } from './mail'
+import type {
+  MailPerson,
+  MessageAction,
+  MessageActionRequest,
+  MessageFlags,
+  SendMessageRequest,
+} from './mail'
 
 interface QueuedBase {
   /** Client-generated UUID; for sends also the outbox `clientId` (idempotency). */
@@ -134,6 +143,12 @@ export type ReplayDecision =
   | 'drop'
   /** Session expired or revoked: stop, the app clears its offline data. */
   | 'unauthorized'
+  /**
+   * A send whose attachments are gone (expired uploads, code
+   * ATTACHMENT_MISSING): nothing was sent; keep the text as a draft
+   * (sendToDraft) and tell the user to add the files again.
+   */
+  | 'draft'
 
 /** Retries of a 409 (e.g. moved message without its new UID yet, a few seconds). */
 export const MAX_CONFLICT_ATTEMPTS = 3
@@ -143,17 +158,61 @@ export const MAX_REPLAY_ATTEMPTS = 10
 /**
  * Decides what happens to a replayed operation. `status` is the HTTP
  * status, or 'network' when the request did not reach the server (does not
- * count as an attempt). `attempts` counts earlier retryable answers.
+ * count as an attempt). `attempts` counts earlier retryable answers. `code`
+ * is the `code` of an error answer, if any.
  */
-export function replayDecision(status: number | 'network', attempts: number): ReplayDecision {
+export function replayDecision(
+  status: number | 'network',
+  attempts: number,
+  code?: string,
+): ReplayDecision {
   if (status === 'network') return 'retry'
   if (status >= 200 && status < 300) return 'done'
   if (status === 401) return 'unauthorized'
+  if (status === 410 && code === ATTACHMENT_MISSING) return 'draft'
   if (status === 409) return attempts + 1 < MAX_CONFLICT_ATTEMPTS ? 'retry' : 'drop'
   if (status === 408 || status === 429 || status >= 500) {
     return attempts + 1 < MAX_REPLAY_ATTEMPTS ? 'retry' : 'drop'
   }
   return 'drop'
+}
+
+function addressText(list: readonly (string | MailPerson)[] | undefined): string {
+  return (list ?? [])
+    .map((entry) => (typeof entry === 'string' ? entry : formatAddressList([entry])))
+    .join(', ')
+}
+
+/**
+ * Turns a queued send into a queued draft save with the same text,
+ * recipients and threading headers (decision 'draft'): the draft the
+ * message was written in (its queued saves were dropped with the send) or,
+ * without one, a new draft with the operation id. Saved with `force`.
+ */
+export function sendToDraft(operation: QueuedSend, now = new Date()): QueuedDraft {
+  const { request } = operation
+  return {
+    kind: 'draft',
+    id: operation.id,
+    accountId: operation.accountId,
+    createdAt: now.toISOString(),
+    attempts: 0,
+    request: {
+      draftId: request.draftId ?? operation.id,
+      body: {
+        accountId: request.accountId,
+        identityId: request.identityId ?? null,
+        to: addressText(request.to),
+        cc: addressText(request.cc),
+        bcc: addressText(request.bcc),
+        subject: request.subject,
+        text: request.text,
+        inReplyTo: request.inReplyTo ?? null,
+        references: request.references ?? [],
+        force: true,
+      },
+    },
+  }
 }
 
 /** German label of the pending indicator, e.g. "3 Aktionen ausstehend". */

@@ -26,6 +26,11 @@ import {
   type OutboxMessage,
   type SaveDraftRequest,
   type SendMessageRequest,
+  type UploadedAttachment,
+  type AttachmentMissingResponse,
+  ATTACHMENT_LIMIT_DEFAULTS,
+  ATTACHMENT_MISSING,
+  formatByteSize,
 } from '@fma/shared'
 import {
   addNotice,
@@ -77,6 +82,69 @@ const error = ref('')
 const toInput = ref<HTMLInputElement | null>(null)
 const clientId = newId()
 const textInput = ref<HTMLTextAreaElement | null>(null)
+
+// Attachments (roadmap 5.3): uploaded right away (encrypted on the server),
+// sent by id. They are not part of the draft: closing or discarding the
+// form removes them on the server.
+const attachments = ref<UploadedAttachment[]>([])
+const uploading = ref(0)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+/** Uploads one file; waits and retries a few times while the server is busy (429). */
+async function uploadFile(file: File): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`/api/accounts/${props.accountId}/uploads`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-filename': encodeURIComponent(file.name),
+        'x-content-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    })
+    if (res.status !== 429 || attempt >= 5) return res
+    const seconds = Number(res.headers.get('retry-after')) || 2
+    await new Promise((resolve) => setTimeout(resolve, Math.min(seconds, 10) * 1000))
+  }
+}
+
+async function addFiles(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = [...(input.files ?? [])]
+  input.value = ''
+  error.value = ''
+  for (const file of files) {
+    if (attachments.value.length + uploading.value >= ATTACHMENT_LIMIT_DEFAULTS.maxCount) {
+      error.value = `Höchstens ${ATTACHMENT_LIMIT_DEFAULTS.maxCount} Anhänge sind erlaubt.`
+      break
+    }
+    uploading.value++
+    try {
+      const res = await uploadFile(file)
+      const payload = (await res.json().catch(() => null)) as
+        (UploadedAttachment & { message?: string }) | null
+      if (!res.ok || !payload) {
+        error.value = `${file.name}: ${payload?.message ?? `Hochladen fehlgeschlagen (Fehler ${res.status}).`}`
+      } else {
+        attachments.value.push(payload)
+      }
+    } catch {
+      error.value = `${file.name}: Hochladen fehlgeschlagen (offline?).`
+    } finally {
+      uploading.value--
+    }
+  }
+}
+
+function removeAttachment(attachment: UploadedAttachment): void {
+  attachments.value = attachments.value.filter((a) => a.id !== attachment.id)
+  void fetch(`/api/uploads/${attachment.id}`, { method: 'DELETE' }).catch(() => {})
+}
+
+/** Form closed without sending: the uploads are not needed anymore (best effort). */
+function dropAttachments(): void {
+  for (const attachment of attachments.value) removeAttachment(attachment)
+}
 
 // Draft state: id (client-generated for new drafts), the server version
 // this form is based on (0 = not saved yet) and the last saved content.
@@ -242,6 +310,12 @@ function keepMine(): void {
 /** Closes the form and keeps the draft (saved right away if it changed). */
 async function close(): Promise<void> {
   if (sending.value) return
+  if (
+    attachments.value.length > 0 &&
+    !window.confirm('Anhänge werden nicht im Entwurf gespeichert. Trotzdem schließen?')
+  ) {
+    return
+  }
   if (!finished && dirty.value) {
     await saveDraft()
     if (saveState.value === 'error' && !conflict.value) {
@@ -254,6 +328,7 @@ async function close(): Promise<void> {
   }
   finished = true
   clearTimeout(saveTimer)
+  dropAttachments()
   emit('close')
 }
 
@@ -283,6 +358,7 @@ async function discard(): Promise<void> {
     }
     emit('draftsChanged')
   }
+  dropAttachments()
   emit('close')
 }
 
@@ -295,6 +371,10 @@ function onPageHide(event: Event): void {
 async function send(): Promise<void> {
   if (sending.value) return
   error.value = ''
+  if (uploading.value > 0) {
+    error.value = 'Bitte warten, bis alle Anhänge hochgeladen sind.'
+    return
+  }
   const to = parseField('An', form.to)
   const cc = to && parseField('Cc', form.cc)
   const bcc = cc && parseField('Bcc', form.bcc)
@@ -332,6 +412,7 @@ async function send(): Promise<void> {
   if (form.identityId) body.identityId = form.identityId
   if (inReplyTo) body.inReplyTo = inReplyTo
   if (references.length) body.references = references
+  if (attachments.value.length) body.attachmentIds = attachments.value.map((a) => a.id)
 
   sending.value = true
   // No autosave may race the send (it would answer 410 or recreate nothing).
@@ -350,9 +431,22 @@ async function send(): Promise<void> {
       body: JSON.stringify(body),
     })
     const payload = (await res.json().catch(() => null)) as
-      (OutboxMessage & { message?: string }) | null
+      (OutboxMessage & Partial<AttachmentMissingResponse>) | null
     if (!res.ok || !payload) {
       finished = wasFinished
+      if (payload?.code === ATTACHMENT_MISSING && payload.missingIds) {
+        // Upload expired (form open for days) or removed: drop it from the
+        // list, the user adds the file again. Nothing was sent.
+        const missing = new Set(payload.missingIds)
+        const names = attachments.value.filter((a) => missing.has(a.id)).map((a) => a.filename)
+        attachments.value = attachments.value.filter((a) => !missing.has(a.id))
+        error.value =
+          `Nicht gesendet: ${names.length === 1 ? 'Der Anhang' : 'Die Anhänge'} ` +
+          `${names.map((name) => `„${name}“`).join(', ')} ` +
+          `${names.length === 1 ? 'ist' : 'sind'} nicht mehr vorhanden (abgelaufen). ` +
+          'Bitte erneut hinzufügen und dann senden.'
+        return
+      }
       error.value = payload?.message ?? `Senden fehlgeschlagen (Fehler ${res.status}).`
       return
     }
@@ -499,6 +593,30 @@ onBeforeUnmount(() => {
         <span class="visually-hidden">Nachricht</span>
         <textarea ref="textInput" v-model="form.text" spellcheck="true" />
       </label>
+
+      <div class="attachments">
+        <ul v-if="attachments.length > 0">
+          <li v-for="attachment in attachments" :key="attachment.id">
+            <span class="attachment-name" :title="attachment.filename">{{
+              attachment.filename
+            }}</span>
+            <span class="attachment-size">{{ formatByteSize(attachment.size) }}</span>
+            <button
+              type="button"
+              class="link"
+              :disabled="sending"
+              :aria-label="`Anhang ${attachment.filename} entfernen`"
+              @click="removeAttachment(attachment)"
+            >
+              Entfernen
+            </button>
+          </li>
+        </ul>
+        <input ref="fileInput" type="file" multiple class="visually-hidden" @change="addFiles" />
+        <button type="button" class="link" :disabled="sending" @click="fileInput?.click()">
+          {{ uploading > 0 ? 'Wird hochgeladen …' : 'Anhang hinzufügen' }}
+        </button>
+      </div>
 
       <footer class="compose-footer">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -657,6 +775,43 @@ textarea:focus {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.attachments ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachments li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-size {
+  flex: none;
+  color: #52606d;
 }
 
 button.primary,

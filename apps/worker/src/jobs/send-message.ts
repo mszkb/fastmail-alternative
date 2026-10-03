@@ -27,13 +27,20 @@
  * accepted the message but before `sent_at` is stored, the stale-job
  * requeue sends it again (duplicate rather than lost mail).
  *
+ * Attachments (roadmap 5.3): uploads bound to the message
+ * (`attachment_upload.outbox_id`) are decrypted and added by MailComposer;
+ * they are deleted together with the content once the message settled.
+ * `attachment_count` is the number bound by the api: when fewer uploads are
+ * found (removed meanwhile), the message fails for good with
+ * ATTACHMENT_MISSING instead of being sent without them.
+ *
  * Never logged: content, addresses, server replies (may echo addresses).
  */
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import type { Pool } from '@fma/db'
-import { decryptField, outboxContentAad } from '@fma/crypto'
+import { decryptBytes, decryptField, outboxContentAad, uploadFieldAad } from '@fma/crypto'
 import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 import type { OutboxContent, OutboxErrorCode, OutboxStatus, SentCopyStatus } from '@fma/shared'
 import { loadAccountContext, type AccountContext } from '../accounts'
@@ -72,6 +79,7 @@ interface OutboxRow {
   references: string[]
   sent_copy: SentCopyStatus | null
   sent_at: Date | null
+  attachment_count: number
 }
 
 /** Error with a stable code; thrown to make the job queue retry. */
@@ -115,14 +123,59 @@ export function providerSavesSentCopy(ctx: AccountContext): boolean {
   return AUTO_SAVE_HOST_RE.test(ctx.smtp.host) || AUTO_SAVE_HOST_RE.test(ctx.imap.host)
 }
 
+/** A decrypted upload attached to the message (roadmap 5.3). */
+interface OutgoingAttachment {
+  filename: string
+  contentType: string
+  content: Buffer
+}
+
+/** Decrypts the uploads bound to an outbox message, in upload order. */
+async function loadAttachments(
+  pool: Pool,
+  dek: Buffer,
+  outboxId: string,
+): Promise<OutgoingAttachment[]> {
+  const { rows } = await pool.query<{
+    id: string
+    filename_enc: Buffer
+    content_type: string
+    content_enc: Buffer
+  }>(
+    `SELECT id, filename_enc, content_type, content_enc FROM attachment_upload
+     WHERE outbox_id = $1 ORDER BY created_at, id`,
+    [outboxId],
+  )
+  return rows.map((upload) => ({
+    filename: decryptField(
+      dek,
+      upload.filename_enc.toString('utf8'),
+      uploadFieldAad('filename', upload.id),
+    ),
+    contentType: upload.content_type,
+    content: decryptBytes(dek, upload.content_enc, uploadFieldAad('content', upload.id)),
+  }))
+}
+
+/** Settled message: its uploads are not needed anymore. */
+async function deleteAttachments(pool: Pool, outboxId: string): Promise<void> {
+  await pool.query('DELETE FROM attachment_upload WHERE outbox_id = $1', [outboxId])
+}
+
 /** Builds the raw RFC 5322 message; `keepBcc` only for the Sent copy. */
 async function buildMessage(
   row: OutboxRow,
   content: OutboxContent,
+  attachments: OutgoingAttachment[],
   date: Date,
   keepBcc: boolean,
 ): Promise<{ raw: Buffer; envelope: { from: string; to: string[] } }> {
   const composer = new MailComposer({
+    attachments: attachments.map((attachment) => ({
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+      content: attachment.content,
+    })),
     from: content.from,
     to: content.to,
     cc: content.cc,
@@ -212,7 +265,7 @@ export async function runSendMessage(
 
   const { rows } = await pool.query<OutboxRow>(
     `SELECT id, status, content_enc, message_id_header, in_reply_to, "references", sent_copy,
-            sent_at
+            sent_at, attachment_count
      FROM outbox_message WHERE id = $1 AND account_id = $2`,
     [outboxId, accountId],
   )
@@ -228,6 +281,15 @@ export async function runSendMessage(
   const content = JSON.parse(
     decryptField(ctx.dek, row.content_enc.toString('utf8'), outboxContentAad(row.id)),
   ) as OutboxContent
+  const attachments = await loadAttachments(pool, ctx.dek, row.id)
+  const attachmentsMissing = attachments.length < row.attachment_count
+  if (attachmentsMissing && !row.sent_at) {
+    // Never send without an attachment the user added.
+    await setStatus(pool, row.id, { status: 'failed', last_error_code: 'ATTACHMENT_MISSING' })
+    log.warn({ accountId, outboxId, code: 'ATTACHMENT_MISSING' }, 'send_message failed')
+    options.onFailed?.('ATTACHMENT_MISSING')
+    return 'failed'
+  }
 
   // Step 1: SMTP (only while not yet accepted).
   let sentAt = row.sent_at
@@ -239,7 +301,7 @@ export async function runSendMessage(
     )
     const date = new Date()
     try {
-      const { raw, envelope } = await buildMessage(row, content, date, false)
+      const { raw, envelope } = await buildMessage(row, content, attachments, date, false)
       await sendViaSmtp(ctx, raw, envelope)
     } catch (err) {
       const { code, permanent } = classifySmtpError(err)
@@ -272,9 +334,12 @@ export async function runSendMessage(
   let sentCopy: SentCopyStatus
   if (providerSavesSentCopy(ctx) || !sentFolder) {
     sentCopy = 'skipped'
+  } else if (attachmentsMissing) {
+    // The copy would differ from what was sent.
+    sentCopy = 'failed'
   } else {
     try {
-      const { raw } = await buildMessage(row, content, sentAt, true)
+      const { raw } = await buildMessage(row, content, attachments, sentAt, true)
       await appendToSent(ctx, sentFolder.path, raw, sentAt)
       sentCopy = 'done'
     } catch (err) {
@@ -288,6 +353,7 @@ export async function runSendMessage(
   }
   // Settled: drop the content (the copy lives in "Sent" on the server now).
   await setStatus(pool, row.id, { sent_copy: sentCopy, content_enc: null })
+  await deleteAttachments(pool, row.id)
   if (sentCopy === 'done') await enqueueMessageSync(pool, accountId, sentFolder!.id)
   return 'sent'
 }
@@ -309,6 +375,11 @@ export async function markSendGivenUp(pool: Pool, payload: Record<string, unknow
   await pool.query(
     `UPDATE outbox_message SET sent_copy = 'failed', content_enc = NULL, updated_at = now()
      WHERE id = $1 AND sent_at IS NOT NULL AND sent_copy = 'pending'`,
+    [payload.outboxId],
+  )
+  await pool.query(
+    `DELETE FROM attachment_upload u USING outbox_message o
+     WHERE u.outbox_id = o.id AND o.id = $1 AND o.content_enc IS NULL`,
     [payload.outboxId],
   )
 }

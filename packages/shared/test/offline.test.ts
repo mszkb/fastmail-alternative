@@ -9,7 +9,9 @@ import {
   queueOperation,
   replayDecision,
   selectEvictions,
+  sendToDraft,
   type QueuedOperation,
+  type QueuedSend,
 } from '../src/offline'
 
 const ACCOUNT = 'a1'
@@ -123,6 +125,64 @@ describe('replayDecision', () => {
     expect(replayDecision(409, MAX_CONFLICT_ATTEMPTS - 1)).toBe('drop')
     expect(replayDecision(500, MAX_REPLAY_ATTEMPTS - 2)).toBe('retry')
     expect(replayDecision(500, MAX_REPLAY_ATTEMPTS - 1)).toBe('drop')
+  })
+})
+
+describe('expired attachments of a queued send', () => {
+  it('keeps the message as a draft instead of dropping it', () => {
+    expect(replayDecision(410, 0, 'ATTACHMENT_MISSING')).toBe('draft')
+    expect(replayDecision(410, 0)).toBe('drop')
+    expect(replayDecision(400, 0, 'ATTACHMENT_MISSING')).toBe('drop')
+  })
+
+  it('turns the send into a forced save of its draft with the same content', () => {
+    const send: QueuedSend = {
+      kind: 'send',
+      id: 'c1',
+      accountId: ACCOUNT,
+      createdAt: new Date(0).toISOString(),
+      attempts: 2,
+      request: {
+        accountId: ACCOUNT,
+        clientId: 'c1',
+        draftId: 'd1',
+        identityId: 'i1',
+        to: ['anna@example.com', { name: 'Doe, John', address: 'john@example.com' }],
+        cc: [{ name: '', address: 'cc@example.com' }],
+        subject: 'Bericht',
+        text: 'Siehe Anhang',
+        inReplyTo: '<x@example.com>',
+        references: ['<x@example.com>'],
+        attachmentIds: ['u1'],
+      },
+    }
+    const draft = sendToDraft(send, new Date(1000))
+    expect(draft).toEqual({
+      kind: 'draft',
+      id: 'c1',
+      accountId: ACCOUNT,
+      createdAt: new Date(1000).toISOString(),
+      attempts: 0,
+      request: {
+        draftId: 'd1',
+        body: {
+          accountId: ACCOUNT,
+          identityId: 'i1',
+          to: 'anna@example.com, "Doe, John" <john@example.com>',
+          cc: 'cc@example.com',
+          bcc: '',
+          subject: 'Bericht',
+          text: 'Siehe Anhang',
+          inReplyTo: '<x@example.com>',
+          references: ['<x@example.com>'],
+          force: true,
+        },
+      },
+    })
+    // Without a draft id: a new draft named after the operation.
+    const withoutDraft = { ...send.request }
+    delete withoutDraft.draftId
+    expect(sendToDraft({ ...send, request: withoutDraft }).request.draftId).toBe('c1')
   })
 })
 

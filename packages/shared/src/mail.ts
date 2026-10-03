@@ -187,8 +187,8 @@ export function isValidEmailAddress(address: string): boolean {
 }
 
 /**
- * `POST /api/outbox` - sends a plain-text message (HTML and attachments
- * follow later). Recipients are plain addresses or `{ name, address }`.
+ * `POST /api/outbox` - sends a plain-text message, optionally with
+ * attachments uploaded before (HTML follows later). Recipients are plain addresses or `{ name, address }`.
  * `identityId` defaults to the account's default identity.
  * `inReplyTo`/`references` are Message-IDs in angle brackets.
  */
@@ -214,6 +214,12 @@ export interface SendMessageRequest {
    * ignored, so a replayed send never fails because of its draft.
    */
   draftId?: string
+  /**
+   * Uploaded attachments (`POST /api/accounts/:id/uploads`, roadmap 5.3) of
+   * the same account, in order. Each upload can be sent once; it is deleted
+   * after the message settled.
+   */
+  attachmentIds?: string[]
 }
 
 /** Stable error codes of a failed send; `message` carries the German text. */
@@ -226,6 +232,7 @@ export type OutboxErrorCode =
   | 'CONNECTION_REFUSED'
   | 'TIMEOUT'
   | 'TLS_ERROR'
+  | 'ATTACHMENT_MISSING'
   | 'UNKNOWN'
 
 export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
@@ -237,6 +244,8 @@ export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
   CONNECTION_REFUSED: 'Verbindung zum SMTP-Server abgelehnt - Host/Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden mit dem SMTP-Server.',
   TLS_ERROR: 'TLS-Fehler - Zertifikat des SMTP-Servers konnte nicht verifiziert werden.',
+  ATTACHMENT_MISSING:
+    'Ein Anhang ist nicht mehr vorhanden - bitte die Nachricht neu schreiben und den Anhang erneut hinzufügen.',
   UNKNOWN: 'Versand fehlgeschlagen.',
 }
 

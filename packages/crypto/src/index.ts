@@ -21,6 +21,7 @@
  *   blow-up; same AES-256-GCM + AAD binding as fields)
  */
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto'
+import { Transform } from 'node:stream'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_BYTES = 32
@@ -229,6 +230,11 @@ export function draftContentAad(draftId: string): string {
   return `draft.content:${draftId}`
 }
 
+/** AAD contexts of an uploaded attachment (see migration 0017). */
+export function uploadFieldAad(field: 'filename' | 'content', uploadId: string): string {
+  return `attachment_upload.${field}:${uploadId}`
+}
+
 /**
  * AAD context of a push subscription's encrypted keys (p256dh/auth,
  * migration 0010), encrypted with the user DEK and bound to the endpoint
@@ -246,4 +252,148 @@ function expectPrefix(value: string, prefix: string): void {
   if (!value.startsWith(prefix)) {
     throw new Error(`invalid envelope: expected prefix ${prefix}`)
   }
+}
+
+/*
+ * Backup encryption (roadmap 6.2): chunked AES-256-GCM stream.
+ *
+ * File layout: `fma.bk1` | salt[16] | chunk*, each chunk is
+ * ciphertext(<= BACKUP_CHUNK_BYTES) | tag[16]. Only the last chunk may be
+ * shorter. The key is derived per backup via HKDF(master key, salt), so the
+ * nonce can be a counter: counter[11] (big endian) | final flag[1]. The
+ * final flag authenticates the end of the stream (truncation is detected),
+ * the counter the order of the chunks. Each chunk is authenticated before
+ * its plaintext is released; memory use is bounded by one chunk.
+ */
+const BACKUP_MAGIC = Buffer.from('fma.bk1', 'ascii')
+const BACKUP_SALT_BYTES = 16
+/** Plaintext bytes per backup chunk. */
+export const BACKUP_CHUNK_BYTES = 64 * 1024
+
+/** Derives the backup encryption key from the master key and a per-backup salt. */
+export function deriveBackupKey(masterKey: Buffer, salt: Buffer): Buffer {
+  return Buffer.from(
+    hkdfSync('sha256', masterKey, salt, Buffer.from('fma-backup-v1', 'utf8'), KEY_BYTES),
+  )
+}
+
+function backupNonce(counter: bigint, final: boolean): Buffer {
+  const nonce = Buffer.alloc(NONCE_BYTES)
+  nonce.writeBigUInt64BE(counter, 3)
+  nonce[NONCE_BYTES - 1] = final ? 1 : 0
+  return nonce
+}
+
+/** Error thrown when a backup cannot be decrypted (wrong key, corrupt or truncated). */
+export class BackupDecryptError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'BackupDecryptError'
+  }
+}
+
+/** Transform: plaintext -> encrypted backup stream (see layout above). */
+export function createBackupEncryptStream(masterKey: Buffer): Transform {
+  const salt = randomBytes(BACKUP_SALT_BYTES)
+  const key = deriveBackupKey(masterKey, salt)
+  let counter = 0n
+  let pending: Buffer[] = []
+  let pendingBytes = 0
+  let headerSent = false
+
+  function seal(plaintext: Buffer, final: boolean): Buffer {
+    const cipher = createCipheriv(ALGORITHM, key, backupNonce(counter++, final))
+    return Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()])
+  }
+  function header(stream: Transform): void {
+    if (headerSent) return
+    headerSent = true
+    stream.push(Buffer.concat([BACKUP_MAGIC, salt]))
+  }
+
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      header(this)
+      pending.push(chunk)
+      pendingBytes += chunk.length
+      // Keep at least one byte back: the last chunk must be sealed as final.
+      if (pendingBytes > BACKUP_CHUNK_BYTES) {
+        let buf = Buffer.concat(pending)
+        while (buf.length > BACKUP_CHUNK_BYTES) {
+          this.push(seal(buf.subarray(0, BACKUP_CHUNK_BYTES), false))
+          buf = buf.subarray(BACKUP_CHUNK_BYTES)
+        }
+        pending = [buf]
+        pendingBytes = buf.length
+      }
+      callback()
+    },
+    flush(callback) {
+      header(this)
+      this.push(seal(Buffer.concat(pending), true))
+      pending = []
+      callback()
+    },
+  })
+}
+
+/**
+ * Transform: encrypted backup stream -> plaintext. Fails with
+ * BackupDecryptError on a wrong master key, modified or truncated data.
+ */
+export function createBackupDecryptStream(masterKey: Buffer): Transform {
+  const sealedBytes = BACKUP_CHUNK_BYTES + TAG_BYTES
+  const headerBytes = BACKUP_MAGIC.length + BACKUP_SALT_BYTES
+  let key: Buffer | null = null
+  let counter = 0n
+  let buf: Buffer = Buffer.alloc(0)
+
+  function open(sealed: Buffer, final: boolean): Buffer {
+    if (!key) throw new BackupDecryptError('not a backup file')
+    if (sealed.length < TAG_BYTES) throw new BackupDecryptError('backup file is truncated')
+    try {
+      const decipher = createDecipheriv(ALGORITHM, key, backupNonce(counter++, final))
+      decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES))
+      const plaintext = decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES))
+      const rest = decipher.final()
+      return rest.length > 0 ? Buffer.concat([plaintext, rest]) : plaintext
+    } catch {
+      throw new BackupDecryptError(
+        'backup cannot be decrypted: wrong MASTER_KEY, or the file is corrupt or truncated',
+      )
+    }
+  }
+
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      try {
+        buf = buf.length > 0 ? Buffer.concat([buf, chunk]) : chunk
+        if (!key) {
+          if (buf.length < headerBytes) return callback()
+          if (!buf.subarray(0, BACKUP_MAGIC.length).equals(BACKUP_MAGIC)) {
+            throw new BackupDecryptError('not a backup file (unknown format)')
+          }
+          key = deriveBackupKey(masterKey, buf.subarray(BACKUP_MAGIC.length, headerBytes))
+          buf = buf.subarray(headerBytes)
+        }
+        // A full chunk followed by more data cannot be the final one.
+        while (buf.length > sealedBytes) {
+          this.push(open(buf.subarray(0, sealedBytes), false))
+          buf = buf.subarray(sealedBytes)
+        }
+        callback()
+      } catch (err) {
+        callback(err as Error)
+      }
+    },
+    flush(callback) {
+      try {
+        if (!key) throw new BackupDecryptError('not a backup file (too short)')
+        this.push(open(buf, true))
+        callback()
+      } catch (err) {
+        callback(err as Error)
+      }
+    },
+  })
 }

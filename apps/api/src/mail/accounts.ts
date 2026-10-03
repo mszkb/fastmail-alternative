@@ -163,7 +163,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: CreateAccountBody }>(
     '/api/accounts',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const parsed = parseCreateBody(request.body)
       if (!parsed) {
@@ -259,7 +259,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
-  app.get('/api/accounts', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/api/accounts', { onRequest: requireAuth }, async (request, reply) => {
     // Unread count per account: INBOX only, computed from the synced
     // locations like the folder counts (optimistic read/unread included).
     // `syncing` lets clients poll briefly after a sync request (4.5).
@@ -280,7 +280,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{ Params: { id: string }; Body: UpdateAccountBody }>(
     '/api/accounts/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       if (!UUID_RE.test(accountId)) {
@@ -382,7 +382,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete<{ Params: { id: string } }>(
     '/api/accounts/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       if (!UUID_RE.test(accountId)) {

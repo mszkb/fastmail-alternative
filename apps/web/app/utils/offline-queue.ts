@@ -4,11 +4,15 @@
 // (start, `online`, focus). The
 // rules - coalescing, what to do with each answer - are in @fma/shared
 // (offline.ts). Sends carry a clientId, so a replay never sends twice.
+// A send whose attachments expired meanwhile (ATTACHMENT_MISSING) is not
+// dropped: its text is saved as a draft and the user is told to add the
+// files again.
 // Multiple tabs: queue changes and replays run under a Web Lock.
 import {
   pendingLabel,
   queueOperation,
   replayDecision,
+  sendToDraft,
   type MessageActionRequest,
   type QueuedOperation,
   type SaveDraftRequest,
@@ -198,19 +202,36 @@ export async function replayQueue(): Promise<void> {
         const operation = queue[0]!
         let status: number | 'network'
         let serverMessage: string | undefined
+        let serverCode: string | undefined
         try {
           const res = await sendOperation(operation)
           status = res.status
           offlineState.reachable = true
           if (!res.ok) {
-            const body = (await res.json().catch(() => null)) as { message?: string } | null
+            const body = (await res.json().catch(() => null)) as {
+              message?: string
+              code?: string
+            } | null
             serverMessage = body?.message
+            serverCode = body?.code
           }
         } catch {
           status = 'network'
           offlineState.reachable = false
         }
-        const decision = replayDecision(status, operation.attempts)
+        const decision = replayDecision(status, operation.attempts, serverCode)
+        if (decision === 'draft' && operation.kind === 'send') {
+          // Nothing was sent: keep the text as a draft (saved next in this run).
+          addNotice(
+            'Eine offline geschriebene Nachricht wurde nicht gesendet: Ein Anhang ist nicht mehr ' +
+              'vorhanden. Der Text liegt unter „Entwürfe“ - bitte die Anhänge neu hinzufügen und ' +
+              'erneut senden.',
+          )
+          changed = true
+          queue = [sendToDraft(operation), ...queue.slice(1)]
+          await writeQueue(queue)
+          continue
+        }
         if (decision === 'retry') {
           if (status !== 'network') {
             queue = [{ ...operation, attempts: operation.attempts + 1 }, ...queue.slice(1)]
@@ -222,7 +243,9 @@ export async function replayQueue(): Promise<void> {
           unauthorized = true
           break
         }
-        if (decision === 'drop') addNotice(dropNotice(operation, serverMessage))
+        if (decision === 'drop' || decision === 'draft') {
+          addNotice(dropNotice(operation, serverMessage))
+        }
         changed = true
         queue = queue.slice(1)
         await writeQueue(queue)

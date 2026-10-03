@@ -237,7 +237,7 @@ export async function messageActionRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: Partial<MessageActionRequest> }>(
     '/api/messages/actions',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const parsed = parseRequest(request.body)
       if (!parsed) {

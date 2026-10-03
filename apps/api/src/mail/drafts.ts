@@ -217,7 +217,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
 
   app.put<{ Params: { id: string }; Body: unknown }>(
     '/api/drafts/:id',
-    { preHandler: requireAuth, bodyLimit: BODY_LIMIT_BYTES },
+    { onRequest: requireAuth, bodyLimit: BODY_LIMIT_BYTES },
     async (request, reply) => {
       const id = request.params.id.toLowerCase()
       if (!UUID_RE.test(id)) {
@@ -342,7 +342,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/drafts/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const row = await loadOwned(request.params.id, request.auth!.userId)
       if (!row) {
@@ -355,7 +355,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/accounts/:id/drafts',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       if (!(await ownsAccount(accountId, request.auth!.userId))) {
@@ -376,7 +376,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete<{ Params: { id: string } }>(
     '/api/drafts/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const id = request.params.id
       if (!UUID_RE.test(id)) {
@@ -418,7 +418,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { id: string } }>(
     '/api/messages/:id/draft',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const messageId = request.params.id
       const userId = request.auth!.userId

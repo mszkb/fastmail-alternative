@@ -13,6 +13,9 @@ coverage/
 .env.*
 !.env.example
 
+# encrypted backups (scripts/backup.sh)
+backups/
+
 # logs & os
 *.log
 .DS_Store

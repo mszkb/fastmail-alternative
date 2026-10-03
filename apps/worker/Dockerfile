@@ -14,6 +14,10 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
+# pg_dump/pg_restore for the backup CLI (dist/backup.js, roadmap 6.2); the
+# major version must be >= the postgres service (docker-compose.yml).
+RUN apk add --no-cache postgresql17-client
+
 COPY --from=build /repo/LICENSE ./LICENSE
 COPY --from=build /repo/apps/worker/dist ./dist
 

@@ -255,7 +255,7 @@ export async function searchRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string }; Querystring: Record<string, unknown> }>(
     '/api/accounts/:id/search',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       const { rows: accounts } = UUID_RE.test(accountId)

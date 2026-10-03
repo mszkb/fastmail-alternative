@@ -7,6 +7,10 @@
  *
  * Bounded initial fetch: the newest MESSAGE_SYNC_LIMIT messages per folder;
  * incremental runs fetch only UIDs above the highest synced one.
+ * Older messages are loaded on request (POST /api/folders/:id/load-older,
+ * payload `loadOlder` of message_sync): additionally the next
+ * MESSAGE_SYNC_LIMIT unknown UIDs below the lowest synced one. Nothing
+ * removes them later: reconciliation compares against the whole folder.
  *
  * Reconciliation of already known messages: every run lists UID+FLAGS of
  * the whole folder (cheap, no headers), updates changed flags and removes
@@ -52,10 +56,18 @@ import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { assertMailHost, mailTestMode } from '../ports'
+import { purgeLocationlessMessages } from './cleanup'
 import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
 
-const MESSAGE_SYNC_LIMIT = 200
+export const MESSAGE_SYNC_LIMIT = 200
+
+export interface MessageSyncOptions {
+  /** Also fetch the next `limit` unknown UIDs below the lowest synced one. */
+  loadOlder?: boolean
+  /** Messages per window (initial sync / load older); tests set it small. */
+  limit?: number
+}
 /** Raw messages above this size are not stored (MAX_RAW_MESSAGE_BYTES, default 20 MB). */
 const DEFAULT_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024
 const MAX_TEXT_PLAIN_BYTES = 100 * 1024
@@ -270,8 +282,10 @@ export async function runMessageSync(
   accountId: string,
   folderId: string,
   context?: AccountContext,
+  options: MessageSyncOptions = {},
 ): Promise<void> {
   const ctx = context ?? (await loadAccountContext(pool, accountId, process.env.MASTER_KEY ?? ''))
+  const limit = options.limit ?? MESSAGE_SYNC_LIMIT
 
   const folderRows = await pool.query<{
     id: string
@@ -368,11 +382,20 @@ export async function runMessageSync(
     const knownUids = new Set(knownRows.map((row) => Number(row.uid)))
     let highestSynced = 0
     for (const uid of knownUids) if (uid > highestSynced) highestSynced = uid
-    const windowStart = allUids.length - MESSAGE_SYNC_LIMIT
+    const windowStart = allUids.length - limit
     const targetUids = allUids.filter(
       (uid, index) =>
         !knownUids.has(uid) && (index >= windowStart || (highestSynced > 0 && uid > highestSynced)),
     )
+    if (options.loadOlder) {
+      // The next `limit` unknown UIDs below the lowest synced (server) UID.
+      let lowestSynced = Infinity
+      for (const uid of knownUids) if (uid > 0 && uid < lowestSynced) lowestSynced = uid
+      const older = allUids.filter((uid) => uid < lowestSynced && !knownUids.has(uid))
+      const pending = new Set(targetUids)
+      for (const uid of older.slice(-limit)) if (!pending.has(uid)) targetUids.push(uid)
+      targetUids.sort((a, b) => a - b)
+    }
 
     const isIncremental = dbUidvalidity !== null && dbUidvalidity === serverUidvalidity
 
@@ -546,11 +569,16 @@ export async function runMessageSync(
 
     // Messages whose only location had an outdated uidvalidity and that did
     // not come back under a new UID (after the fetch above, so re-fetched
-    // ones keep their row and body).
-    if (staleLocations.length > 0) {
-      await removeOrphanMessages(pool, accountId, [
-        ...new Set(staleLocations.map((row) => row.message_id)),
-      ])
+    // ones keep their row and body). Account-wide instead of only this run's
+    // stale locations: a previous attempt may have discarded the locations
+    // and then failed before this point (folder.uidvalidity is still the
+    // old one until the end of a successful run). Safe, since this job is
+    // the account's only running job.
+    if (staleLocations.length > 0 || dbUidvalidity !== serverUidvalidity) {
+      const messagesRemoved = await purgeLocationlessMessages(pool, accountId)
+      if (messagesRemoved > 0) {
+        log.info({ accountId, folderId, messagesRemoved }, 'messages without location removed')
+      }
     }
 
     try {

@@ -294,7 +294,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/accounts/:id/folders',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       if (!UUID_RE.test(accountId)) {
@@ -329,7 +329,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string }; Querystring: { cursor?: string; limit?: string } }>(
     '/api/folders/:id/messages',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const folderId = request.params.id
       if (!UUID_RE.test(folderId)) {
@@ -383,7 +383,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/messages/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const messageId = request.params.id
       if (!UUID_RE.test(messageId)) {
@@ -408,7 +408,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string } }>(
     '/api/threads/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const threadId = request.params.id
       if (!UUID_RE.test(threadId)) {

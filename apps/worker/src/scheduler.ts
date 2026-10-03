@@ -1,8 +1,8 @@
 /**
  * Periodic sync scheduler (roadmap 2.2): enqueues a folder_sync job for every
  * active account whose last sync is older than the sync interval. The
- * folder_sync job chains one message_sync per folder, so new mail appears
- * without IMAP IDLE (IDLE is a later step).
+ * folder_sync job chains one message_sync per folder. This polling is the
+ * fallback next to IMAP IDLE (./idle, INBOX only).
  *
  * - No pile-up: an account with a queued or running folder_sync gets no new
  *   one. Failed jobs stay 'queued' with a future run_at (backoff in
@@ -118,6 +118,26 @@ export async function enqueueMessageSync(
          AND state IN ('queued', 'running')
      )`,
     [accountId, folderId],
+  )
+  return (rowCount ?? 0) > 0
+}
+
+/**
+ * Enqueues the periodic cleanup job (roadmap 5.5, ./jobs/cleanup) unless
+ * one is queued or running, or the last one was created less than
+ * `intervalSeconds` ago. Returns whether a job was added.
+ */
+export async function enqueueDueCleanup(pool: Pool, intervalSeconds: number): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `INSERT INTO job (type)
+     SELECT 'cleanup'
+     WHERE NOT EXISTS (
+       SELECT 1 FROM job
+       WHERE type = 'cleanup'
+         AND (state IN ('queued', 'running')
+           OR created_at > now() - ($1 || ' seconds')::interval)
+     )`,
+    [String(intervalSeconds)],
   )
   return (rowCount ?? 0) > 0
 }

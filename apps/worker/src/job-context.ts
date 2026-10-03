@@ -27,3 +27,8 @@ export function closeOnJobAbort(close: () => void): () => void {
   signal.addEventListener('abort', onAbort, { once: true })
   return () => signal.removeEventListener('abort', onAbort)
 }
+
+/** True when the current job was aborted (long loops stop between batches). */
+export function jobAborted(): boolean {
+  return storage.getStore()?.signal.aborted ?? false
+}

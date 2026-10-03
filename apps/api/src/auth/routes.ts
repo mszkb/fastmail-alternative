@@ -3,8 +3,9 @@
  * single-user setup on first start, password login with lockout,
  * server-side sessions in an HttpOnly cookie, logout, device management.
  *
- * CSRF: the cookie is SameSite=Strict, which covers the MVP surface;
- * dedicated CSRF tokens follow in 6.4 (hardening) per ADR-0004.
+ * CSRF (roadmap 6.4): the cookie is SameSite=Strict and every
+ * state-changing request must come from the same origin
+ * (security/csrf.ts). Session timeouts: see sessions.ts.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import cookies from '@fastify/cookie'
@@ -19,6 +20,7 @@ import {
   resolveSession,
   revokeDevice,
   rotateSession,
+  SESSION_TTL_MS,
   type SessionRow,
 } from './sessions'
 
@@ -26,7 +28,9 @@ const COOKIE_NAME = 'fma_session'
 const ROTATION_INTERVAL_MS = 24 * 60 * 60_000
 
 /** Secure cookies only when the instance is not plain-HTTP (`DOMAIN=:80`). */
-const COOKIE_SECURE = (process.env.DOMAIN ?? ':80') !== ':80'
+function cookieSecure(): boolean {
+  return (process.env.DOMAIN ?? ':80') !== ':80'
+}
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -67,7 +71,11 @@ async function resolveWithRotation(
   return session
 }
 
-/** Middleware for authenticated routes. */
+/**
+ * Middleware for authenticated routes. Registered as `onRequest` hook (not
+ * preHandler), so requests without a valid session are answered with 401
+ * before their body is read or parsed.
+ */
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const session = await resolveWithRotation(request, reply)
   if (!session) {
@@ -80,13 +88,29 @@ function setSessionCookie(reply: FastifyReply, token: string): void {
     path: '/',
     httpOnly: true,
     sameSite: 'strict',
-    secure: COOKIE_SECURE,
-    maxAge: 30 * 24 * 60 * 60, // seconds; server-side expiry is authoritative
+    secure: cookieSecure(),
+    maxAge: SESSION_TTL_MS / 1000, // seconds; server-side expiry is authoritative
   })
 }
 
 function clearSessionCookie(reply: FastifyReply): void {
-  reply.clearCookie(COOKIE_NAME, { path: '/' })
+  reply.clearCookie(COOKIE_NAME, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: cookieSecure(),
+  })
+}
+
+/**
+ * A login on a browser that still holds a valid session replaces it: the
+ * old token is invalidated server-side instead of lingering until expiry.
+ */
+async function endPreviousSession(request: FastifyRequest): Promise<void> {
+  const token = request.cookies[COOKIE_NAME]
+  if (!token) return
+  const previous = await resolveSession(request.server.authPool, token)
+  if (previous) await deleteSession(request.server.authPool, previous.sessionId)
 }
 
 interface CredentialsBody {
@@ -198,6 +222,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     recordSuccess(request.ip)
+    await endPreviousSession(request)
     const { token } = await createDeviceWithSession(
       pool,
       userId,
@@ -208,20 +233,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await reply.send({ email: credentials.email })
   })
 
-  app.delete('/api/auth/session', { preHandler: requireAuth }, async (request, reply) => {
+  app.delete('/api/auth/session', { onRequest: requireAuth }, async (request, reply) => {
     await deleteSession(pool, request.auth!.sessionId)
     clearSessionCookie(reply)
     await reply.code(204).send()
   })
 
-  app.get('/api/auth/devices', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/api/auth/devices', { onRequest: requireAuth }, async (request, reply) => {
     const devices = await listDevices(pool, request.auth!.userId, request.auth!.deviceId)
     await reply.send({ devices })
   })
 
   app.delete<{ Params: { id: string } }>(
     '/api/auth/devices/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       if (request.params.id === request.auth!.deviceId) {
         await reply.code(409).send({ message: 'Cannot revoke the current device; log out instead' })

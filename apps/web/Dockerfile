@@ -16,6 +16,7 @@ RUN pnpm --filter @fma/web generate
 FROM nginx:alpine
 
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /repo/apps/web/.output/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /repo/LICENSE /LICENSE
 COPY --from=build /repo/apps/web/.output/public /usr/share/nginx/html
 

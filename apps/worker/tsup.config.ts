@@ -1,7 +1,8 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/main.ts'],
+  // backup.js: encrypted backup/restore CLI (docs/operations/backup-restore.md).
+  entry: { main: 'src/main.ts', backup: 'src/backup-cli.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node24',

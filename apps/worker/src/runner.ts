@@ -23,6 +23,7 @@ import {
 } from './account-health'
 import { runWithJobSignal } from './job-context'
 import { runAccountCleanup } from './jobs/account-cleanup'
+import { runCleanup } from './jobs/cleanup'
 import { runDraftSync } from './jobs/draft-sync'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
@@ -41,6 +42,7 @@ export const JOB_TYPES = [
   'draft_sync',
   'account_cleanup',
   'push_notify',
+  'cleanup',
 ]
 /**
  * Claimed before all other types: user actions are small and interactive,
@@ -61,6 +63,7 @@ const JOB_TIMEOUT_MS: Record<string, number> = {
   draft_sync: 2 * 60_000,
   account_cleanup: 5 * 60_000,
   push_notify: 2 * 60_000,
+  cleanup: 10 * 60_000,
 }
 const FALLBACK_TIMEOUT_MS = 5 * 60_000
 
@@ -102,10 +105,11 @@ async function processJob(
       if (!accountId) throw new Error('message_sync job without account_id')
       const folderId = typeof job.payload.folderId === 'string' ? job.payload.folderId : null
       if (!folderId) throw new Error('message_sync job without folder_id')
-      await runMessageSync(pool, accountId, folderId)
+      const loadOlder = job.payload.loadOlder === true
+      await runMessageSync(pool, accountId, folderId, undefined, { loadOlder })
       health.synced = true
       await completeJob(pool, jobId)
-      log.info({ jobId, accountId, folderId }, 'message_sync done')
+      log.info({ jobId, accountId, folderId, loadOlder }, 'message_sync done')
       break
     }
     case 'message_action': {
@@ -145,6 +149,13 @@ async function processJob(
       const outcome = await runPushNotify(pool, job.payload)
       await completeJob(pool, jobId)
       log.info({ jobId, outcome }, 'push_notify done')
+      break
+    }
+    case 'cleanup': {
+      // Counters only, never content.
+      const outcome = await runCleanup(pool)
+      await completeJob(pool, jobId)
+      log.info({ jobId, ...outcome }, 'cleanup done')
       break
     }
     default:

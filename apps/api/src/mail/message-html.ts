@@ -41,7 +41,7 @@ function mailDataDir(): string {
 }
 
 /** 64 KiB views of a buffer (no copies) to stream it into a parser. */
-function* slices(buf: Buffer): Generator<Buffer> {
+export function* slices(buf: Buffer): Generator<Buffer> {
   for (let i = 0; i < buf.length; i += 64 * 1024) yield buf.subarray(i, i + 64 * 1024)
 }
 
@@ -118,7 +118,7 @@ export function parseMailHtml(raw: Buffer): Promise<ParsedHtml> {
  * Reads and decrypts the raw source. Returns null when the file is missing,
  * outside the volume or cannot be decrypted (logged without content).
  */
-async function readRaw(
+export async function readRaw(
   log: FastifyBaseLogger,
   dek: Buffer,
   messageId: string,
@@ -143,7 +143,7 @@ export async function messageHtmlRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { id: string }; Querystring: { remote?: string } }>(
     '/api/messages/:id/html',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       void reply.header('cache-control', 'no-store')
       const messageId = request.params.id

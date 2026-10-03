@@ -199,12 +199,12 @@ function hostOf(endpoint: string): string {
 export async function pushRoutes(app: FastifyInstance): Promise<void> {
   const pool = app.authPool
 
-  app.get('/api/push/vapid-public-key', { preHandler: requireAuth }, async (_request, reply) => {
+  app.get('/api/push/vapid-public-key', { onRequest: requireAuth }, async (_request, reply) => {
     const body: VapidKeyResponse = { publicKey: process.env.VAPID_PUBLIC_KEY || null }
     await reply.send(body)
   })
 
-  app.get('/api/push/subscriptions', { preHandler: requireAuth }, async (request, reply) => {
+  app.get('/api/push/subscriptions', { onRequest: requireAuth }, async (request, reply) => {
     const body: PushSubscriptionListResponse = {
       subscriptions: await listSubscriptions(pool, request.auth!.userId, request.auth!.deviceId),
     }
@@ -213,7 +213,7 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Body: Partial<PushSubscriptionRequest> }>(
     '/api/push/subscriptions',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       let subscription: ValidSubscription
       try {
@@ -240,7 +240,7 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
   // This browser unsubscribes: identified by its endpoint.
   app.delete<{ Body: { endpoint?: string } }>(
     '/api/push/subscriptions',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const endpoint = typeof request.body?.endpoint === 'string' ? request.body.endpoint : ''
       const { rowCount } = await pool.query(
@@ -260,7 +260,7 @@ export async function pushRoutes(app: FastifyInstance): Promise<void> {
   // Device management: remove any subscription of the user.
   app.delete<{ Params: { id: string } }>(
     '/api/push/subscriptions/:id',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const { rowCount } = UUID_RE.test(request.params.id)
         ? await pool.query(

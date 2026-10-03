@@ -2,12 +2,13 @@
  * Worker entrypoint (roadmap 2.2): runs the scheduler and the job runner.
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
- * worker-managed connections added in a later step. The runner (./runner)
+ * worker-managed connections (./idle, INBOX only, IMAP_IDLE=0 disables
+ * them) that enqueue message_sync on changes. The runner (./runner)
  * only processes short-lived jobs (folder sync, message sync, message
- * actions, SMTP send, account cleanup, push), several in parallel
+ * actions, SMTP send, account cleanup, push, periodic cleanup), several in parallel
  * but at most one per account, each with a hard timeout (roadmap 3.4).
- * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
- * folder_sync per account so new mail appears without reload.
+ * As a fallback the scheduler (./scheduler) enqueues a periodic
+ * folder_sync per account.
  *
  * Logging: structured JSON via pino with the central redaction rules
  * (roadmap 1.7).
@@ -15,9 +16,16 @@
 import { runMigrations } from '@fma/db/migrate'
 import { createPool } from '@fma/db'
 import { markSendGivenUp } from './jobs/send-message'
+import { IdleManager, imapIdleEnabled } from './idle'
 import { log } from './log'
 import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
-import { enqueueDueSyncs, requeueStaleJobs, syncIntervalSeconds } from './scheduler'
+import { cleanupIntervalSeconds } from './jobs/cleanup'
+import {
+  enqueueDueCleanup,
+  enqueueDueSyncs,
+  requeueStaleJobs,
+  syncIntervalSeconds,
+} from './scheduler'
 
 const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
@@ -53,6 +61,7 @@ async function main(): Promise<void> {
   // Periodic sync. The first tick runs immediately and also covers accounts
   // created while the worker was down.
   const intervalSeconds = syncIntervalSeconds()
+  const cleanupInterval = cleanupIntervalSeconds()
   let nextSchedulerTick = 0
   const schedulerTick = async (): Promise<void> => {
     if (Date.now() < nextSchedulerTick) return
@@ -62,6 +71,7 @@ async function main(): Promise<void> {
       if (stale.requeued + stale.failed > 0) log.warn(stale, 'stale running jobs recovered')
       const accountIds = await enqueueDueSyncs(pool, intervalSeconds)
       if (accountIds.length > 0) log.info({ accountIds }, 'periodic sync enqueued')
+      if (await enqueueDueCleanup(pool, cleanupInterval)) log.info('cleanup enqueued')
     } catch (err) {
       log.error({ err: (err as Error).message }, 'scheduler tick failed')
     }
@@ -74,6 +84,13 @@ async function main(): Promise<void> {
     'worker started',
   )
 
+  // IMAP IDLE for the INBOX of every active account (failures never stop
+  // the worker: the scheduler keeps polling).
+  const idle = imapIdleEnabled() ? new IdleManager(pool) : null
+  await idle?.start().catch((err: unknown) => {
+    log.error({ code: (err as { code?: string }).code ?? 'UNKNOWN' }, 'idle start failed')
+  })
+
   while (!shuttingDown) {
     await schedulerTick()
     await runner.fill()
@@ -81,6 +98,7 @@ async function main(): Promise<void> {
     await runner.waitForSlot(POLL_INTERVAL_MS)
   }
 
+  await idle?.stop()
   await runner.stop()
   log.info('worker stopped')
   await pool.end().catch(() => {})

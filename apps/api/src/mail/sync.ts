@@ -109,7 +109,7 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { id: string } }>(
     '/api/accounts/:id/sync',
-    { preHandler: requireAuth },
+    { onRequest: requireAuth },
     async (request, reply) => {
       const accountId = request.params.id
       const [result] = UUID_RE.test(accountId)
@@ -133,7 +133,7 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
 
   // All accounts at once (app start/focus): rate-limited accounts are
   // simply reported, the request itself always succeeds.
-  app.post('/api/sync', { preHandler: requireAuth }, async (request, reply) => {
+  app.post('/api/sync', { onRequest: requireAuth }, async (request, reply) => {
     const body: SyncAllResponse = {
       accounts: await requestSync(pool, request.auth!.userId, null),
     }

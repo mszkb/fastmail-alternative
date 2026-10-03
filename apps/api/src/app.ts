@@ -9,6 +9,7 @@ import { draftRoutes } from './mail/drafts'
 import { folderRoutes } from './mail/folders'
 import { identityRoutes } from './mail/identities'
 import { messageActionRoutes } from './mail/message-actions'
+import { attachmentRoutes } from './mail/attachments'
 import { messageHtmlRoutes } from './mail/message-html'
 import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
@@ -16,12 +17,21 @@ import { searchRoutes } from './mail/search'
 import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
 import { pushRoutes } from './push/routes'
+import { trustOnePrivateProxy } from './security/client-ip'
+import { registerCsrfProtection } from './security/csrf'
+import { registerSecurityHeaders } from './security/headers'
+import { DEFAULT_RATE_LIMITS, registerRateLimits, type RateLimitRule } from './security/rate-limit'
+
+/** Time to receive one complete request (also upload bodies on slow links). */
+export const REQUEST_TIMEOUT_MS = 120_000
 
 export interface AppOptions {
   /** Logging can be disabled to keep test output clean. */
   logger?: boolean
   /** Destination of the log lines (tests inspect them); default stdout. */
   logStream?: NodeJS.WritableStream
+  /** Rate limit rules (tests lower them); default DEFAULT_RATE_LIMITS. */
+  rateLimits?: RateLimitRule[]
 }
 
 /**
@@ -31,13 +41,30 @@ export interface AppOptions {
  * All routes live under /api/* (caddy forwards /api/* as-is; native clients
  * later use the same paths, see ADR-0010).
  */
-export function buildApp({ logger = true, logStream }: AppOptions = {}): FastifyInstance {
+export function buildApp({
+  logger = true,
+  logStream,
+  rateLimits = DEFAULT_RATE_LIMITS,
+}: AppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: logger
       ? { ...buildLoggerOptions(), ...(logStream ? { stream: logStream } : {}) }
       : false,
-    trustProxy: true,
+    // Only the reverse proxy in front of the api is trusted for
+    // X-Forwarded-For (security/client-ip.ts).
+    trustProxy: trustOnePrivateProxy,
+    // Slow-body protection: a request (headers and body, e.g. a 10 MB
+    // upload) must arrive within this time, else the socket is closed.
+    // Fastify's default (0) would switch off Node's own limit.
+    requestTimeout: REQUEST_TIMEOUT_MS,
   })
+
+  // Hardening (roadmap 6.4): order matters - rejected requests are answered
+  // before authentication or body parsing. Protected routes authenticate in
+  // onRequest as well (requireAuth), i.e. before any body is read.
+  registerSecurityHeaders(app)
+  registerRateLimits(app, rateLimits)
+  registerCsrfProtection(app)
 
   const metrics = new Metrics()
 
@@ -91,6 +118,7 @@ export function buildApp({ logger = true, logStream }: AppOptions = {}): Fastify
   app.register(folderRoutes)
   app.register(messageActionRoutes)
   app.register(messageHtmlRoutes)
+  app.register(attachmentRoutes)
   app.register(outboxRoutes)
   app.register(draftRoutes)
   app.register(searchRoutes)
