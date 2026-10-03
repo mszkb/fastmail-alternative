@@ -7,16 +7,23 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsup",
     "start": "node dist/main.js",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3"
   },
   "dependencies": {
+    "@fma/crypto": "workspace:*",
+    "@fma/db": "workspace:*",
     "@fma/shared": "workspace:*",
+    "imapflow": "^2.2.1",
     "pino": "^10.3.1"
   }
 }

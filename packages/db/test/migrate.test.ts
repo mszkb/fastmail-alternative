@@ -16,14 +16,14 @@ describe.skipIf(!databaseUrl)('runMigrations', () => {
     pool = new pg.Pool({ connectionString: databaseUrl })
     // Clean slate: drop everything the migrations create (test-only!).
     await pool.query(
-      'DROP TABLE IF EXISTS push_subscription, session, device, "user", schema_migrations CASCADE',
+      'DROP TABLE IF EXISTS job, folder, identity, mail_account, push_subscription, session, device, "user", schema_migrations CASCADE',
     )
     await pool.query('DROP EXTENSION IF EXISTS citext')
   })
 
   afterAll(async () => {
     await pool.query(
-      'DROP TABLE IF EXISTS push_subscription, session, device, "user", schema_migrations CASCADE',
+      'DROP TABLE IF EXISTS job, folder, identity, mail_account, push_subscription, session, device, "user", schema_migrations CASCADE',
     )
     await pool.query('DROP EXTENSION IF EXISTS citext')
     await pool.end()

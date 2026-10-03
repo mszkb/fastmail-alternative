@@ -11,7 +11,8 @@
  *   backups) become unreadable.
  */
 import { randomUUID } from 'node:crypto'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
+import { enqueueJob } from '@fma/db/job-queue'
 import { encryptField, generateDataKey, loadMasterKey, wrapDataKey } from '@fma/crypto'
 import { requireAuth } from '../auth/routes'
 import { testImap, testSmtp, type HostConfig } from '../mail/connection-test'
@@ -50,7 +51,7 @@ function isSecurePort(port: number): boolean {
   return port === 993 || port === 465
 }
 
-function isValidPort(port: number | undefined): boolean {
+function isValidPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
@@ -105,7 +106,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: CreateAccountBody }>(
     '/api/accounts',
     { preHandler: requireAuth },
-    async (request: FastifyRequest, reply) => {
+    async (request, reply) => {
       const parsed = parseCreateBody(request.body)
       if (!parsed) {
         await reply.code(400).send({
@@ -188,6 +189,9 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         `INSERT INTO identity (account_id, name, email_address) VALUES ($1, $2, $3)`,
         [accountId, parsed.displayName, parsed.emailAddress],
       )
+
+      // Kick off the initial folder sync in the worker (roadmap 2.2).
+      await enqueueJob(pool, { type: 'folder_sync', accountId })
 
       const account = await pool.query<MailAccountRow>(
         `SELECT id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
