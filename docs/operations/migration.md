@@ -16,6 +16,8 @@ Beide Wege setzen auf dem Zielserver eine laufende Installation voraus (`docker 
 
 Alle Inhalte und Zugangsdaten sind mit Data Keys verschlüsselt, die ihrerseits mit dem `MASTER_KEY` verpackt in der Datenbank liegen ([Datenmodell → Verschlüsselung](../architecture/data-model.md#verschlüsselung)). Datenbank und Volume sind deshalb **nur zusammen mit genau diesem `MASTER_KEY`** lesbar. Ohne ihn hilft nur Weg B.
 
+> **Einfacher:** Mit dem Backup-Werkzeug ist der Umzug ein verschlüsseltes Backup auf dem alten und ein Restore auf dem neuen Server, siehe [Backup & Restore](backup-restore.md). Die folgenden Einzelschritte funktionieren weiterhin ohne das Werkzeug.
+
 ### 1. Alten Server sichern
 
 Im Projektverzeichnis (z. B. `~/fastmail-alternative`):

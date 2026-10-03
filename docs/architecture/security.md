@@ -102,9 +102,9 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 
 ## Backups
 
-- Backups werden **verschlüsselt**.
-- Wiederherstellung wird **regelmäßig getestet** (automatisierter Restore-Test in CI, Phase 6).
-- Restore auf einer frischen Installation muss mit dokumentierten Schritten funktionieren.
+- Backups werden **verschlüsselt**: eine Datei aus `pg_dump` und dem Volume `mail-data`, als Ganzes mit AES-256-GCM in 64-KiB-Blöcken verschlüsselt; der Schlüssel wird je Backup per HKDF aus `MASTER_KEY` und zufälligem Salt abgeleitet. Damit sind auch die Klartext-Metadaten der DB (Hostnamen, Benutzernamen, Adressen, Ordner) geschützt. Der `MASTER_KEY` selbst ist nie im Backup.
+- Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL in CI (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
+- Restore auf einer frischen Installation funktioniert mit dokumentierten Schritten: [Backup & Restore](../operations/backup-restore.md).
 
 ## Offene Punkte
 

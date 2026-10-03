@@ -13,5 +13,6 @@
 | [process/key-rotation.md](process/key-rotation.md)                     | Master-Key-Rotation und Crypto-Shredding                        |
 | [operations/system-requirements.md](operations/system-requirements.md) | Systemanforderungen und gemessener Ressourcenverbrauch          |
 | [operations/migration.md](operations/migration.md)                     | Umzug auf einen neuen Server, Konfigurations-Export/-Import     |
+| [operations/backup-restore.md](operations/backup-restore.md)           | Verschlüsselte Backups, Cron, Restore, Restore-Test             |
 
 Die Phasen- und Aufgabenplanung steht in [`../ROADMAP.md`](../ROADMAP.md).

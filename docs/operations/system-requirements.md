@@ -48,6 +48,6 @@ Software: Docker (Engine + Compose-Plugin) auf Linux; Rootless-Betrieb wird empf
 
 Die Limits in der `docker-compose.yml` setzen einen Memory-Cgroup-Controller voraus. Viele Pi-Images booten mit `cgroup_disable=memory` (Firmware-Default, spart wenige MB RAM) – dann sind die Limits wirkungslos, der Stack läuft aber unverändert. Aktivierung optional per `cgroup_enable=memory` in `/boot/firmware/cmdline.txt` + Neustart; auf typischen VPS ist der Controller vorhanden und die Limits greifen direkt.
 
-## Backup (Vorblick)
+## Backup
 
-Der `MASTER_KEY` aus der `.env` muss **getrennt vom Datenbank-Backup** gesichert werden – geht er verloren, sind alle verschlüsselten Mails und Zugangsdaten unlesbar. Details: [Key-Rotation](../process/key-rotation.md). Umzug auf einen neuen Server (Backup/Restore bzw. Konfigurations-Export): [Migration](migration.md). Vollständiges Backup-/Restore-Konzept: Roadmap 6.2.
+Der `MASTER_KEY` aus der `.env` muss **getrennt vom Datenbank-Backup** gesichert werden – geht er verloren, sind alle verschlüsselten Mails und Zugangsdaten unlesbar. Details: [Key-Rotation](../process/key-rotation.md). Umzug auf einen neuen Server (Backup/Restore bzw. Konfigurations-Export): [Migration](migration.md). Verschlüsselte Backups, Cron und Restore: [Backup & Restore](backup-restore.md).
