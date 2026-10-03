@@ -4,8 +4,8 @@
 // Basic actions (2.4): opening a message marks it as read; read/unread,
 // flag, archive, delete and move are applied optimistically to the list and
 // counts and rolled back if the API refuses them (the server writes them
-// back to IMAP in the background). Bodies are shown as text, never as HTML
-// (sanitized HTML rendering follows in 2.9).
+// back to IMAP in the background). Bodies (2.9) are rendered by MessageBody:
+// sanitized HTML in a sandboxed iframe, plain text as fallback.
 // Compose (2.6): new message, reply, reply all and forward open the
 // ComposeForm (prefilled via createDraft from @fma/shared); submitted
 // messages show up in the OutboxPanel until they are sent.
@@ -689,9 +689,7 @@ onBeforeUnmount(() => {
               <dt>Datum</dt>
               <dd>{{ fullFormat.format(new Date(message.date)) }}</dd>
             </dl>
-            <!-- Plain text only: rendered via text interpolation, never v-html. -->
-            <pre v-if="message.text !== null" class="body">{{ message.text }}</pre>
-            <p v-else class="hint">Inhalt wird noch synchronisiert &hellip;</p>
+            <MessageBody :message="message" />
           </template>
         </div>
       </article>
@@ -1020,15 +1018,6 @@ button.secondary {
 
 .headers dd {
   margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.body {
-  margin: 0;
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

@@ -52,7 +52,7 @@ export interface MessageListResponse {
   nextCursor: string | null
 }
 
-/** `GET /api/messages/:id` - plain text only (HTML rendering follows in 2.9). */
+/** `GET /api/messages/:id` - plain text body; the HTML body comes from MessageHtmlResponse. */
 export interface MessageDetail {
   id: string
   accountId: string
@@ -74,6 +74,18 @@ export interface MessageDetail {
   text: string | null
   /** Conversation (roadmap 2.5); null until the worker has threaded the message. */
   threadId: string | null
+}
+
+/**
+ * `GET /api/messages/:id/html?remote=0|1` - sanitized HTML body (roadmap
+ * 2.9). Render only in a sandboxed iframe (no scripts, no same-origin) with
+ * a restrictive CSP. Remote images are removed unless `remote=1`.
+ */
+export interface MessageHtmlResponse {
+  /** null when the message has no HTML part or its body is not synced yet (use `text`). */
+  html: string | null
+  /** True when remote images/backgrounds were removed (loadable with `remote=1`). */
+  remoteContentBlocked: boolean
 }
 
 /**

@@ -61,9 +61,14 @@ services:
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 192m
+    volumes:
+      # Read-only: the api decrypts raw mails on demand (HTML view, 2.9);
+      # only the worker writes the volume.
+      - mail-data:/app/mail-data:ro
     environment:
       NODE_ENV: production
       DOMAIN: ${DOMAIN:-:80}
+      MAIL_DATA_DIR: /app/mail-data
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}

@@ -31,6 +31,16 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 | Datenabfluss über Logs         | Zentrale Redaction, Tests dafür                                                                                                                                         |
 | Datenabfluss über Push         | Inhaltsfreie Payloads (siehe [push.md](push.md))                                                                                                                        |
 
+## HTML-Mails
+
+Umgesetzt in Roadmap 2.9. Drei unabhängige Schichten, jede für sich soll Script-Ausführung und ungewolltes Nachladen verhindern:
+
+1. **Sanitizing auf dem Server** (`apps/api/src/mail/html-sanitizer.ts`, sanitize-html): strikte Tag-/Attribut-Allowlist (kein `script`, `iframe`, `object`/`embed`, Formulare, `meta`/`base`/`link`, `svg`/`math`, keine Event-Handler). Links nur `http(s)`/`mailto`, immer `target="_blank" rel="noopener noreferrer nofollow"`. CSS (`style`-Attribute und `<style>`-Blöcke) wird nach dem Dekodieren von Escapes gefiltert: `@import`, `expression()`, `image-set()` u. ä. entfernt, `url()` über dieselbe URL-Policy wie Bilder.
+2. **Remote-Content opt-in:** Bilder/Hintergründe aus dem Netz werden standardmäßig entfernt (`remoteContentBlocked: true`); erst nach Klick auf „Laden" (pro Nachricht, `?remote=1`) bleiben absolute `http(s)`-Bild-URLs erhalten. Inline-Bilder (`cid:`) werden als `data:`-URL eingebettet (nur Rasterformate, kein SVG, größenbegrenzt). Relative URLs werden nie geladen.
+3. **Sandboxed iframe + CSP im Client:** Darstellung per `srcdoc` mit `sandbox="allow-popups allow-popups-to-escape-sandbox"` (ohne `allow-scripts`, ohne `allow-same-origin` → opaker Origin) und CSP `default-src 'none'; img-src data: [http: https:]; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'`, kein Referrer.
+
+Da der Parent ohne Scripts/Same-Origin die Höhe des iframes nicht messen kann (und Mail-HTML nicht zum Messen ins App-DOM gerendert wird), hat der Rahmen eine feste, vom Nutzer veränderbare Höhe und scrollt intern. `position: fixed` u. ä. bleibt erlaubt, wirkt aber nur innerhalb des iframes. Die API liefert `Cache-Control: no-store` und loggt keine Inhalte.
+
 ## Backups
 
 - Backups werden **verschlüsselt**.

@@ -9,8 +9,8 @@
  * - Lists use keyset pagination over (sort date, location id) - stable
  *   while new mail arrives, no OFFSET.
  * - Read-only: opening a message does NOT set \Seen by itself (the client
- *   marks it read via ./message-actions), and only the plain-text body is
- *   returned (HTML rendering follows in 2.9).
+ *   marks it read via ./message-actions). Details carry the plain-text
+ *   body; the sanitized HTML body comes from ./message-html (2.9).
  * - Threads (roadmap 2.5): list items carry threadId + threadCount; a
  *   thread's messages across all folders of the account come from
  *   GET /api/threads/:id (oldest first, newest MAX_THREAD_MESSAGES).
