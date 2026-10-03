@@ -7,12 +7,13 @@
  * values, locations, body files in the mail-data directory, idempotency.
  */
 import { randomBytes, randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import pg from 'pg'
 import nodemailer from 'nodemailer'
+import { ImapFlow } from 'imapflow'
 import { runMigrations } from '@fma/db/migrate'
 import {
   decryptField,
@@ -31,6 +32,27 @@ const databaseUrl = process.env.DATABASE_URL
 const greenmailHost = process.env.GREENMAIL_HOST
 const greenmailUser = process.env.GREENMAIL_USER ?? ''
 const greenmailPassword = process.env.GREENMAIL_PASSWORD ?? ''
+
+/** Runs fn with INBOX selected on GreenMail (used to mutate server state). */
+async function withInbox<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+  const client = new ImapFlow({
+    host: greenmailHost!,
+    port: Number(process.env.GREENMAIL_IMAP_PORT),
+    secure: false,
+    auth: { user: greenmailUser, pass: greenmailPassword },
+    logger: false,
+    tls: { rejectUnauthorized: false },
+    doSTARTTLS: false,
+  })
+  await client.connect()
+  const lock = await client.getMailboxLock('INBOX')
+  try {
+    return await fn(client)
+  } finally {
+    lock.release()
+    await client.logout().catch(() => client.close())
+  }
+}
 
 describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
   let pool: pg.Pool
@@ -317,5 +339,93 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       if (count === 3) break
     }
     expect(count).toBe(3)
+
+    // Incrementally fetched messages get their real server UID (regression:
+    // the uid used to be mapped by fetch position and stored as 0).
+    const serverUids = await withInbox(async (client) => {
+      const uids: number[] = []
+      for await (const msg of client.fetch('1:*', { uid: true })) uids.push(msg.uid)
+      return uids
+    })
+    const locations = await pool.query<{ uid: string }>(
+      'SELECT uid::text FROM message_location WHERE folder_id = $1 ORDER BY uid',
+      [inboxFolderId],
+    )
+    expect(locations.rows.map((row) => Number(row.uid))).toEqual(serverUids)
+  })
+
+  it('reflects flag changes made on the server after a resync', async () => {
+    const before = await pool.query<{ uid: string; flags: string[] }>(
+      'SELECT uid::text, flags FROM message_location WHERE folder_id = $1 ORDER BY uid',
+      [inboxFolderId],
+    )
+    const seenUid = Number(before.rows.find((row) => row.flags.includes('\\Seen'))!.uid)
+    const unseenUid = Number(before.rows.find((row) => !row.flags.includes('\\Seen'))!.uid)
+
+    // Server-side: unread the read mail, flag + read another one. Mutate by
+    // sequence number (GreenMail's UID STORE with uid sets is unreliable).
+    await withInbox(async (client) => {
+      const uids: number[] = []
+      for await (const msg of client.fetch('1:*', { uid: true })) uids.push(msg.uid)
+      const seq = (uid: number) => String(uids.indexOf(uid) + 1)
+      await client.messageFlagsRemove(seq(seenUid), ['\\Seen'])
+      await client.messageFlagsAdd(seq(unseenUid), ['\\Seen', '\\Flagged'])
+    })
+
+    await runMessageSync(pool, accountId, inboxFolderId)
+
+    const after = await pool.query<{ uid: string; flags: string[] }>(
+      'SELECT uid::text, flags FROM message_location WHERE folder_id = $1',
+      [inboxFolderId],
+    )
+    const flagsOf = (uid: number) => after.rows.find((row) => Number(row.uid) === uid)!.flags
+    expect(flagsOf(seenUid)).not.toContain('\\Seen')
+    expect(flagsOf(unseenUid)).toEqual(expect.arrayContaining(['\\Seen', '\\Flagged']))
+
+    const unread = after.rows.filter((row) => !row.flags.includes('\\Seen')).length
+    const folder = await pool.query<{ unread_count: number }>(
+      'SELECT unread_count FROM folder WHERE id = $1',
+      [inboxFolderId],
+    )
+    expect(folder.rows[0]!.unread_count).toBe(unread)
+  })
+
+  it('removes messages expunged on the server, including the body file', async () => {
+    const { rows } = await pool.query<{ uid: string; message_id: string; storage_ref: string }>(
+      `SELECT ml.uid::text, ml.message_id::text, mb.storage_ref
+       FROM message_location ml JOIN message_body mb ON mb.message_id = ml.message_id
+       WHERE ml.folder_id = $1 ORDER BY ml.uid LIMIT 1`,
+      [inboxFolderId],
+    )
+    const victim = rows[0]!
+    const bodyFile = path.join(mailDataDir, victim.storage_ref)
+    await access(bodyFile) // exists before
+
+    await withInbox(async (client) => {
+      const uids: number[] = []
+      for await (const msg of client.fetch('1:*', { uid: true })) uids.push(msg.uid)
+      await client.messageDelete(String(uids.indexOf(Number(victim.uid)) + 1))
+    })
+
+    await runMessageSync(pool, accountId, inboxFolderId)
+
+    const message = await pool.query('SELECT 1 FROM message WHERE id = $1', [victim.message_id])
+    expect(message.rowCount).toBe(0)
+    const location = await pool.query('SELECT 1 FROM message_location WHERE message_id = $1', [
+      victim.message_id,
+    ])
+    expect(location.rowCount).toBe(0)
+    const body = await pool.query('SELECT 1 FROM message_body WHERE message_id = $1', [
+      victim.message_id,
+    ])
+    expect(body.rowCount).toBe(0)
+    await expect(access(bodyFile)).rejects.toThrow()
+
+    // The other messages are untouched.
+    const remaining = await pool.query(
+      'SELECT count(*)::int AS count FROM message WHERE account_id = $1',
+      [accountId],
+    )
+    expect(remaining.rows[0].count).toBe(2)
   })
 })

@@ -7,10 +7,15 @@
  *
  * Bounded initial fetch: the newest MESSAGE_SYNC_LIMIT messages per folder;
  * incremental runs fetch only UIDs above the highest synced one.
- * Expunge handling (deleted messages) follows with the IDLE step.
+ *
+ * Reconciliation of already known messages: every run lists UID+FLAGS of
+ * the whole folder (cheap, no headers), updates changed flags and removes
+ * locations whose UID vanished on the server (expunged/moved). A message
+ * without any remaining location is deleted together with its encrypted
+ * body file.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ImapFlow } from 'imapflow'
 import type { MailboxLockObject } from 'imapflow'
@@ -27,6 +32,7 @@ const MAX_TEXT_PLAIN_BYTES = 100 * 1024
 
 interface FetchMessage {
   uid: number
+  seq: number
   modseq?: bigint
   flags: Set<string>
   envelope?: {
@@ -150,11 +156,15 @@ export async function runMessageSync(
     // and Dovecot rejects FETCH 1:* on an EMPTY mailbox with BAD
     // "Invalid messageset").
     const allUids: number[] = []
+    const serverFlags = new Map<number, string[]>()
     if ((selected.exists ?? 0) > 0) {
-      for await (const msg of client.fetch('1:*', { uid: true })) {
+      for await (const msg of client.fetch('1:*', { uid: true, flags: true })) {
         allUids.push(msg.uid)
+        serverFlags.set(msg.uid, [...(msg.flags ?? [])])
       }
     }
+
+    await reconcileKnownMessages(pool, accountId, folderId, serverUidvalidity, serverFlags)
 
     // Incremental: UIDs above the highest synced one of THIS uidvalidity;
     // initial sync: the newest MESSAGE_SYNC_LIMIT messages.
@@ -202,15 +212,20 @@ export async function runMessageSync(
         envelope: true,
         bodyStructure: true,
       })) {
+        // Map back via the sequence number the server echoes (fallback:
+        // request order). Positions start at 1 while incremental runs fetch
+        // e.g. only seq 3, so the position itself is NOT a sequence number.
+        const seq = (msg as { seq?: number }).seq ?? seqs[position]
         position += 1
-        const uid = uidBySeq.get(position) ?? 0
-        fetched.push({ ...(msg as unknown as FetchMessage), uid })
+        const uid = seq !== undefined ? uidBySeq.get(seq) : undefined
+        if (seq === undefined || uid === undefined) continue
+        fetched.push({ ...(msg as unknown as FetchMessage), uid, seq })
       }
 
       // Phase 2: process messages one by one.
-      for (const [index, message] of fetched.entries()) {
+      for (const message of fetched) {
         // Sequence number of this message on the server (for downloads).
-        const seq = seqs[index]!
+        const seq = message.seq
         const envelope = message.envelope ?? {}
         const subject = envelope.subject ?? ''
         const subjectHmac = hmacValue(hmacKey, subject)
@@ -337,6 +352,85 @@ export async function runMessageSync(
     lock?.release()
     client.close()
   }
+}
+
+function sameFlags(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const set = new Set(a)
+  return b.every((flag) => set.has(flag))
+}
+
+/**
+ * Applies server state to already known locations of one folder: updates
+ * changed flags, deletes locations whose UID is gone (expunged or moved
+ * away) and removes messages that no longer have any location, including
+ * their encrypted raw file in the mail-data volume.
+ */
+async function reconcileKnownMessages(
+  pool: Pool,
+  accountId: string,
+  folderId: string,
+  uidvalidity: bigint,
+  serverFlags: Map<number, string[]>,
+): Promise<void> {
+  const { rows: known } = await pool.query<{
+    id: string
+    uid: string
+    flags: string[]
+  }>(
+    `SELECT id, uid::text AS uid, flags FROM message_location
+     WHERE folder_id = $1 AND uidvalidity = $2`,
+    [folderId, uidvalidity.toString()],
+  )
+
+  const vanished: string[] = []
+  for (const row of known) {
+    const flags = serverFlags.get(Number(row.uid))
+    if (!flags) {
+      vanished.push(row.id)
+    } else if (!sameFlags(row.flags, flags)) {
+      await pool.query('UPDATE message_location SET flags = $2 WHERE id = $1', [row.id, flags])
+    }
+  }
+  if (vanished.length === 0) return
+
+  const { rows: removed } = await pool.query<{ message_id: string }>(
+    'DELETE FROM message_location WHERE id = ANY($1::uuid[]) RETURNING message_id::text',
+    [vanished],
+  )
+  const candidates = [...new Set(removed.map((row) => row.message_id))]
+
+  // Orphans: messages of this account without any remaining location (a
+  // message may still live in another folder). message_body rows cascade;
+  // storage refs are read first so the files can be removed afterwards.
+  const { rows: orphans } = await pool.query<{ id: string; storage_ref: string | null }>(
+    `WITH orphan AS (
+       SELECT m.id FROM message m
+       WHERE m.id = ANY($1::uuid[]) AND m.account_id = $2
+         AND NOT EXISTS (SELECT 1 FROM message_location ml WHERE ml.message_id = m.id)
+     ), refs AS (
+       SELECT mb.message_id, mb.storage_ref FROM message_body mb
+       JOIN orphan o ON o.id = mb.message_id
+     )
+     DELETE FROM message m USING orphan o
+     WHERE m.id = o.id
+     RETURNING m.id::text AS id,
+       (SELECT storage_ref FROM refs WHERE refs.message_id = m.id) AS storage_ref`,
+    [candidates, accountId],
+  )
+
+  const root = path.resolve(mailDataDir())
+  for (const orphan of orphans) {
+    if (!orphan.storage_ref) continue
+    // storage_ref = <account>/<message>/raw.eml.enc: remove the message dir.
+    const dir = path.resolve(root, path.dirname(orphan.storage_ref))
+    if (!dir.startsWith(root + path.sep)) continue // never leave the volume
+    await rm(dir, { recursive: true, force: true })
+  }
+  log.info(
+    { accountId, folderId, locationsRemoved: removed.length, messagesRemoved: orphans.length },
+    'expunged messages reconciled',
+  )
 }
 
 /**

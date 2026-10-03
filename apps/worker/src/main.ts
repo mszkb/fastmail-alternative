@@ -3,20 +3,30 @@
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. This loop only processes
- * short-lived jobs (folder sync, later: message sync, send, push, cleanup).
+ * short-lived jobs (folder sync, message sync, later: send, push, cleanup).
+ * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
+ * folder_sync per account so new mail appears without reload.
  *
  * Logging: structured JSON via pino with the central redaction rules
  * (roadmap 1.7).
  */
 import { setTimeout as sleep } from 'node:timers/promises'
-import { claimNextJob, completeJob, enqueueJob, failJob } from '@fma/db/job-queue'
+import { claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
 import { createPool, type Pool } from '@fma/db'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageSync } from './jobs/message-sync'
 import { log } from './log'
+import {
+  enqueueDueSyncs,
+  enqueueMessageSync,
+  requeueStaleJobs,
+  syncIntervalSeconds,
+} from './scheduler'
 
 const POLL_INTERVAL_MS = 2_000
+/** How often the scheduler checks for due accounts (cheap single query). */
+const SCHEDULER_TICK_MS = 15_000
 /** Job types this worker instance processes. */
 const JOB_TYPES = ['folder_sync', 'message_sync']
 
@@ -39,17 +49,13 @@ async function processJob(
     case 'folder_sync': {
       if (!accountId) throw new Error('folder_sync job without account_id')
       await runFolderSync(pool, accountId)
-      // Chain: one message_sync job per synced folder.
+      // Chain: one message_sync job per synced folder (deduplicated).
       const { rows } = await pool.query<{ id: string }>(
         'SELECT id FROM folder WHERE account_id = $1',
         [accountId],
       )
       for (const row of rows) {
-        await enqueueJob(pool, {
-          type: 'message_sync',
-          accountId,
-          payload: { folderId: String(row.id) },
-        })
+        await enqueueMessageSync(pool, accountId, String(row.id))
       }
       await completeJob(pool, jobId)
       log.info({ jobId, accountId }, 'folder_sync done')
@@ -85,21 +91,28 @@ async function main(): Promise<void> {
     })
   }
 
-  // Catch-up: make sure every account has at least one folder_sync queued
-  // (covers accounts created while the worker was down).
-  await pool.query(
-    `INSERT INTO job (type, account_id)
-     SELECT 'folder_sync', id FROM mail_account ma
-     WHERE NOT EXISTS (
-       SELECT 1 FROM job j
-       WHERE j.type = 'folder_sync' AND j.account_id = ma.id
-         AND j.state IN ('queued', 'running')
-     )`,
-  )
+  // Periodic sync. The first tick runs immediately and also covers accounts
+  // created while the worker was down.
+  const intervalSeconds = syncIntervalSeconds()
+  let nextSchedulerTick = 0
+  const schedulerTick = async (): Promise<void> => {
+    if (Date.now() < nextSchedulerTick) return
+    nextSchedulerTick = Date.now() + SCHEDULER_TICK_MS
+    try {
+      const requeued = await requeueStaleJobs(pool)
+      if (requeued > 0) log.warn({ requeued }, 'stale running jobs requeued')
+      const accountIds = await enqueueDueSyncs(pool, intervalSeconds)
+      if (accountIds.length > 0) log.info({ accountIds }, 'periodic sync enqueued')
+    } catch (err) {
+      log.error({ err: (err as Error).message }, 'scheduler tick failed')
+    }
+  }
 
-  log.info({ jobTypes: JOB_TYPES }, 'worker started')
+  log.info({ jobTypes: JOB_TYPES, syncIntervalSeconds: intervalSeconds }, 'worker started')
 
   while (!shuttingDown) {
+    await schedulerTick()
+
     let job: Awaited<ReturnType<typeof claimNextJob>> = null
     try {
       job = await claimNextJob(pool, JOB_TYPES)
