@@ -190,6 +190,8 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       references: ['<root@example.org>', '<parent@example.org>'],
       subject: 'Zweite Testmail',
       text: 'Hallo von Testmail zwei.',
+      // Envelope recipient of an alias (sender identity for replies, 3.6).
+      headers: { 'Delivered-To': '<Alias@Example.com>' },
     })
     transporter.close()
 
@@ -291,7 +293,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       ) as unknown,
       recipients: JSON.parse(
         decryptField(ctx.dek, row.recipients_enc.toString('utf8'), `message.recipients:${row.id}`),
-      ) as { to: unknown; cc: unknown; replyTo: unknown },
+      ) as { to: unknown; cc: unknown; replyTo: unknown; deliveredTo?: string[] },
       inReplyTo: row.in_reply_to,
       references: row.references,
     }))
@@ -307,6 +309,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     expect(second.from).toEqual([{ name: 'Sender Two', address: 'sender-two@example.com' }])
     expect(second.recipients.cc).toEqual([{ name: 'Carol', address: 'carol@example.com' }])
     expect(second.recipients.replyTo).toEqual([{ name: 'Team', address: 'team@example.com' }])
+    expect(second.recipients.deliveredTo).toContain('alias@example.com')
     expect(second.inReplyTo).toBe('<parent@example.org>')
     // References come from the raw message (not part of the IMAP envelope).
     expect(second.references).toEqual(['<root@example.org>', '<parent@example.org>'])
@@ -337,7 +340,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       id: string
       subject: string
       from: unknown
-      recipients: { to: unknown; cc: unknown; replyTo: unknown }
+      recipients: { to: unknown; cc: unknown; replyTo: unknown; deliveredTo?: string[] }
       inReplyTo: string | null
       references: string[]
       metadataVersion: number
@@ -366,7 +369,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       ) as unknown,
       recipients: JSON.parse(
         decryptField(ctx.dek, row.recipients_enc.toString('utf8'), `message.recipients:${row.id}`),
-      ) as { to: unknown; cc: unknown; replyTo: unknown },
+      ) as { to: unknown; cc: unknown; replyTo: unknown; deliveredTo?: string[] },
       inReplyTo: row.in_reply_to,
       references: row.references,
       metadataVersion: row.metadata_version,
@@ -385,6 +388,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     expect(second.recipients.to).toEqual([{ name: '', address: greenmailUser }])
     expect(second.recipients.cc).toEqual([{ name: 'Carol', address: 'carol@example.com' }])
     expect(second.recipients.replyTo).toEqual([{ name: 'Team', address: 'team@example.com' }])
+    expect(second.recipients.deliveredTo).toContain('alias@example.com')
     expect(second.inReplyTo).toBe('<parent@example.org>')
     expect(second.references).toEqual(['<root@example.org>', '<parent@example.org>'])
   }

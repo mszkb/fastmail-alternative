@@ -327,6 +327,7 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
       to: [{ name: 'Bob', address: 'bob@example.com' }],
       cc: [{ name: '', address: 'carol@example.com' }],
       replyTo: [],
+      deliveredTo: [],
       date: '2026-02-01T08:30:00.000Z',
       flags: { seen: false, flagged: false, answered: false },
       hasAttachments: false,

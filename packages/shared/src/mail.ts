@@ -65,6 +65,11 @@ export interface MessageDetail {
   cc: MailPerson[]
   /** Reply-To header; empty when the message has none (reply goes to From). */
   replyTo: MailPerson[]
+  /**
+   * Envelope recipients (Delivered-To/X-Original-To, lower-case): picks the
+   * sender identity of a reply when To/Cc do not name one (roadmap 3.6).
+   */
+  deliveredTo: string[]
   date: string
   flags: MessageFlags
   hasAttachments: boolean

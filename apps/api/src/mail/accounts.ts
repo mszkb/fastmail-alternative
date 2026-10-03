@@ -235,9 +235,13 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       )
       if (!inserted.rows[0]) throw new Error('account insert returned no id')
 
-      // Default identity from the account email address (data model).
+      // Default identity from the account email address (data model, 3.6).
       await pool.query(
-        `INSERT INTO identity (account_id, name, email_address) VALUES ($1, $2, $3)`,
+        `WITH created AS (
+           INSERT INTO identity (account_id, name, email_address) VALUES ($1, $2, $3)
+           RETURNING id
+         )
+         UPDATE mail_account SET default_identity_id = created.id FROM created WHERE mail_account.id = $1`,
         [accountId, parsed.displayName, parsed.emailAddress],
       )
 

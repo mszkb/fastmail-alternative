@@ -24,7 +24,7 @@
  * Metadata backfill (migration 0007): messages stored with an outdated
  * metadata_version get their addresses, Reply-To and threading headers
  * re-derived in bounded batches - from the encrypted raw mail in the
- * mail-data volume when present, else from IMAP (envelope + References).
+ * mail-data volume when present, else from IMAP (envelope + References/Delivered-To).
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -59,8 +59,13 @@ const MAX_REFERENCES = 100
  * backfillMetadata() re-derives outdated rows.
  * - 1: From/To/Cc stored as empty lists, no Reply-To/References (bug)
  * - 2: addresses, Reply-To (when it differs from From), References
+ * - 3: Delivered-To/X-Original-To (sender identity for replies, 3.6)
  */
-export const MESSAGE_METADATA_VERSION = 2
+export const MESSAGE_METADATA_VERSION = 3
+/** Envelope-recipient headers fetched with the envelope (not part of it). */
+const DELIVERED_TO_HEADERS = ['references', 'delivered-to', 'x-original-to']
+/** Delivered-To addresses kept per message (forwarding chains add one each). */
+const MAX_DELIVERED_TO = 10
 /** Outdated messages re-derived per message_sync run and folder. */
 const METADATA_BACKFILL_LIMIT = 200
 
@@ -72,6 +77,7 @@ interface DerivedMetadata {
   to: Person[]
   cc: Person[]
   replyTo: Person[]
+  deliveredTo: string[]
   inReplyTo: string | null
   references: string[]
 }
@@ -99,6 +105,7 @@ interface FetchMessage {
   }
   bodyStructure?: { childNodes?: unknown[] } | false
   size?: number
+  headers?: Buffer
 }
 
 function mailDataDir(): string {
@@ -161,6 +168,22 @@ function referencesFromHeaderBlock(headers: Buffer | undefined): string[] {
   const match = /^references:[ \t]*(.*)$/im.exec(unfolded)
   if (!match?.[1]) return []
   return (match[1].match(/<[^<>\s]+>/g) ?? []).slice(-MAX_REFERENCES)
+}
+
+/**
+ * Envelope recipients (Delivered-To, X-Original-To) of a raw header block,
+ * lower-cased and deduplicated. They tell which own address a message was
+ * delivered to when To/Cc do not (Bcc, mailing lists, forwarding).
+ */
+export function deliveredToFromHeaderBlock(headers: Buffer | undefined): string[] {
+  if (!headers) return []
+  const unfolded = headers.toString('latin1').replace(/\r?\n[ \t]+/g, ' ')
+  const result = new Set<string>()
+  for (const match of unfolded.matchAll(/^(?:delivered-to|x-original-to):[ \t]*(.*)$/gim)) {
+    const address = (match[1] ?? '').trim().replace(/^<|>$/g, '').trim().toLowerCase()
+    if (/^[^\s@<>]+@[^\s@<>]+$/.test(address)) result.add(address)
+  }
+  return [...result].slice(0, MAX_DELIVERED_TO)
 }
 
 function normalizeReferences(value: string | string[] | undefined): string[] {
@@ -322,6 +345,7 @@ export async function runMessageSync(
         size: true,
         envelope: true,
         bodyStructure: true,
+        headers: DELIVERED_TO_HEADERS,
       })) {
         // Map back via the sequence number the server echoes (fallback:
         // request order). Positions start at 1 while incremental runs fetch
@@ -398,6 +422,7 @@ export async function runMessageSync(
                     to: personList(envelope.to),
                     cc: personList(envelope.cc),
                     replyTo: replyToList(envelope),
+                    deliveredTo: deliveredToFromHeaderBlock(message.headers),
                   }),
                   aad('recipients', dbMessageId),
                 ),
@@ -713,7 +738,7 @@ async function downloadBody(
  * folder whose metadata_version is outdated (bounded per run). Prefers the
  * encrypted raw mail in the mail-data volume (no provider round-trip);
  * messages without a usable raw file are fetched from IMAP (envelope +
- * References header). Must run while no other IMAP command is pending.
+ * References/Delivered-To headers). Must run while no other IMAP command is pending.
  */
 async function backfillMetadata(
   pool: Pool,
@@ -764,7 +789,10 @@ async function backfillMetadata(
   if (viaImap.size > 0) {
     const seqs = [...viaImap.keys()]
     let position = 0
-    for await (const msg of client.fetch(seqs, { envelope: true, headers: ['references'] })) {
+    for await (const msg of client.fetch(seqs, {
+      envelope: true,
+      headers: DELIVERED_TO_HEADERS,
+    })) {
       const seq = (msg as { seq?: number }).seq ?? seqs[position]
       position += 1
       const messageId = seq !== undefined ? viaImap.get(seq) : undefined
@@ -777,6 +805,7 @@ async function backfillMetadata(
           to: personList(envelope.to),
           cc: personList(envelope.cc),
           replyTo: replyToList(envelope),
+          deliveredTo: deliveredToFromHeaderBlock(msg.headers),
           inReplyTo: envelope.inReplyTo || null,
           references: referencesFromHeaderBlock(msg.headers),
         },
@@ -818,13 +847,15 @@ async function metadataFromStoredRaw(
     const lf = raw.indexOf('\n\n')
     const ends = [crlf >= 0 ? crlf + 4 : -1, lf >= 0 ? lf + 2 : -1].filter((i) => i >= 0)
     const end = ends.length > 0 ? Math.min(...ends) : raw.length
-    const parsed = await simpleParser(raw.subarray(0, end))
+    const headerBlock = raw.subarray(0, end)
+    const parsed = await simpleParser(headerBlock)
     const from = parsedPeople(parsed.from)
     return {
       from,
       to: parsedPeople(parsed.to),
       cc: parsedPeople(parsed.cc),
       replyTo: distinctReplyTo(parsedPeople(parsed.replyTo), from),
+      deliveredTo: deliveredToFromHeaderBlock(headerBlock),
       inReplyTo: parsed.inReplyTo?.trim() || null,
       references: normalizeReferences(parsed.references).slice(-MAX_REFERENCES),
     }
@@ -852,7 +883,12 @@ async function storeMetadata(
       Buffer.from(
         encryptField(
           ctx.dek,
-          JSON.stringify({ to: metadata.to, cc: metadata.cc, replyTo: metadata.replyTo }),
+          JSON.stringify({
+            to: metadata.to,
+            cc: metadata.cc,
+            replyTo: metadata.replyTo,
+            deliveredTo: metadata.deliveredTo,
+          }),
           aad('recipients', messageId),
         ),
         'utf8',

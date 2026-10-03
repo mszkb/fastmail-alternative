@@ -380,10 +380,39 @@ describe('pickIdentity', () => {
     expect(picked?.id).toBe('id-alias')
   })
 
+  it('matches case-insensitively and prefers To/Cc over Delivered-To', () => {
+    const picked = pickIdentity(
+      identities,
+      original({
+        to: [{ name: '', address: ' ME@example.COM ' }],
+        deliveredTo: ['info@example.com'],
+      }),
+    )
+    expect(picked?.id).toBe('id-main')
+  })
+
+  it('uses the envelope recipient (Delivered-To) when To/Cc name no identity', () => {
+    const picked = pickIdentity(
+      identities,
+      original({
+        to: [{ name: 'Liste', address: 'list@example.org' }],
+        deliveredTo: ['someone@example.net', 'INFO@example.com'],
+      }),
+    )
+    expect(picked?.id).toBe('id-alias')
+    expect(
+      createDraft('reply', identities, original({ to: [], deliveredTo: ['info@example.com'] }))
+        .identityId,
+    ).toBe('id-alias')
+  })
+
   it('falls back to the default identity, then the first', () => {
     expect(pickIdentity(identities, original({ to: [] }))?.id).toBe('id-main')
     expect(pickIdentity([{ ...identities[1]! }])?.id).toBe('id-alias')
     expect(pickIdentity([])).toBeNull()
+    const noMatch = original({ to: [{ name: '', address: 'x@example.org' }], deliveredTo: [] })
+    const defaultLast = [identities[1]!, { ...identities[0]! }]
+    expect(pickIdentity(defaultLast, noMatch)?.id).toBe('id-main')
   })
 })
 

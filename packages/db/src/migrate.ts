@@ -21,6 +21,7 @@ import { migration0008 } from './migrations/0008_threads'
 import { migration0009 } from './migrations/0009_account_health'
 import { migration0010 } from './migrations/0010_push'
 import { migration0011 } from './migrations/0011_folder_roles'
+import { migration0012 } from './migrations/0012_default_identity'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -45,6 +46,7 @@ export const migrations: Migration[] = [
   migration0009,
   migration0010,
   migration0011,
+  migration0012,
 ]
 
 /**

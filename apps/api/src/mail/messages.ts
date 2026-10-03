@@ -145,7 +145,7 @@ function toPeople(value: unknown): MailPerson[] {
 
 function toMessageDetail(log: FastifyBaseLogger, dek: Buffer, row: DetailRow): MessageDetail {
   const recipients = (parseJson(decrypt(log, dek, row.recipients_enc, 'recipients', row.id)) ??
-    {}) as { to?: unknown; cc?: unknown; replyTo?: unknown }
+    {}) as { to?: unknown; cc?: unknown; replyTo?: unknown; deliveredTo?: unknown }
   return {
     id: row.id,
     accountId: row.account_id,
@@ -155,6 +155,9 @@ function toMessageDetail(log: FastifyBaseLogger, dek: Buffer, row: DetailRow): M
     to: toPeople(recipients.to),
     cc: toPeople(recipients.cc),
     replyTo: toPeople(recipients.replyTo),
+    deliveredTo: Array.isArray(recipients.deliveredTo)
+      ? recipients.deliveredTo.filter((value): value is string => typeof value === 'string')
+      : [],
     date: row.sort_at.toISOString(),
     flags: toFlags(row.flags),
     hasAttachments: row.has_attachments,

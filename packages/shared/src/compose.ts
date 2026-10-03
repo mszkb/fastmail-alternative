@@ -28,7 +28,10 @@ export interface ComposeIdentity {
   emailAddress: string
   /** Plain-text signature without the "-- " delimiter; null/empty = none. */
   signature: string | null
-  /** Identity matching the account address (used when nothing else fits). */
+  /**
+   * Default identity of the account (chosen in the settings, else the one
+   * matching the account address); used when nothing else fits.
+   */
   isDefault: boolean
 }
 
@@ -37,12 +40,23 @@ export interface IdentityListResponse {
   identities: ComposeIdentity[]
 }
 
-/** `PATCH /api/identities/:id` */
+/** `POST /api/accounts/:id/identities` (roadmap 3.6) */
+export interface CreateIdentityRequest {
+  name: string
+  emailAddress: string
+  signature?: string | null
+}
+
+/** `PATCH /api/identities/:id` - every field optional; isDefault only `true`. */
 export interface UpdateIdentityRequest {
-  signature: string | null
+  name?: string
+  signature?: string | null
+  isDefault?: true
 }
 
 export const MAX_SIGNATURE_LENGTH = 10_000
+export const MAX_IDENTITY_NAME_LENGTH = 100
+export const MAX_IDENTITIES_PER_ACCOUNT = 20
 
 export type ComposeMode = 'new' | 'reply' | 'replyAll' | 'forward'
 
@@ -63,7 +77,8 @@ export interface ComposeDraft {
 export type ComposeOriginal = Pick<
   MessageDetail,
   'subject' | 'from' | 'to' | 'cc' | 'replyTo' | 'date' | 'text' | 'messageId' | 'references'
->
+> &
+  Partial<Pick<MessageDetail, 'deliveredTo'>>
 
 // Reply prefixes in common languages/clients: Re, Aw/Antw (German), Sv
 // (Nordic), optionally with a counter like "Re[2]:" or "Re(2):".
@@ -261,19 +276,30 @@ function composeBody(signature: string | null | undefined, tail: string): string
 }
 
 /**
- * Identity to send from: for replies/forwards the identity the original
- * was addressed to (To/Cc), otherwise the default (or first) identity.
+ * Identity to send from (roadmap 3.6): for replies/forwards the identity
+ * the original was addressed to - To/Cc first (in header order), then the
+ * envelope recipient (Delivered-To/X-Original-To, e.g. Bcc or mailing
+ * lists) - compared case-insensitively; otherwise the default (or first)
+ * identity.
  */
 export function pickIdentity(
   identities: ComposeIdentity[],
-  original?: Pick<ComposeOriginal, 'to' | 'cc'>,
+  original?: Pick<ComposeOriginal, 'to' | 'cc' | 'deliveredTo'>,
 ): ComposeIdentity | null {
   if (original) {
-    const addressed = new Set(
-      [...original.to, ...original.cc].map((person) => person.address.toLowerCase()),
-    )
-    const match = identities.find((identity) => addressed.has(identity.emailAddress.toLowerCase()))
-    if (match) return match
+    const byAddress = new Map<string, ComposeIdentity>()
+    for (const identity of identities) {
+      const key = identity.emailAddress.trim().toLowerCase()
+      if (!byAddress.has(key)) byAddress.set(key, identity)
+    }
+    const candidates = [
+      ...[...original.to, ...original.cc].map((person) => person.address),
+      ...(original.deliveredTo ?? []),
+    ]
+    for (const address of candidates) {
+      const match = byAddress.get(address.trim().toLowerCase())
+      if (match) return match
+    }
   }
   return identities.find((identity) => identity.isDefault) ?? identities[0] ?? null
 }

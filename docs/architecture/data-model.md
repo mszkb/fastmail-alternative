@@ -94,6 +94,7 @@ erDiagram
         text last_error_code "nur Fehlercode, nie Servertext"
         timestamptz last_sync_at
         text[] capabilities "IDLE, CONDSTORE, QRESYNC, MOVE, ..."
+        uuid default_identity_id "Standard-Identität, null = Kontoadresse"
     }
     IDENTITY {
         uuid id PK
@@ -107,7 +108,9 @@ erDiagram
         uuid account_id FK
         text path
         text delimiter
-        text special_use "inbox | sent | drafts | trash | archive | junk | null"
+        text special_use "effektive Rolle: inbox | sent | drafts | trash | archive | junk | null"
+        text special_use_detected "Rolle laut Sync (Attribut oder Name)"
+        text special_use_override "manuelle Zuordnung, vom Sync nie überschrieben"
         bigint uidvalidity
         bigint uidnext
         bigint highestmodseq
@@ -130,7 +133,7 @@ erDiagram
         text[] references
         bytea subject_enc
         bytea from_enc
-        bytea recipients_enc "To + Cc + Reply-To"
+        bytea recipients_enc "To + Cc + Reply-To + Delivered-To"
         bytea snippet_enc
         timestamptz sent_at
         timestamptz received_at
@@ -199,11 +202,11 @@ erDiagram
 
 - **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Initial-Sync-Grenze (`sync_since`, pro Konto wählbar), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
   - Die API darf `credential_enc` nie in Listen- oder Detail-Antworten ausliefern. Dafür ist **ein explizites Spalten-Select** in der Konto-Abfrage Pflicht (kein `SELECT *`).
-- **`identity`**: Absenderadressen pro Konto (Roadmap 3.6). Beim Anlegen wird eine Identität aus `email_address` erzeugt.
+- **`identity`**: Absenderadressen pro Konto (Roadmap 3.6), je Konto eindeutig (Adresse ohne Groß-/Kleinschreibung). Beim Anlegen wird eine Identität aus `email_address` erzeugt und als `mail_account.default_identity_id` gesetzt; weitere Aliase legt der Benutzer an. Die Standard-Identität kann nicht gelöscht werden.
 
 ### Ordner
 
-- **`folder`**: ein IMAP-Mailbox-Eintrag. `special_use` aus RFC 6154 bzw. Heuristik (Roadmap 3.3).
+- **`folder`**: ein IMAP-Mailbox-Eintrag. Ordnerrollen (Roadmap 3.3): `special_use_detected` setzt der Sync aus RFC 6154 bzw. der Namensheuristik (deutsche/englische Ordnernamen, nur für Rollen ohne Attribut), `special_use_override` der Benutzer; `special_use` ist die daraus aufgelöste effektive Rolle (Override vor Erkennung, je Konto höchstens ein Ordner pro Rolle), die alle Aktionen verwenden.
 - Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners verworfen und neu synchronisiert.
 
 ### Nachrichten

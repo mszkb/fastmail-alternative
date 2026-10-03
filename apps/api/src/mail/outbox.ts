@@ -33,6 +33,7 @@ import {
   type SentCopyStatus,
 } from '@fma/shared'
 import { requireAuth } from '../auth/routes'
+import { IDENTITY_IS_DEFAULT } from './identities'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Generous body limit for long plain-text messages (UTF-8 up to 4 bytes/char). */
@@ -216,7 +217,7 @@ export async function outboxRoutes(app: FastifyInstance): Promise<void> {
         return
       }
 
-      // Explicit identity, or the default one (matching the account address).
+      // Explicit identity, or the default one (see IDENTITY_IS_DEFAULT).
       const { rows: identities } = await pool.query<{
         id: string
         name: string
@@ -224,9 +225,11 @@ export async function outboxRoutes(app: FastifyInstance): Promise<void> {
       }>(
         parsed.identityId
           ? `SELECT id, name, email_address FROM identity WHERE account_id = $1 AND id = $2`
-          : `SELECT id, name, email_address FROM identity WHERE account_id = $1
-             ORDER BY (lower(email_address) = lower($2)) DESC, email_address LIMIT 1`,
-        [account.id, parsed.identityId ?? account.email_address],
+          : `SELECT i.id, i.name, i.email_address
+             FROM identity i JOIN mail_account a ON a.id = i.account_id
+             WHERE i.account_id = $1
+             ORDER BY ${IDENTITY_IS_DEFAULT} DESC, i.email_address LIMIT 1`,
+        parsed.identityId ? [account.id, parsed.identityId] : [account.id],
       )
       const identity = identities[0]
       if (parsed.identityId && !identity) {
