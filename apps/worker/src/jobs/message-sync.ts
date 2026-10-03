@@ -52,6 +52,7 @@ import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { assertMailHost, mailTestMode } from '../ports'
+import { purgeLocationlessMessages } from './cleanup'
 import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
 
@@ -546,11 +547,16 @@ export async function runMessageSync(
 
     // Messages whose only location had an outdated uidvalidity and that did
     // not come back under a new UID (after the fetch above, so re-fetched
-    // ones keep their row and body).
-    if (staleLocations.length > 0) {
-      await removeOrphanMessages(pool, accountId, [
-        ...new Set(staleLocations.map((row) => row.message_id)),
-      ])
+    // ones keep their row and body). Account-wide instead of only this run's
+    // stale locations: a previous attempt may have discarded the locations
+    // and then failed before this point (folder.uidvalidity is still the
+    // old one until the end of a successful run). Safe, since this job is
+    // the account's only running job.
+    if (staleLocations.length > 0 || dbUidvalidity !== serverUidvalidity) {
+      const messagesRemoved = await purgeLocationlessMessages(pool, accountId)
+      if (messagesRemoved > 0) {
+        log.info({ accountId, folderId, messagesRemoved }, 'messages without location removed')
+      }
     }
 
     try {

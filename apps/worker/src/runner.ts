@@ -23,6 +23,7 @@ import {
 } from './account-health'
 import { runWithJobSignal } from './job-context'
 import { runAccountCleanup } from './jobs/account-cleanup'
+import { runCleanup } from './jobs/cleanup'
 import { runDraftSync } from './jobs/draft-sync'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
@@ -41,6 +42,7 @@ export const JOB_TYPES = [
   'draft_sync',
   'account_cleanup',
   'push_notify',
+  'cleanup',
 ]
 /**
  * Claimed before all other types: user actions are small and interactive,
@@ -61,6 +63,7 @@ const JOB_TIMEOUT_MS: Record<string, number> = {
   draft_sync: 2 * 60_000,
   account_cleanup: 5 * 60_000,
   push_notify: 2 * 60_000,
+  cleanup: 10 * 60_000,
 }
 const FALLBACK_TIMEOUT_MS = 5 * 60_000
 
@@ -145,6 +148,13 @@ async function processJob(
       const outcome = await runPushNotify(pool, job.payload)
       await completeJob(pool, jobId)
       log.info({ jobId, outcome }, 'push_notify done')
+      break
+    }
+    case 'cleanup': {
+      // Counters only, never content.
+      const outcome = await runCleanup(pool)
+      await completeJob(pool, jobId)
+      log.info({ jobId, ...outcome }, 'cleanup done')
       break
     }
     default:

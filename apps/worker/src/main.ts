@@ -4,7 +4,7 @@
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. The runner (./runner)
  * only processes short-lived jobs (folder sync, message sync, message
- * actions, SMTP send, account cleanup, push), several in parallel
+ * actions, SMTP send, account cleanup, push, periodic cleanup), several in parallel
  * but at most one per account, each with a hard timeout (roadmap 3.4).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.
@@ -17,7 +17,13 @@ import { createPool } from '@fma/db'
 import { markSendGivenUp } from './jobs/send-message'
 import { log } from './log'
 import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
-import { enqueueDueSyncs, requeueStaleJobs, syncIntervalSeconds } from './scheduler'
+import { cleanupIntervalSeconds } from './jobs/cleanup'
+import {
+  enqueueDueCleanup,
+  enqueueDueSyncs,
+  requeueStaleJobs,
+  syncIntervalSeconds,
+} from './scheduler'
 
 const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
@@ -53,6 +59,7 @@ async function main(): Promise<void> {
   // Periodic sync. The first tick runs immediately and also covers accounts
   // created while the worker was down.
   const intervalSeconds = syncIntervalSeconds()
+  const cleanupInterval = cleanupIntervalSeconds()
   let nextSchedulerTick = 0
   const schedulerTick = async (): Promise<void> => {
     if (Date.now() < nextSchedulerTick) return
@@ -62,6 +69,7 @@ async function main(): Promise<void> {
       if (stale.requeued + stale.failed > 0) log.warn(stale, 'stale running jobs recovered')
       const accountIds = await enqueueDueSyncs(pool, intervalSeconds)
       if (accountIds.length > 0) log.info({ accountIds }, 'periodic sync enqueued')
+      if (await enqueueDueCleanup(pool, cleanupInterval)) log.info('cleanup enqueued')
     } catch (err) {
       log.error({ err: (err as Error).message }, 'scheduler tick failed')
     }
