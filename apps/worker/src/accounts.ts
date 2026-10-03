@@ -4,7 +4,7 @@
  * @fma/crypto).
  */
 import type { Pool } from '@fma/db'
-import { decryptField, loadMasterKey, unwrapDataKey } from '@fma/crypto'
+import { decryptField, unwrapAccountKey } from '@fma/crypto'
 import { isSecurePort } from './ports'
 
 export interface AccountImapConfig {
@@ -40,8 +40,7 @@ export async function loadAccountContext(
   const row = rows[0]
   if (!row) throw new Error(`account ${accountId} not found`)
 
-  const masterKey = loadMasterKey(masterKeyBase64)
-  const { dataKey } = unwrapDataKey(masterKey, row.wrapped_dek.toString('utf8'))
+  const dataKey = unwrapAccountKey(masterKeyBase64, row.wrapped_dek)
   const credentialsJson = decryptField(
     dataKey,
     row.credential_enc.toString('utf8'),

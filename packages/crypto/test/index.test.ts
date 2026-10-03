@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   decryptField,
@@ -6,6 +7,8 @@ import {
   generateDataKey,
   hmacValue,
   loadMasterKey,
+  messageFieldAad,
+  unwrapAccountKey,
   unwrapDataKey,
   wrapDataKey,
 } from '../src/index'
@@ -93,5 +96,16 @@ describe('HMAC derivation', () => {
     expect(k1).toEqual(k2)
     expect(k1).not.toEqual(k3)
     expect(hmacValue(k1, 'Re: hello')).toBe(hmacValue(k2, 'Re: hello'))
+  })
+})
+
+describe('account key helpers', () => {
+  it('unwraps an account DEK from bytea or text and builds message AADs', () => {
+    const masterBase64 = randomBytes(32).toString('base64')
+    const dek = generateDataKey()
+    const wrapped = wrapDataKey(loadMasterKey(masterBase64), dek, 'v1')
+    expect(unwrapAccountKey(masterBase64, wrapped)).toEqual(dek)
+    expect(unwrapAccountKey(masterBase64, Buffer.from(wrapped, 'utf8'))).toEqual(dek)
+    expect(messageFieldAad('subject', 'abc')).toBe('message.subject:abc')
   })
 })

@@ -8,7 +8,7 @@ export default defineNuxtConfig({
   // as behind caddy in production).
   nitro: {
     devProxy: {
-      '/api/': { target: 'http://localhost:3001', changeOrigin: true },
+      '/api/': { target: 'http://localhost:3001/api/', changeOrigin: true },
     },
   },
 })

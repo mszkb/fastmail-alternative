@@ -134,6 +134,24 @@ export function hmacValue(hmacKey: Buffer, value: string): string {
   return createHmac('sha256', hmacKey).update(value, 'utf8').digest('hex')
 }
 
+/**
+ * Unwraps an account DEK as stored in `mail_account.wrapped_dek` (bytea or
+ * text) with the base64 master key from the environment. Shared by api and
+ * worker; the result must never be logged or persisted.
+ */
+export function unwrapAccountKey(masterKeyBase64: string, wrappedDek: Buffer | string): Buffer {
+  const wrapped = Buffer.isBuffer(wrappedDek) ? wrappedDek.toString('utf8') : wrappedDek
+  return unwrapDataKey(loadMasterKey(masterKeyBase64), wrapped).dataKey
+}
+
+/** Message fields encrypted with the account DEK (see migration 0004). */
+export type MessageField = 'subject' | 'from' | 'recipients' | 'snippet' | 'body' | 'text'
+
+/** AAD context of an encrypted message field: `message.<field>:<message id>`. */
+export function messageFieldAad(field: MessageField, messageId: string): string {
+  return `message.${field}:${messageId}`
+}
+
 function aadForWrappedKey(keyId: string): Buffer {
   return Buffer.from(`fma.wrapped-dek:${keyId}`, 'utf8')
 }

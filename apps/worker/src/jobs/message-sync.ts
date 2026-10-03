@@ -21,7 +21,7 @@ import { ImapFlow } from 'imapflow'
 import type { MailboxLockObject } from 'imapflow'
 import { simpleParser, type ParsedMail } from 'mailparser'
 import type { Pool } from '@fma/db'
-import { encryptField, deriveHmacKey, hmacValue } from '@fma/crypto'
+import { encryptField, deriveHmacKey, hmacValue, messageFieldAad as aad } from '@fma/crypto'
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
@@ -51,10 +51,6 @@ interface FetchMessage {
 
 function mailDataDir(): string {
   return process.env.MAIL_DATA_DIR ?? '/app/mail-data'
-}
-
-function aad(kind: string, messageId: string): string {
-  return `message.${kind}:${messageId}`
 }
 
 /** Deterministic fallback id when the server/message has no Message-ID. */

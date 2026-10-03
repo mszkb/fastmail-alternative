@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Auth UI (roadmap 1.6) + account management (roadmap 2.1). The real mail
-// UI replaces the "app" view in later phases.
+// Auth UI (roadmap 1.6), mail view (roadmap 2.3) and settings with account
+// management (roadmap 2.1) and devices.
 interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
@@ -25,6 +25,7 @@ interface DeviceInfo {
 }
 
 const view = ref<'loading' | 'setup' | 'login' | 'app'>('loading')
+const section = ref<'mail' | 'settings'>('mail')
 const email = ref('')
 const password = ref('')
 const deviceName = ref('')
@@ -156,7 +157,7 @@ onMounted(loadStatus)
 </script>
 
 <template>
-  <main class="shell">
+  <main class="shell" :class="{ wide: view === 'app' && section === 'mail' }">
     <h1>fastmail-alternative</h1>
 
     <div v-if="view === 'loading'" class="card">Wird geladen &hellip;</div>
@@ -193,38 +194,70 @@ onMounted(loadStatus)
       <button type="submit" :disabled="busy">Anmelden</button>
     </form>
 
-    <!-- Authenticated placeholder "app" -->
+    <!-- Authenticated app: mail view and settings -->
     <template v-else>
-      <div class="card">
-        <p>
-          Angemeldet als <strong>{{ currentEmail }}</strong>
-        </p>
-        <button type="button" :disabled="busy" @click="logout">Abmelden</button>
-      </div>
+      <nav class="topbar">
+        <span class="tabs">
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: section === 'mail' }"
+            @click="section = 'mail'"
+          >
+            E-Mail
+          </button>
+          <button
+            type="button"
+            class="tab"
+            :class="{ active: section === 'settings' }"
+            @click="section = 'settings'"
+          >
+            Einstellungen
+          </button>
+        </span>
+        <span class="user">{{ currentEmail }}</span>
+      </nav>
 
-      <AccountList :accounts="accounts" @deleted="loadAccounts" />
-      <AccountForm @created="loadAccounts" />
+      <template v-if="section === 'mail'">
+        <MailView v-if="accounts.length > 0" :accounts="accounts" />
+        <div v-else class="card">
+          <p>Noch kein E-Mail-Konto verbunden.</p>
+          <button type="button" @click="section = 'settings'">Konto hinzufügen</button>
+        </div>
+      </template>
 
-      <div class="card">
-        <h2>Geräte</h2>
-        <p class="hint">Ein Gerät abzumelden beendet alle zugehörigen Sitzungen.</p>
-        <ul class="devices">
-          <li v-for="device in devices" :key="device.id">
-            <span>
-              <strong>{{ device.name }}</strong>
-              <span class="tag">{{ device.platform }}</span>
-              <span v-if="device.isCurrent" class="tag current">dieses Gerät</span>
-            </span>
-            <button
-              v-if="!device.isCurrent"
-              type="button"
-              :disabled="busy"
-              @click="revokeDevice(device)"
-            >
-              Abmelden
-            </button>
-          </li>
-        </ul>
+      <div v-else class="settings">
+        <div class="card">
+          <p>
+            Angemeldet als <strong>{{ currentEmail }}</strong>
+          </p>
+          <button type="button" :disabled="busy" @click="logout">Abmelden</button>
+        </div>
+
+        <AccountList :accounts="accounts" @deleted="loadAccounts" />
+        <AccountForm @created="loadAccounts" />
+
+        <div class="card">
+          <h2>Geräte</h2>
+          <p class="hint">Ein Gerät abzumelden beendet alle zugehörigen Sitzungen.</p>
+          <ul class="devices">
+            <li v-for="device in devices" :key="device.id">
+              <span>
+                <strong>{{ device.name }}</strong>
+                <span class="tag">{{ device.platform }}</span>
+                <span v-if="device.isCurrent" class="tag current">dieses Gerät</span>
+              </span>
+              <button
+                v-if="!device.isCurrent"
+                type="button"
+                :disabled="busy"
+                @click="revokeDevice(device)"
+              >
+                Abmelden
+              </button>
+            </li>
+          </ul>
+        </div>
       </div>
     </template>
 
@@ -240,6 +273,50 @@ onMounted(loadStatus)
   padding: 0 1rem;
   font-family: system-ui, sans-serif;
   color: #1f2933;
+}
+
+.shell.wide {
+  max-width: 90rem;
+  margin-top: 1rem;
+}
+
+.shell.wide h1 {
+  display: none;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+button.tab {
+  padding: 0.4rem 0.9rem;
+  white-space: nowrap;
+  background: transparent;
+  color: #3e4c59;
+}
+
+button.tab.active {
+  background: #e4e9ee;
+  color: #1f2933;
+  font-weight: 600;
+}
+
+.user {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.85rem;
+  color: #52606d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card {
