@@ -157,5 +157,5 @@ export function maybeTouchDevice(pool: Pool, deviceId: string): void {
   const last = lastSeenWrites.get(deviceId) ?? 0
   if (now - last < LAST_SEEN_THROTTLE_MS) return
   lastSeenWrites.set(deviceId, now)
-  pool.query('UPDATE device SET last_seen_at = now() WHERE id = $1').catch(() => {})
+  pool.query('UPDATE device SET last_seen_at = now() WHERE id = $1', [deviceId]).catch(() => {})
 }
