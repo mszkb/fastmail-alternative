@@ -1,8 +1,8 @@
 /**
  * Periodic sync scheduler (roadmap 2.2): enqueues a folder_sync job for every
  * active account whose last sync is older than the sync interval. The
- * folder_sync job chains one message_sync per folder, so new mail appears
- * without IMAP IDLE (IDLE is a later step).
+ * folder_sync job chains one message_sync per folder. This polling is the
+ * fallback next to IMAP IDLE (./idle, INBOX only).
  *
  * - No pile-up: an account with a queued or running folder_sync gets no new
  *   one. Failed jobs stay 'queued' with a future run_at (backoff in
