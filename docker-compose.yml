@@ -73,8 +73,8 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
+      # Public key only: the api hands it to browsers; sending is the worker's job.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -117,6 +117,7 @@ services:
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
       POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

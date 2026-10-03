@@ -26,6 +26,7 @@ import { runAccountCleanup } from './jobs/account-cleanup'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
 import { runMessageSync } from './jobs/message-sync'
+import { runPushNotify } from './jobs/push-notify'
 import { markSendGivenUp, runSendMessage } from './jobs/send-message'
 import { log } from './log'
 import { enqueueMessageSync } from './scheduler'
@@ -37,6 +38,7 @@ export const JOB_TYPES = [
   'message_action',
   'send_message',
   'account_cleanup',
+  'push_notify',
 ]
 /**
  * Claimed before all other types: user actions are small and interactive,
@@ -54,6 +56,7 @@ const JOB_TIMEOUT_MS: Record<string, number> = {
   message_action: 3 * 60_000,
   send_message: 5 * 60_000,
   account_cleanup: 5 * 60_000,
+  push_notify: 2 * 60_000,
 }
 const FALLBACK_TIMEOUT_MS = 5 * 60_000
 
@@ -125,6 +128,12 @@ async function processJob(
       const outcome = await runAccountCleanup(pool, job.payload)
       await completeJob(pool, jobId)
       log.info({ jobId, outcome }, 'account_cleanup done')
+      break
+    }
+    case 'push_notify': {
+      const outcome = await runPushNotify(pool, job.payload)
+      await completeJob(pool, jobId)
+      log.info({ jobId, outcome }, 'push_notify done')
       break
     }
     default:

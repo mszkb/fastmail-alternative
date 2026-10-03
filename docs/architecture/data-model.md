@@ -41,6 +41,8 @@ erDiagram
         text password_hash
         bytea totp_secret_enc "optional"
         boolean unified_inbox_enabled "Default false"
+        bytea wrapped_dek "Data Key des Benutzers (Push-Keys, TOTP)"
+        text key_id "Master-Key-Version"
         timestamptz created_at
     }
     DEVICE {
@@ -63,10 +65,12 @@ erDiagram
         uuid id PK
         uuid device_id FK
         text transport "webpush | apns | relay"
-        text endpoint
+        text endpoint UK
         bytea keys_enc
         int failure_count
         timestamptz disabled_at
+        timestamptz created_at
+        timestamptz last_success_at
     }
     MAIL_ACCOUNT {
         uuid id PK
@@ -189,7 +193,7 @@ erDiagram
 - **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Im MVP gibt es genau einen Benutzer, angelegt beim ersten Start. Passwort-Hash (Argon2id); `totp_secret_enc` bleibt bis zu späterer 2FA leer. `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
 - **`device`**: gemeinsame Basis für Sessions und Push (ADR-0004). `installation_id` ist die einzige gerätebezogene Kennung im Push-Payload ([push.md](push.md)). Widerruf eines Geräts (`revoked_at`) beendet alle Sessions und deaktiviert alle Subscriptions.
 - **`session`**: nur der **Hash** des Tokens wird gespeichert. Ein späterer nativer Client nutzt dieselbe Tabelle mit einem gerätegebundenen Token.
-- **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). Bei HTTP 404/410 wird `disabled_at` gesetzt; der Cleanup-Job löscht später.
+- **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). `endpoint` ist eindeutig (Upsert, wenn derselbe Browser sich neu anmeldet); `keys_enc` ist mit dem DEK des Benutzers verschlüsselt (`user.wrapped_dek`, beim ersten Bedarf angelegt). Bei HTTP 404/410 vom Push-Service wird die Zeile direkt gelöscht; `disabled_at` bleibt für spätere Transporte reserviert. Details: [push.md](push.md).
 
 ### Konten
 

@@ -4,7 +4,7 @@
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. The runner (./runner)
  * only processes short-lived jobs (folder sync, message sync, message
- * actions, SMTP send, account cleanup; later: push), several in parallel
+ * actions, SMTP send, account cleanup, push), several in parallel
  * but at most one per account, each with a hard timeout (roadmap 3.4).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.

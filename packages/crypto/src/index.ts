@@ -157,6 +157,15 @@ export function outboxContentAad(outboxId: string): string {
   return `outbox_message.content:${outboxId}`
 }
 
+/**
+ * AAD context of a push subscription's encrypted keys (p256dh/auth,
+ * migration 0010), encrypted with the user DEK and bound to the endpoint
+ * (unique per subscription, stable across upserts).
+ */
+export function pushKeysAad(endpoint: string): string {
+  return `push_subscription.keys:${endpoint}`
+}
+
 function aadForWrappedKey(keyId: string): Buffer {
   return Buffer.from(`fma.wrapped-dek:${keyId}`, 'utf8')
 }

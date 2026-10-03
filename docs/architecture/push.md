@@ -15,25 +15,17 @@ Damit die App auch ganz ohne Push aktuell ist:
 
 Die Regeln (Drosselung, Polling-Fenster, Änderungserkennung, Zusammenführen der Liste) liegen testbar in `@fma/shared` (`foreground-sync.ts`) und gelten genauso für spätere native Clients (ADR-0010). Ein eigener „changes since“-Endpoint ist dafür nicht nötig.
 
-## MVP: Web Push
+## MVP: Web Push (Roadmap 4.3)
 
 - Zielplattformen: installierte iOS-PWA (iOS/iPadOS ≥ 16.4, nur nach Hinzufügen zum Home-Bildschirm), Android-PWA, Desktop-Browser.
-- Server erzeugt bei der Initialisierung ein **VAPID-Keypair** oder erhält es über Konfiguration. Der private Schlüssel wird wie andere Secrets behandelt.
-- Push-Subscriptions werden pro Gerät persistent gespeichert.
-- Abgelaufene/ungültige Endpoints (HTTP 404/410 vom Push-Service) werden automatisch bereinigt.
-- Opt-in nur nach expliziter Nutzeraktion (iOS verlangt eine User-Geste).
-
-## Payload
-
-Erlaubt:
-
-```json
-{ "type": "new_mail", "installationId": "…", "badge": 7 }
-```
-
-**Nicht erlaubt:** Betreffzeilen, Absender, Mailinhalte, Kontonamen, E-Mail-Adressen.
-
-Der Service Worker zeigt eine generische Benachrichtigung („Neue Nachricht") und aktualisiert das Badge. Details lädt die App nach dem Öffnen über die API.
+- **VAPID-Keypair** aus der Umgebung (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; `scripts/setup-env.mjs` erzeugt sie). Der private Schlüssel ist ein Secret und liegt nur beim Worker; die API kennt nur den öffentlichen. Ohne Keys ist Push aus (Einstellungen zeigen das an), alles andere funktioniert. Neue Keys machen alle bestehenden Subscriptions ungültig.
+- **Opt-in** nur nach expliziter Nutzeraktion: „Benachrichtigungen aktivieren“ in den Einstellungen ruft `Notification.requestPermission()` direkt im Klick-Handler auf (iOS verlangt eine User-Geste). In Safari auf iPhone/iPad ohne Installation zeigt die App stattdessen den Hinweis „Zum Home-Bildschirm“. Deaktivieren meldet die Subscription im Browser und auf dem Server ab.
+- **API:** `GET /api/push/vapid-public-key`, `POST /api/push/subscriptions` (PushSubscription-JSON), `DELETE /api/push/subscriptions` (Body: `endpoint`, dieser Browser), `GET /api/push/subscriptions` und `DELETE /api/push/subscriptions/:id` (Geräteverwaltung; die Liste zeigt nur den Host des Push-Dienstes, nie den Endpoint).
+- **Subscriptions** gehören zum Gerät der aktuellen Session und werden über den Endpoint upserted (derselbe Browser nach neuer Anmeldung → neues Gerät). Ein Endpoint eines anderen Benutzers wird abgelehnt (409). Der Endpoint muss eine `https`-URL auf einem öffentlichen Host sein (SSRF-Schutz `@fma/shared/ssrf`, beim Speichern und vor jedem Versand erneut). `p256dh`/`auth` liegen mit dem DEK des Benutzers verschlüsselt in `keys_enc`. Abmelden (letzte Session des Geräts) und Gerät widerrufen löschen die Subscriptions des Geräts; der Worker sendet ohnehin nur an Geräte mit gültiger Session.
+- **Auslöser:** Legt ein inkrementeller `message_sync` neue, ungelesene Nachrichten im INBOX ab (nicht beim Initial-Sync, nicht nach UIDVALIDITY-Wechsel), reiht er einen `push_notify`-Job für den Benutzer ein – nur wenn es eine aktive Subscription gibt, höchstens einen wartenden Job je Benutzer und mit mindestens 30 s Abstand zum vorigen. Viele neue Mails über mehrere Konten ergeben so eine Benachrichtigung.
+- **Versand:** `web-push` (VAPID, `aes128gcm`), `TTL` 15 min, `Urgency: normal`, ohne Redirects, mit Timeout. Das Badge wird beim Versand berechnet (Summe der ungelesenen INBOX-Nachrichten aller Konten).
+- **Bereinigung:** HTTP 404/410 vom Push-Service → Subscription wird gelöscht. Andere Fehler zählen `failure_count` hoch, der Job wird mit Backoff wiederholt (doppelte Zustellung ist harmlos, siehe unten).
+- **Logs:** Endpoints sind Capability-URLs und erscheinen nie im Log, nur Host des Push-Dienstes und ein kurzer Hash.
 
 ## Optionales Hosted Push Relay (Phase 8)
 

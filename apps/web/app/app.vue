@@ -7,6 +7,8 @@
 // server to sync all accounts (POST /api/sync) and then polls the account
 // list every few seconds while a sync runs (ForegroundSyncPolicy from
 // @fma/shared); MailView reloads its data when the active account changed.
+// Push (4.3): opt-in in the settings (PushSettings); a click on a
+// notification focuses the app and the service worker asks it to sync.
 import { ForegroundSyncPolicy } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 
@@ -91,6 +93,12 @@ function onForeground(): void {
   }
   if (navigator.onLine === false) return
   void syncNow()
+}
+
+/** The service worker forwards notification clicks (new mail): sync now. */
+function onWorkerMessage(event: MessageEvent): void {
+  const data = event.data as { type?: string } | null
+  if (data?.type === 'SYNC_REQUEST') void syncNow(true)
 }
 
 /** Opens the edit form of an account in the settings (e.g. new credentials). */
@@ -219,6 +227,9 @@ onMounted(() => {
   window.addEventListener('focus', onForeground)
   window.addEventListener('online', onForeground)
   document.addEventListener('visibilitychange', onForeground)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', onWorkerMessage)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -227,6 +238,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('focus', onForeground)
   window.removeEventListener('online', onForeground)
   document.removeEventListener('visibilitychange', onForeground)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.removeEventListener('message', onWorkerMessage)
+  }
 })
 </script>
 
@@ -337,6 +351,8 @@ onBeforeUnmount(() => {
             </li>
           </ul>
         </div>
+
+        <PushSettings />
       </div>
     </template>
 

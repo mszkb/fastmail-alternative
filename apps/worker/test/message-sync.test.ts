@@ -64,7 +64,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     pool = new pg.Pool({ connectionString: databaseUrl })
     await runMigrations(pool)
     await pool.query(
-      'TRUNCATE session, device, "user", mail_account, identity, folder, job, message, message_location, message_body CASCADE',
+      'TRUNCATE session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, push_subscription CASCADE',
     )
 
     mailDataDir = await mkdtemp(path.join(tmpdir(), 'fma-mail-data-'))
@@ -102,6 +102,23 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
         process.env.MASTER_KEY_ID ?? 'v1',
         credentialEnc,
       ],
+    )
+
+    // A logged-in device with push enabled: new INBOX mail enqueues push_notify.
+    const device = await pool.query<{ id: string }>(
+      `INSERT INTO device (user_id, name, platform, installation_id)
+       VALUES ($1, 'Phone', 'ios_pwa', gen_random_uuid()) RETURNING id`,
+      [user.rows[0]!.id],
+    )
+    await pool.query(
+      `INSERT INTO session (device_id, token_hash, expires_at)
+       VALUES ($1, $2, now() + interval '1 day')`,
+      [device.rows[0]!.id, randomBytes(32)],
+    )
+    await pool.query(
+      `INSERT INTO push_subscription (device_id, transport, endpoint, keys_enc)
+       VALUES ($1, 'webpush', 'https://push.example.net/sync-test', '\\x00')`,
+      [device.rows[0]!.id],
     )
 
     // Helper: list INBOX UIDs via IMAP (also used to wait for deliveries).
@@ -217,7 +234,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
 
   afterAll(async () => {
     await pool.query(
-      'TRUNCATE session, device, "user", mail_account, identity, folder, job, message, message_location, message_body CASCADE',
+      'TRUNCATE session, device, "user", mail_account, identity, folder, job, message, message_location, message_body, push_subscription CASCADE',
     )
     await pool.end()
     await rm(mailDataDir, { recursive: true, force: true }).catch(() => {})
@@ -473,6 +490,11 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
   })
 
   it('fetches only new messages on incremental runs', async () => {
+    const pushJobs = async (): Promise<number> =>
+      (await pool.query(`SELECT 1 FROM job WHERE type = 'push_notify'`)).rowCount ?? 0
+    // The initial sync (earlier tests) never notifies.
+    expect(await pushJobs()).toBe(0)
+
     // Deliver a third mail, sync again: only the new one is fetched.
     const transporter = nodemailer.createTransport({
       host: greenmailHost,
@@ -501,6 +523,8 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       if (count === 3) break
     }
     expect(count).toBe(3)
+    // New unseen INBOX mail on an incremental run: one (coalesced) push job.
+    expect(await pushJobs()).toBe(1)
 
     // Incrementally fetched messages get their real server UID (regression:
     // the uid used to be mapped by fetch position and stored as 0).

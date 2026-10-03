@@ -8,6 +8,7 @@
 export * from './compose'
 export * from './foreground-sync'
 export * from './mail'
+export * from './push'
 export * from './redact'
 export * from './request-scope'
 export * from './threading'

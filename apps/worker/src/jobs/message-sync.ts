@@ -44,6 +44,7 @@ import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
+import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
 
 const MESSAGE_SYNC_LIMIT = 200
@@ -208,10 +209,15 @@ export async function runMessageSync(
 ): Promise<void> {
   const ctx = context ?? (await loadAccountContext(pool, accountId, process.env.MASTER_KEY ?? ''))
 
-  const folderRows = await pool.query<{ id: string; path: string; uidvalidity: string | null }>(
-    'SELECT id, path, uidvalidity FROM folder WHERE id = $1 AND account_id = $2',
-    [folderId, accountId],
-  )
+  const folderRows = await pool.query<{
+    id: string
+    path: string
+    uidvalidity: string | null
+    special_use: string | null
+  }>('SELECT id, path, uidvalidity, special_use FROM folder WHERE id = $1 AND account_id = $2', [
+    folderId,
+    accountId,
+  ])
   const folder = folderRows.rows[0]
   if (!folder) throw new Error(`folder ${folderId} not found for account ${accountId}`)
 
@@ -228,6 +234,8 @@ export async function runMessageSync(
 
   const unregister = closeOnJobAbort(() => client.close())
   let lock: MailboxLockObject | null = null
+  // New unseen INBOX messages of an incremental run (push hint, roadmap 4.3).
+  let newUnseen = 0
   try {
     await client.connect()
     lock = await client.getMailboxLock(folder.path)
@@ -281,6 +289,8 @@ export async function runMessageSync(
       (uid, index) =>
         !knownUids.has(uid) && (index >= windowStart || (highestSynced > 0 && uid > highestSynced)),
     )
+
+    const isIncremental = dbUidvalidity !== null && dbUidvalidity === serverUidvalidity
 
     if (targetUids.length > 0) {
       const hmacKey = deriveHmacKey(ctx.dek, 'thread')
@@ -348,6 +358,17 @@ export async function runMessageSync(
           dbMessageId = existing.rows[0]?.id
         }
         if (!dbMessageId) {
+          // Push only for mail that really arrived since the last run: not on
+          // the initial sync, after a UIDVALIDITY change or for self-healed
+          // older UIDs.
+          if (
+            isIncremental &&
+            highestSynced > 0 &&
+            message.uid > highestSynced &&
+            !(message.flags ?? new Set()).has('\\Seen')
+          ) {
+            newUnseen++
+          }
           dbMessageId = randomUUID()
           await pool.query(
             `INSERT INTO message
@@ -477,6 +498,18 @@ export async function runMessageSync(
     unregister()
     lock?.release()
     client.close()
+  }
+
+  if (newUnseen > 0 && folder.special_use === 'inbox') {
+    // Best effort: push is only a hint, the sync result stays either way.
+    try {
+      await enqueuePushNotify(pool, accountId)
+    } catch (err) {
+      log.warn(
+        { accountId, error: err instanceof Error ? err.name : 'unknown' },
+        'push enqueue failed',
+      )
+    }
   }
 
   // Threading (roadmap 2.5) for new and backfilled messages of the account;

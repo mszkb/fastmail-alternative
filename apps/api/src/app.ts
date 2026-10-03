@@ -11,6 +11,7 @@ import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
 import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
+import { pushRoutes } from './push/routes'
 
 export interface AppOptions {
   /** Logging can be disabled to keep test output clean. */
@@ -84,6 +85,7 @@ export function buildApp({ logger = true }: AppOptions = {}): FastifyInstance {
   app.register(outboxRoutes)
   app.register(identityRoutes)
   app.register(syncRoutes)
+  app.register(pushRoutes)
 
   return app
 }

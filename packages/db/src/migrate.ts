@@ -19,6 +19,7 @@ import { migration0006 } from './migrations/0006_outbox'
 import { migration0007 } from './migrations/0007_message_metadata_version'
 import { migration0008 } from './migrations/0008_threads'
 import { migration0009 } from './migrations/0009_account_health'
+import { migration0010 } from './migrations/0010_push'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -41,6 +42,7 @@ export const migrations: Migration[] = [
   migration0007,
   migration0008,
   migration0009,
+  migration0010,
 ]
 
 /**
