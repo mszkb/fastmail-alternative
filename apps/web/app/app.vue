@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Auth UI (roadmap 1.6), mail view (roadmap 2.3) and settings with account
-// management (roadmap 2.1/3.1) and devices. The account list (with unread
-// counts for the switcher, 3.2) is refreshed periodically and on focus.
+// management (roadmap 2.1/3.1), devices and password change. The account
+// list (with unread counts for the switcher, 3.2) is refreshed periodically
+// and on focus.
 // Sync on start and focus (4.5, push-independent): on start, when the app
 // becomes visible/focused again and when it comes back online, it asks the
 // server to sync all accounts (POST /api/sync) and then polls the account
@@ -518,6 +519,8 @@ onBeforeUnmount(() => {
             </li>
           </ul>
         </div>
+
+        <PasswordChange @changed="loadDevices" />
 
         <InstallGuide />
         <PushSettings />

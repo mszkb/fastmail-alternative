@@ -155,6 +155,56 @@ export async function revokeDevice(pool: Pool, userId: string, deviceId: string)
   return true
 }
 
+/**
+ * Password change (ADR-0004): stores the new hash and, in the same
+ * transaction, revokes every other device of the user (their sessions and
+ * push subscriptions go with them, as with a manual device revocation) and
+ * rotates the current session's token. Returns the new token.
+ */
+export async function changePasswordAndEndOtherSessions(
+  pool: Pool,
+  userId: string,
+  sessionId: string,
+  deviceId: string,
+  passwordHash: string,
+): Promise<string> {
+  const token = generateToken()
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('UPDATE "user" SET password_hash = $2 WHERE id = $1', [userId, passwordHash])
+    const others = await client.query<{ id: string }>(
+      `UPDATE device SET revoked_at = now()
+       WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL
+       RETURNING id`,
+      [userId, deviceId],
+    )
+    const otherIds = others.rows.map((row) => row.id)
+    // Also covers sessions of devices revoked earlier (none should exist).
+    await client.query(
+      `DELETE FROM session
+       WHERE id <> $2 AND device_id IN (SELECT id FROM device WHERE user_id = $1)`,
+      [userId, sessionId],
+    )
+    if (otherIds.length > 0) {
+      await client.query('DELETE FROM push_subscription WHERE device_id = ANY($1::uuid[])', [
+        otherIds,
+      ])
+    }
+    await client.query(`UPDATE session SET token_hash = $2, rotated_at = now() WHERE id = $1`, [
+      sessionId,
+      hashToken(token),
+    ])
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+  return token
+}
+
 // --- last_seen_at throttling: at most one write per device per minute ---
 
 const LAST_SEEN_THROTTLE_MS = 60_000

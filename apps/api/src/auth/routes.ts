@@ -6,6 +6,9 @@
  * CSRF (roadmap 6.4): the cookie is SameSite=Strict and every
  * state-changing request must come from the same origin
  * (security/csrf.ts). Session timeouts: see sessions.ts.
+ *
+ * Password change: requires the current password (same lockout as login),
+ * ends all other devices/sessions and rotates the current session token.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import cookies from '@fastify/cookie'
@@ -13,6 +16,7 @@ import type { Pool } from '@fma/db'
 import { dummyVerify, hashPassword, verifyPassword } from './password'
 import { isLockedOut, recordFail, recordSuccess } from './lockout'
 import {
+  changePasswordAndEndOtherSessions,
   createDeviceWithSession,
   deleteSession,
   listDevices,
@@ -123,12 +127,17 @@ interface CredentialsBody {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PLATFORMS = new Set(['ios_pwa', 'android_pwa', 'desktop'])
 
+/** Minimum requirements for a new password (setup and password change). */
+function isAcceptablePassword(password: string): boolean {
+  return password.length >= 10 && password.length <= 200
+}
+
 function readCredentials(
   body: CredentialsBody | undefined,
 ): { email: string; password: string; deviceName: string; platform: string } | null {
   const email = body?.email?.trim().toLowerCase() ?? ''
   const password = body?.password ?? ''
-  if (!EMAIL_RE.test(email) || password.length < 10 || password.length > 200) return null
+  if (!EMAIL_RE.test(email) || !isAcceptablePassword(password)) return null
   const deviceName = (body?.deviceName ?? 'Browser').trim().slice(0, 100) || 'Browser'
   const platform = PLATFORMS.has(body?.platform ?? '') ? (body?.platform as string) : 'desktop'
   return { email, password, deviceName, platform }
@@ -232,6 +241,62 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     setSessionCookie(reply, token)
     await reply.send({ email: credentials.email })
   })
+
+  app.post<{ Body: { currentPassword?: unknown; newPassword?: unknown } }>(
+    '/api/auth/password',
+    { onRequest: requireAuth },
+    async (request, reply) => {
+      const lockSeconds = isLockedOut(request.ip)
+      if (lockSeconds > 0) {
+        await reply
+          .code(429)
+          .header('retry-after', String(lockSeconds))
+          .send({
+            message: `Too many failed attempts. Try again in ${Math.ceil(lockSeconds / 60)} minutes.`,
+          })
+        return
+      }
+
+      const currentPassword =
+        typeof request.body?.currentPassword === 'string' ? request.body.currentPassword : ''
+      const newPassword =
+        typeof request.body?.newPassword === 'string' ? request.body.newPassword : ''
+      const auth = request.auth!
+
+      const { rows } = await pool.query<{ password_hash: string }>(
+        'SELECT password_hash FROM "user" WHERE id = $1',
+        [auth.userId],
+      )
+      const passwordHash = rows[0]?.password_hash
+      const currentOk =
+        passwordHash !== undefined &&
+        currentPassword.length > 0 &&
+        currentPassword.length <= 200 &&
+        (await verifyPassword(currentPassword, passwordHash))
+      if (!currentOk) {
+        recordFail(request.ip)
+        await reply.code(403).send({ message: 'Current password is incorrect' })
+        return
+      }
+      recordSuccess(request.ip)
+
+      if (!isAcceptablePassword(newPassword)) {
+        await reply.code(400).send({ message: 'New password must have 10 to 200 characters' })
+        return
+      }
+
+      const newHash = await hashPassword(newPassword)
+      const token = await changePasswordAndEndOtherSessions(
+        pool,
+        auth.userId,
+        auth.sessionId,
+        auth.deviceId,
+        newHash,
+      )
+      setSessionCookie(reply, token)
+      await reply.code(204).send()
+    },
+  )
 
   app.delete('/api/auth/session', { onRequest: requireAuth }, async (request, reply) => {
     await deleteSession(pool, request.auth!.sessionId)

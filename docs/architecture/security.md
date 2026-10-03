@@ -22,7 +22,7 @@
 - **Absoluter Ablauf:** 30 Tage nach dem Login, Aktivität verlängert nicht.
 - **Leerlauf-Ablauf:** 14 Tage ohne Aktivität. Gemessen an `session.rotated_at` (jede aktive Session rotiert mindestens alle 24 h), also ohne Schreibzugriff pro Anfrage; Auflösung ein Tag.
 - **Logout** löscht die Session serverseitig und setzt das Cookie mit denselben Attributen zurück; Geräte-Widerruf löscht alle Sessions des Geräts.
-- **Passwortwechsel** gibt es noch nicht. Sobald er kommt, muss er alle anderen Sessions des Benutzers löschen.
+- **Passwortwechsel** (`POST /api/auth/password`, umgesetzt): verlangt eine gültige Session und das aktuelle Passwort (Argon2id-Prüfung wie beim Login; Fehlversuche zählen für denselben IP-Lockout wie der Login, zusätzlich Rate-Limit `auth`; falsches Passwort → `403` ohne Details). Das neue Passwort muss dieselben Mindestanforderungen wie bei der Ersteinrichtung erfüllen (10–200 Zeichen, sonst `400`). In **einer Transaktion** werden der neue Hash gespeichert, alle anderen Geräte des Benutzers widerrufen, deren Sessions und Push-Subscriptions gelöscht und das Token der aktuellen Session rotiert (neues Cookie). Das aktuelle Gerät behält seine Push-Subscriptions. Passwörter werden nie geloggt (`req.body` ist in den Logs redigiert); CSRF-Schutz greift global (siehe unten).
 
 ## CSRF
 
