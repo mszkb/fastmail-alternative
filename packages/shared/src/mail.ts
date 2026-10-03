@@ -341,6 +341,8 @@ export type AccountErrorCode =
   | 'JOB_TIMEOUT'
   /** Imported account (roadmap 4.7): the export never contains passwords. */
   | 'CREDENTIALS_REQUIRED'
+  /** Provider throttling or too many connections (roadmap 3.5): backoff. */
+  | 'RATE_LIMITED'
 
 export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   AUTH_FAILED: 'Der Mailserver hat die Zugangsdaten abgelehnt.',
@@ -352,6 +354,8 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   BLOCKED_HOST: 'Interner Host ist blockiert (SSRF-Schutz).',
   JOB_TIMEOUT: 'Der Mailserver hat zu lange gebraucht; der Abgleich wurde abgebrochen.',
   CREDENTIALS_REQUIRED: 'Das Konto wurde importiert – das Passwort muss neu eingegeben werden.',
+  RATE_LIMITED:
+    'Der Mailanbieter bremst gerade (zu viele Verbindungen oder Anfragen); der Abgleich pausiert kurz.',
 }
 
 export interface AccountStatusInfo {

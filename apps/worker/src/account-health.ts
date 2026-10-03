@@ -13,6 +13,10 @@
  *   CIRCUIT_OPEN_AFTER consecutive failures the status turns 'unreachable'
  *   for the status display. Failures of jobs that were already running
  *   during an open window do not count twice.
+ * - rate_limited (roadmap 3.5): provider throttling ([LIMIT], [THROTTLED],
+ *   "too many connections") uses the same backoff as 'unreachable' instead
+ *   of failing in a loop - and is checked before auth, because some
+ *   providers reject the login itself when too many connections are open.
  * - A successful sync (folder_sync/message_sync, which always connect)
  *   closes the circuit: status 'ok', counters reset, last_sync_at.
  *
@@ -62,6 +66,31 @@ const NETWORK_CODES: Record<string, AccountErrorCode> = {
   PRIVATE_HOST_BLOCKED: 'BLOCKED_HOST',
 }
 
+/** IMAP response codes (RFC 5530 and provider extensions) for throttling. */
+const THROTTLE_RESPONSE_CODES = new Set(['LIMIT', 'THROTTLED'])
+/**
+ * Throttling phrases in provider responses. The text is only matched here,
+ * never logged or stored (it may quote content).
+ */
+const THROTTLE_TEXT =
+  /too many (simultaneous |concurrent |open )?(connections|sessions|logins)|rate.?limit|throttl|try again later/i
+
+/** True for errors that mean "the provider wants us to slow down". */
+export function isThrottleError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const error = err as { serverResponseCode?: unknown; responseText?: unknown; response?: unknown }
+  if (
+    typeof error.serverResponseCode === 'string' &&
+    THROTTLE_RESPONSE_CODES.has(error.serverResponseCode.toUpperCase())
+  ) {
+    return true
+  }
+  for (const text of [error.responseText, error.response]) {
+    if (typeof text === 'string' && THROTTLE_TEXT.test(text)) return true
+  }
+  return false
+}
+
 /** Codes reported by jobs themselves (e.g. send_message via SendRetryError). */
 const KNOWN_CODES = new Set<string>(Object.keys(ACCOUNT_ERROR_MESSAGES))
 
@@ -82,6 +111,7 @@ export function classifyAccountError(err: unknown): AccountError | null {
     responseCode?: unknown
     message?: unknown
   }
+  if (isThrottleError(err)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
   if (error.authenticationFailed === true || error.serverResponseCode === 'AUTHENTICATIONFAILED') {
     return { code: 'AUTH_FAILED', kind: 'auth' }
   }

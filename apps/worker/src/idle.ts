@@ -21,7 +21,7 @@ import { loadAccountContext } from './accounts'
 import { classifyAccountError } from './account-health'
 import { log } from './log'
 import { assertMailHost, mailTestMode } from './ports'
-import { enqueueMessageSync } from './scheduler'
+import { enqueueMessageSync, syncMinIntervalSeconds } from './scheduler'
 
 const DEFAULT_RECONCILE_MS = 60_000
 const DEFAULT_MAX_CONNECTIONS = 50
@@ -84,6 +84,8 @@ export interface IdleManagerOptions {
   reconcileMs?: number
   maxConnections?: number
   masterKey?: string
+  /** Debounce of IDLE-triggered syncs (default SYNC_MIN_INTERVAL_SECONDS). */
+  syncMinIntervalSeconds?: number
 }
 
 export class IdleManager {
@@ -93,6 +95,7 @@ export class IdleManager {
   private readonly reconcileMs: number
   private readonly maxConnections: number
   private readonly masterKey: string
+  private readonly syncMinIntervalSeconds: number
 
   constructor(
     private readonly pool: Pool,
@@ -101,6 +104,7 @@ export class IdleManager {
     this.reconcileMs = options.reconcileMs ?? DEFAULT_RECONCILE_MS
     this.maxConnections = options.maxConnections ?? imapIdleMaxConnections()
     this.masterKey = options.masterKey ?? process.env.MASTER_KEY ?? ''
+    this.syncMinIntervalSeconds = options.syncMinIntervalSeconds ?? syncMinIntervalSeconds()
   }
 
   async start(): Promise<void> {
@@ -207,7 +211,12 @@ export class IdleManager {
 
   private enqueue(connection: IdleConnection): void {
     if (connection.stopped) return
-    enqueueMessageSync(this.pool, connection.accountId, connection.folderId).catch((err) => {
+    enqueueMessageSync(
+      this.pool,
+      connection.accountId,
+      connection.folderId,
+      this.syncMinIntervalSeconds,
+    ).catch((err) => {
       log.error({ accountId: connection.accountId, code: errorCode(err) }, 'idle enqueue failed')
     })
   }

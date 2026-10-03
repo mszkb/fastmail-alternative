@@ -17,6 +17,7 @@ import type { Pool } from '@fma/db'
 import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 
 const DEFAULT_SYNC_INTERVAL_SECONDS = 120
+const DEFAULT_SYNC_MIN_INTERVAL_SECONDS = 10
 /** Retry interval after a folder_sync ran out of attempts (state 'failed'). */
 const FAILED_RETRY_INTERVAL_SECONDS = 60 * 60
 /**
@@ -29,6 +30,18 @@ const STALE_RUNNING_SECONDS = 30 * 60
 export function syncIntervalSeconds(): number {
   const value = Number(process.env.SYNC_INTERVAL_SECONDS)
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_SYNC_INTERVAL_SECONDS
+}
+
+/**
+ * Minimum gap between two IDLE-triggered syncs of the same folder from
+ * SYNC_MIN_INTERVAL_SECONDS (roadmap 3.5, default 10; 0 disables it).
+ */
+export function syncMinIntervalSeconds(): number {
+  const raw = process.env.SYNC_MIN_INTERVAL_SECONDS
+  const value = Number(raw)
+  return raw !== undefined && raw.trim() !== '' && Number.isFinite(value) && value >= 0
+    ? value
+    : DEFAULT_SYNC_MIN_INTERVAL_SECONDS
 }
 
 /**
@@ -102,22 +115,32 @@ export async function enqueueDueSyncs(
 /**
  * Enqueues message_sync for one folder unless one is already queued or
  * running for it (a slow or backing-off folder must not pile up jobs).
+ *
+ * `minIntervalSeconds` (roadmap 3.5) debounces bursts, e.g. IDLE events
+ * for every flag change: the job runs no earlier than that many seconds
+ * after the start of the folder's last finished message_sync.
  */
 export async function enqueueMessageSync(
   pool: Pool,
   accountId: string,
   folderId: string,
+  minIntervalSeconds = 0,
 ): Promise<boolean> {
   const { rowCount } = await pool.query(
-    `INSERT INTO job (type, account_id, payload)
-     SELECT 'message_sync', $1::uuid, jsonb_build_object('folderId', $2::text)
+    `INSERT INTO job (type, account_id, payload, run_at)
+     SELECT 'message_sync', $1::uuid, jsonb_build_object('folderId', $2::text),
+       GREATEST(now(), COALESCE((
+         SELECT max(locked_at) FROM job
+         WHERE type = 'message_sync' AND account_id = $1::uuid
+           AND payload->>'folderId' = $2::text AND state = 'done'
+       ) + make_interval(secs => $3::double precision), now()))
      WHERE NOT EXISTS (
        SELECT 1 FROM job
        WHERE type = 'message_sync' AND account_id = $1::uuid
          AND payload->>'folderId' = $2::text
          AND state IN ('queued', 'running')
      )`,
-    [accountId, folderId],
+    [accountId, folderId, minIntervalSeconds],
   )
   return (rowCount ?? 0) > 0
 }
