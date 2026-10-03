@@ -17,7 +17,7 @@ import type { Pool, PoolClient } from '@fma/db'
 import { detectFolderRoles, resolveFolderRoles } from '@fma/shared'
 import { loadAccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
-import { mailTestMode } from '../ports'
+import { assertMailHost, mailTestMode } from '../ports'
 
 interface ListedMailbox {
   path: string
@@ -45,6 +45,7 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
 
   const unregister = closeOnJobAbort(() => client.close())
   try {
+    await assertMailHost(credentials.host)
     await client.connect()
     const mailboxes = (await client.list()) as unknown as ListedMailbox[]
     const detected = detectFolderRoles(

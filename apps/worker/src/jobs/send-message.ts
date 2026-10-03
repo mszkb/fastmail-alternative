@@ -36,11 +36,10 @@ import type { Pool } from '@fma/db'
 import { decryptField, outboxContentAad } from '@fma/crypto'
 import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 import type { OutboxContent, OutboxErrorCode, OutboxStatus, SentCopyStatus } from '@fma/shared'
-import { assertPublicHost } from '@fma/shared/ssrf'
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { mailTestMode } from '../ports'
+import { assertMailHost, mailTestMode } from '../ports'
 import { enqueueMessageSync } from '../scheduler'
 
 const CONNECT_TIMEOUT_MS = 15_000
@@ -149,7 +148,7 @@ async function sendViaSmtp(
   raw: Buffer,
   envelope: { from: string; to: string[] },
 ): Promise<void> {
-  if (!mailTestMode()) await assertPublicHost(ctx.smtp.host)
+  await assertMailHost(ctx.smtp.host)
   const transporter = nodemailer.createTransport({
     host: ctx.smtp.host,
     port: ctx.smtp.port,
@@ -171,7 +170,7 @@ async function sendViaSmtp(
 }
 
 async function appendToSent(ctx: AccountContext, path: string, raw: Buffer, date: Date) {
-  if (!mailTestMode()) await assertPublicHost(ctx.imap.host)
+  await assertMailHost(ctx.imap.host)
   const client = new ImapFlow({
     host: ctx.imap.host,
     port: ctx.imap.port,

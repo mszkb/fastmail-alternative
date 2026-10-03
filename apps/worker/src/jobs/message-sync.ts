@@ -51,7 +51,7 @@ import {
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { mailTestMode } from '../ports'
+import { assertMailHost, mailTestMode } from '../ports'
 import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
 
@@ -301,6 +301,7 @@ export async function runMessageSync(
   // New unseen INBOX messages of an incremental run (push hint, roadmap 4.3).
   let newUnseen = 0
   try {
+    await assertMailHost(ctx.imap.host)
     await client.connect()
     lock = await client.getMailboxLock(folder.path)
     const selected = (

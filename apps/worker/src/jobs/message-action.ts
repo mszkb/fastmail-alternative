@@ -28,7 +28,7 @@ import type { MessageActionJobPayload, MessageActionOperation } from '@fma/share
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { mailTestMode } from '../ports'
+import { assertMailHost, mailTestMode } from '../ports'
 import { enqueueMessageSync } from '../scheduler'
 import { removeOrphanMessages } from './message-sync'
 
@@ -172,6 +172,7 @@ export async function runMessageAction(
   let lock: MailboxLockObject | null = null
   let outcome: MessageActionOutcome = 'done'
   try {
+    await assertMailHost(ctx.imap.host)
     await client.connect()
     lock = await client.getMailboxLock(sourcePath)
     const selected = (

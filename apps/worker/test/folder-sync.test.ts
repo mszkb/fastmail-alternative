@@ -72,6 +72,21 @@ describe.skipIf(!databaseUrl || !greenmailHost)('folder_sync job', () => {
     await pool.end()
   })
 
+  it('refuses to connect to private hosts outside test mode (SSRF guard)', async () => {
+    const allow = process.env.MAIL_ALLOW_PRIVATE_HOSTS
+    delete process.env.MAIL_ALLOW_PRIVATE_HOSTS
+    try {
+      // GreenMail runs on a loopback/private address.
+      await expect(runFolderSync(pool, accountId)).rejects.toMatchObject({
+        code: 'PRIVATE_HOST_BLOCKED',
+      })
+    } finally {
+      if (allow !== undefined) process.env.MAIL_ALLOW_PRIVATE_HOSTS = allow
+    }
+    const { rows } = await pool.query('SELECT 1 FROM folder WHERE account_id = $1', [accountId])
+    expect(rows).toHaveLength(0)
+  })
+
   it('syncs folders from the IMAP server', async () => {
     await runFolderSync(pool, accountId)
 

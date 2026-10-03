@@ -104,13 +104,12 @@ function isPublicIpv6(address: string): boolean {
   if (normalized.startsWith('64:ff9b:')) return false // NAT64 (embeds IPv4)
   if (normalized.startsWith('2001:db8:')) return false // documentation
   if (normalized.startsWith('2002:')) {
-    // 6to4: the first 32 bits after the prefix embed an IPv4 address -
-    // validate that prefix against the IPv4 rules.
-    const firstGroup = normalized.slice('2002:'.length).split(':')[0] ?? ''
-    if (firstGroup.length !== 8) return true // rare/malformed, treat as public
-    const a = Number.parseInt(firstGroup.slice(0, 2), 16)
-    const b = Number.parseInt(firstGroup.slice(2, 4), 16)
-    return isPublicIpv4(`${a}.${b}.1.1`)
+    // 6to4 (2002:AABB:CCDD::/48): groups 2 and 3 embed the IPv4 address
+    // AA.BB.CC.DD - validate it against the IPv4 rules.
+    const groups = expandIpv6(normalized)
+    if (!groups) return false
+    const [, high = 0, low = 0] = groups
+    return isPublicIpv4(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`)
   }
   if (
     normalized.startsWith('fec') ||
@@ -122,4 +121,24 @@ function isPublicIpv6(address: string): boolean {
   }
   if (normalized.startsWith('100:')) return false // discard-only 100::/64
   return true
+}
+
+/** The eight 16-bit groups of an IPv6 address (`::` and a trailing IPv4 expanded). */
+function expandIpv6(address: string): number[] | null {
+  let text = address
+  const ipv4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(text)?.[1]
+  if (ipv4) {
+    const [a = 0, b = 0, c = 0, d = 0] = ipv4.split('.').map(Number)
+    text =
+      text.slice(0, -ipv4.length) + `${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`
+  }
+  const [head = '', tail, ...rest] = text.split('::')
+  if (rest.length > 0) return null
+  const parse = (part: string) => (part ? part.split(':').map((g) => Number.parseInt(g, 16)) : [])
+  const headGroups = parse(head)
+  const tailGroups = tail === undefined ? [] : parse(tail)
+  const missing = 8 - headGroups.length - tailGroups.length
+  if (tail === undefined ? missing !== 0 : missing < 1) return null
+  const groups = [...headGroups, ...Array<number>(Math.max(missing, 0)).fill(0), ...tailGroups]
+  return groups.some((g) => Number.isNaN(g) || g < 0 || g > 0xffff) ? null : groups
 }
