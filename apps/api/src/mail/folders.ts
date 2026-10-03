@@ -10,6 +10,11 @@
  *   right away with the same resolver the worker uses (@fma/shared), so
  *   actions (archive, trash, sent copy) use the new folder immediately.
  * - Ownership via mail_account.user_id; foreign/unknown ids answer 404.
+ *
+ * Loading older messages (roadmap 2.2): `POST /api/folders/:id/load-older`
+ * enqueues a message_sync with `loadOlder` (the worker fetches the next
+ * batch below the lowest synced UID). At most one such job per folder is
+ * queued or running; a repeated request answers `queued: false`.
  */
 import type { FastifyInstance } from 'fastify'
 import type { Pool, PoolClient } from '@fma/db'
@@ -123,6 +128,50 @@ export async function folderRoutes(app: FastifyInstance): Promise<void> {
         client.release()
       }
       await reply.code(204).send()
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/folders/:id/load-older',
+    { onRequest: requireAuth },
+    async (request, reply) => {
+      const folderId = request.params.id
+      if (!UUID_RE.test(folderId)) {
+        await reply.code(404).send({ message: 'Ordner nicht gefunden.' })
+        return
+      }
+      const { rows } = await pool.query<{ selectable: boolean; queued: boolean }>(
+        `WITH f AS (
+           SELECT f.id, f.account_id, f.selectable FROM folder f
+           JOIN mail_account a ON a.id = f.account_id
+           WHERE f.id = $1 AND a.user_id = $2
+         ), ins AS (
+           INSERT INTO job (type, account_id, payload)
+           SELECT 'message_sync', f.account_id,
+             jsonb_build_object('folderId', f.id::text, 'loadOlder', true)
+           FROM f
+           WHERE f.selectable AND NOT EXISTS (
+             SELECT 1 FROM job j
+             WHERE j.type = 'message_sync' AND j.account_id = f.account_id
+               AND j.payload->>'folderId' = f.id::text
+               AND (j.payload->>'loadOlder')::boolean IS TRUE
+               AND j.state IN ('queued', 'running')
+           )
+           RETURNING id
+         )
+         SELECT f.selectable, EXISTS (SELECT 1 FROM ins) AS queued FROM f`,
+        [folderId, request.auth!.userId],
+      )
+      const row = rows[0]
+      if (!row) {
+        await reply.code(404).send({ message: 'Ordner nicht gefunden.' })
+        return
+      }
+      if (!row.selectable) {
+        await reply.code(400).send({ message: 'Dieser Ordner kann keine Nachrichten enthalten.' })
+        return
+      }
+      await reply.code(202).send({ queued: row.queued })
     },
   )
 }

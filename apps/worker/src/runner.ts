@@ -105,10 +105,11 @@ async function processJob(
       if (!accountId) throw new Error('message_sync job without account_id')
       const folderId = typeof job.payload.folderId === 'string' ? job.payload.folderId : null
       if (!folderId) throw new Error('message_sync job without folder_id')
-      await runMessageSync(pool, accountId, folderId)
+      const loadOlder = job.payload.loadOlder === true
+      await runMessageSync(pool, accountId, folderId, undefined, { loadOlder })
       health.synced = true
       await completeJob(pool, jobId)
-      log.info({ jobId, accountId, folderId }, 'message_sync done')
+      log.info({ jobId, accountId, folderId, loadOlder }, 'message_sync done')
       break
     }
     case 'message_action': {

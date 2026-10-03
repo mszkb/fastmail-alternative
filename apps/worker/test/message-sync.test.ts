@@ -801,4 +801,76 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
     )
     expect(still.rowCount).toBe(1)
   })
+
+  it('loads older messages on request without duplicates; later syncs keep them', async () => {
+    // Own folder with 7 messages; the sync window is set to 3.
+    const folderPath = `Older-${Date.now()}`
+    const probe = new ImapFlow({
+      host: greenmailHost!,
+      port: Number(process.env.GREENMAIL_IMAP_PORT),
+      secure: false,
+      auth: { user: greenmailUser, pass: greenmailPassword },
+      logger: false,
+      tls: { rejectUnauthorized: false },
+      doSTARTTLS: false,
+    })
+    await probe.connect()
+    try {
+      await probe.mailboxCreate(folderPath)
+      for (let i = 1; i <= 7; i += 1) {
+        await probe.append(
+          folderPath,
+          `From: a@example.com\r\nTo: b@example.com\r\nSubject: Older ${i}\r\n` +
+            `Message-ID: <older-${i}-${folderPath}@example.com>\r\n\r\nBody ${i}\r\n`,
+        )
+      }
+    } finally {
+      await probe.logout().catch(() => probe.close())
+    }
+    await runFolderSync(pool, accountId)
+    const { rows: folderRows } = await pool.query<{ id: string }>(
+      'SELECT id FROM folder WHERE account_id = $1 AND path = $2',
+      [accountId, folderPath],
+    )
+    const folderId = folderRows[0]!.id
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const subjects = async (): Promise<string[]> => {
+      const { rows } = await pool.query<{ id: string; subject_enc: Buffer }>(
+        `SELECT m.id, m.subject_enc FROM message m
+         JOIN message_location ml ON ml.message_id = m.id WHERE ml.folder_id = $1`,
+        [folderId],
+      )
+      return rows
+        .map((row) =>
+          decryptField(ctx.dek, row.subject_enc.toString('utf8'), `message.subject:${row.id}`),
+        )
+        .sort()
+    }
+
+    await runMessageSync(pool, accountId, folderId, undefined, { limit: 3 })
+    expect(await subjects()).toEqual(['Older 5', 'Older 6', 'Older 7'])
+
+    await runMessageSync(pool, accountId, folderId, undefined, { limit: 3, loadOlder: true })
+    expect(await subjects()).toEqual([2, 3, 4, 5, 6, 7].map((i) => `Older ${i}`))
+    // Raw mails of the loaded older messages are stored encrypted as well.
+    const { rows: bodies } = await pool.query(
+      `SELECT count(*)::int AS n FROM message_body mb
+       JOIN message_location ml ON ml.message_id = mb.message_id
+       WHERE ml.folder_id = $1 AND mb.storage_ref IS NOT NULL`,
+      [folderId],
+    )
+    expect(bodies[0].n).toBe(6)
+
+    // A regular sync neither removes them nor duplicates anything.
+    await runMessageSync(pool, accountId, folderId, undefined, { limit: 3 })
+    await runMessageSync(pool, accountId, folderId, undefined, { limit: 3, loadOlder: true })
+    expect(await subjects()).toEqual([1, 2, 3, 4, 5, 6, 7].map((i) => `Older ${i}`))
+    await runMessageSync(pool, accountId, folderId, undefined, { limit: 3 })
+    expect(await subjects()).toHaveLength(7)
+    const { rows: dupes } = await pool.query(
+      `SELECT count(*)::int AS n FROM message WHERE account_id = $1 AND message_id_header LIKE $2`,
+      [accountId, `<older-%-${folderPath}@example.com>`],
+    )
+    expect(dupes[0].n).toBe(7)
+  })
 })
