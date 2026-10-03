@@ -3,7 +3,8 @@
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. This loop only processes
- * short-lived jobs (folder sync, message sync, later: send, push, cleanup).
+ * short-lived jobs (folder sync, message sync, message actions, later: send,
+ * push, cleanup).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.
  *
@@ -15,6 +16,7 @@ import { claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
 import { createPool, type Pool } from '@fma/db'
 import { runFolderSync } from './jobs/folder-sync'
+import { runMessageAction } from './jobs/message-action'
 import { runMessageSync } from './jobs/message-sync'
 import { log } from './log'
 import {
@@ -28,7 +30,13 @@ const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
 const SCHEDULER_TICK_MS = 15_000
 /** Job types this worker instance processes. */
-const JOB_TYPES = ['folder_sync', 'message_sync']
+const JOB_TYPES = ['folder_sync', 'message_sync', 'message_action']
+/**
+ * Claimed before all other types: user actions are small and interactive,
+ * and writing them back before the next sync keeps the sync from briefly
+ * reverting optimistic changes (see jobs/message-action).
+ */
+const PRIORITY_JOB_TYPES = ['message_action']
 
 let shuttingDown = false
 
@@ -68,6 +76,13 @@ async function processJob(
       await runMessageSync(pool, accountId, folderId)
       await completeJob(pool, jobId)
       log.info({ jobId, accountId, folderId }, 'message_sync done')
+      break
+    }
+    case 'message_action': {
+      if (!accountId) throw new Error('message_action job without account_id')
+      const outcome = await runMessageAction(pool, accountId, job.payload)
+      await completeJob(pool, jobId)
+      log.info({ jobId, accountId, outcome }, 'message_action done')
       break
     }
     default:
@@ -115,7 +130,7 @@ async function main(): Promise<void> {
 
     let job: Awaited<ReturnType<typeof claimNextJob>> = null
     try {
-      job = await claimNextJob(pool, JOB_TYPES)
+      job = (await claimNextJob(pool, PRIORITY_JOB_TYPES)) ?? (await claimNextJob(pool, JOB_TYPES))
     } catch (err) {
       log.error({ err: (err as Error).message }, 'claim failed')
     }

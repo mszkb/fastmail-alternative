@@ -14,6 +14,7 @@ import { migration0001 } from './migrations/0001_users_devices_sessions'
 import { migration0002 } from './migrations/0002_mail_accounts'
 import { migration0003 } from './migrations/0003_jobs_folders'
 import { migration0004 } from './migrations/0004_messages'
+import { migration0005 } from './migrations/0005_message_actions'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -26,7 +27,13 @@ export interface Migration {
 const MIGRATION_LOCK_ID = 0x2f6d61n // "fma"
 
 /** Ordered list of all migrations. Append new ones at the end. */
-export const migrations: Migration[] = [migration0001, migration0002, migration0003, migration0004]
+export const migrations: Migration[] = [
+  migration0001,
+  migration0002,
+  migration0003,
+  migration0004,
+  migration0005,
+]
 
 /**
  * Runs all pending migrations. Returns the names of newly applied

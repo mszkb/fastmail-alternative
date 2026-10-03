@@ -1,12 +1,17 @@
 <script setup lang="ts">
 // Inbox and folder view (roadmap 2.3): account picker, folder tree with
 // unread counts, paginated message list and a plain-text detail pane.
-// Read-only: opening a message does not mark it as read (2.4); bodies are
-// shown as text, never as HTML (sanitized HTML rendering follows in 2.9).
+// Basic actions (2.4): opening a message marks it as read; read/unread,
+// flag, archive, delete and move are applied optimistically to the list and
+// counts and rolled back if the API refuses them (the server writes them
+// back to IMAP in the background). Bodies are shown as text, never as HTML
+// (sanitized HTML rendering follows in 2.9).
 import type {
   FolderListResponse,
   FolderSummary,
   MailPerson,
+  MessageAction,
+  MessageActionRequest,
   MessageDetail,
   MessageListItem,
   MessageListResponse,
@@ -50,6 +55,9 @@ let detailRequest = 0
 let observer: IntersectionObserver | null = null
 
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
+const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
+const inTrash = computed(() => currentFolder.value?.specialUse === 'trash')
+const moveTargets = computed(() => folders.value.filter((f) => f.id !== folderId.value))
 
 function folderLabel(folder: FolderSummary): string {
   return (folder.specialUse && SPECIAL_USE_LABELS[folder.specialUse]) || folder.name
@@ -168,7 +176,10 @@ async function openMessage(id: string): Promise<void> {
   detail.value = null
   try {
     const res = await getJson<MessageDetail>(`/api/messages/${id}`)
-    if (request === detailRequest) detail.value = res
+    if (request !== detailRequest) return
+    detail.value = res
+    // Opening marks as read (written back to the server by the worker).
+    if (!res.flags.seen) void runAction('read', [id])
   } catch (err) {
     if (request === detailRequest) {
       error.value = err instanceof Error ? err.message : 'Nachricht konnte nicht geladen werden.'
@@ -176,6 +187,143 @@ async function openMessage(id: string): Promise<void> {
   } finally {
     if (request === detailRequest) detailLoading.value = false
   }
+}
+
+/** Optimistic local effect of an action on list, detail and folder counts. */
+function applyLocally(action: MessageAction, ids: string[], targetFolderId?: string): void {
+  const idSet = new Set(ids)
+  const affected = messages.value.filter((m) => idSet.has(m.id))
+  const source = currentFolder.value
+  const target = folders.value.find((f) => f.id === targetFolderId) ?? null
+
+  if (action === 'read' || action === 'unread') {
+    const seen = action === 'read'
+    for (const message of affected) {
+      if (message.flags.seen === seen) continue
+      message.flags.seen = seen
+      if (source) source.unreadCount = Math.max(0, source.unreadCount + (seen ? -1 : 1))
+    }
+    if (detail.value && idSet.has(detail.value.id)) detail.value.flags.seen = seen
+    return
+  }
+  if (action === 'flag' || action === 'unflag') {
+    for (const message of affected) message.flags.flagged = action === 'flag'
+    if (detail.value && idSet.has(detail.value.id)) detail.value.flags.flagged = action === 'flag'
+    return
+  }
+
+  // archive / delete / move: the messages leave the current folder.
+  const unread = affected.filter((m) => !m.flags.seen).length
+  if (source) {
+    source.total = Math.max(0, source.total - affected.length)
+    source.unreadCount = Math.max(0, source.unreadCount - unread)
+  }
+  if (target) {
+    target.total += affected.length
+    target.unreadCount += unread
+  }
+  messages.value = messages.value.filter((m) => !idSet.has(m.id))
+  if (idSet.has(selectedId.value)) closeDetail()
+}
+
+/** Target folder of a move-like action as the API resolves it (for counts). */
+function actionTarget(action: MessageAction, targetFolderId?: string): string | undefined {
+  if (action === 'move') return targetFolderId
+  if (action === 'archive') return archiveFolder.value?.id
+  if (action === 'delete' && !inTrash.value) {
+    return folders.value.find((f) => f.specialUse === 'trash')?.id
+  }
+  return undefined
+}
+
+async function runAction(
+  action: MessageAction,
+  ids: string[],
+  targetFolderId?: string,
+): Promise<void> {
+  if (!folderId.value || ids.length === 0) return
+  if (action === 'delete' && inTrash.value) {
+    const ok = window.confirm(
+      ids.length === 1
+        ? 'Nachricht endgültig löschen?'
+        : `${ids.length} Nachrichten endgültig löschen?`,
+    )
+    if (!ok) return
+  }
+
+  // Snapshot for rollback (plain copies, the list is small).
+  const snapshot = {
+    folderId: folderId.value,
+    messages: messages.value.map((m) => ({ ...m, flags: { ...m.flags } })),
+    folders: folders.value.map((f) => ({ ...f })),
+    detailId: detail.value?.id ?? '',
+    detailFlags: detail.value ? { ...detail.value.flags } : null,
+  }
+  error.value = ''
+  applyLocally(action, ids, actionTarget(action, targetFolderId))
+
+  const body: MessageActionRequest = { folderId: snapshot.folderId, messageIds: ids, action }
+  if (targetFolderId) body.targetFolderId = targetFolderId
+  try {
+    const res = await fetch('/api/messages/actions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as { message?: string } | null
+      throw new Error(payload?.message ?? `Fehler ${res.status}`)
+    }
+  } catch (err) {
+    // Roll back only if the user is still looking at the same folder.
+    if (folderId.value === snapshot.folderId) {
+      messages.value = snapshot.messages
+      folders.value = snapshot.folders
+      if (detail.value?.id === snapshot.detailId && snapshot.detailFlags) {
+        detail.value.flags = snapshot.detailFlags
+      }
+    }
+    error.value =
+      err instanceof Error && err.message
+        ? err.message
+        : 'Die Aktion konnte nicht ausgeführt werden.'
+  }
+}
+
+function onMoveSelect(event: Event): void {
+  const select = event.target as HTMLSelectElement
+  const target = select.value
+  select.value = ''
+  if (target && detail.value) void runAction('move', [detail.value.id], target)
+}
+
+// Keyboard shortcuts for the open message (ignored while typing).
+function onKeydown(event: KeyboardEvent): void {
+  if (!detail.value || event.ctrlKey || event.metaKey || event.altKey) return
+  const element = event.target as HTMLElement | null
+  if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return
+  if (element?.isContentEditable) return
+  const id = detail.value.id
+  switch (event.key) {
+    case 'u':
+      void runAction(detail.value.flags.seen ? 'unread' : 'read', [id])
+      break
+    case 's':
+      void runAction(detail.value.flags.flagged ? 'unflag' : 'flag', [id])
+      break
+    case 'e':
+      if (archiveFolder.value && currentFolder.value?.specialUse !== 'archive') {
+        void runAction('archive', [id])
+      }
+      break
+    case '#':
+    case 'Delete':
+      void runAction('delete', [id])
+      break
+    default:
+      return
+  }
+  event.preventDefault()
 }
 
 function closeDetail(): void {
@@ -214,7 +362,11 @@ watch(sentinel, (element) => {
   observer.observe(element)
 })
 
-onBeforeUnmount(() => observer?.disconnect())
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -305,6 +457,51 @@ onBeforeUnmount(() => observer?.disconnect())
       <button type="button" class="secondary back" @click="closeDetail">&larr; Zurück</button>
       <p v-if="detailLoading" class="hint">Wird geladen &hellip;</p>
       <article v-else-if="detail">
+        <div class="toolbar" role="toolbar" aria-label="Aktionen">
+          <button
+            type="button"
+            class="secondary"
+            title="Tastenkürzel: u"
+            @click="runAction(detail.flags.seen ? 'unread' : 'read', [detail.id])"
+          >
+            {{ detail.flags.seen ? 'Als ungelesen markieren' : 'Als gelesen markieren' }}
+          </button>
+          <button
+            type="button"
+            class="secondary"
+            :class="{ 'is-flagged': detail.flags.flagged }"
+            title="Tastenkürzel: s"
+            @click="runAction(detail.flags.flagged ? 'unflag' : 'flag', [detail.id])"
+          >
+            {{ detail.flags.flagged ? 'Markierung entfernen' : 'Markieren' }}
+          </button>
+          <button
+            v-if="archiveFolder && currentFolder?.specialUse !== 'archive'"
+            type="button"
+            class="secondary"
+            title="Tastenkürzel: e"
+            @click="runAction('archive', [detail.id])"
+          >
+            Archivieren
+          </button>
+          <button
+            type="button"
+            class="secondary danger"
+            title="Tastenkürzel: Entf / #"
+            @click="runAction('delete', [detail.id])"
+          >
+            {{ inTrash ? 'Endgültig löschen' : 'Löschen' }}
+          </button>
+          <label class="move">
+            <span class="visually-hidden">Verschieben nach</span>
+            <select @change="onMoveSelect">
+              <option value="">Verschieben nach &hellip;</option>
+              <option v-for="folder in moveTargets" :key="folder.id" :value="folder.id">
+                {{ '  '.repeat(folder.depth) }}{{ folderLabel(folder) }}
+              </option>
+            </select>
+          </label>
+        </div>
         <h2 class="detail-subject">{{ detail.subject || '(kein Betreff)' }}</h2>
         <dl class="headers">
           <dt>Von</dt>
@@ -528,6 +725,35 @@ button.secondary {
 .back {
   display: none;
   margin-bottom: 0.75rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar button.secondary {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.toolbar button.is-flagged {
+  border-color: #cf1124;
+  color: #cf1124;
+}
+
+.toolbar button.danger {
+  border-color: #9b1c1c;
+  color: #9b1c1c;
+}
+
+.toolbar .move select {
+  width: auto;
+  padding: 0.3rem;
+  font-size: 0.85rem;
 }
 
 .detail-subject {

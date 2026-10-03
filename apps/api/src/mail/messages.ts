@@ -8,8 +8,9 @@
  *   per request with the master key). Decrypted values are never logged.
  * - Lists use keyset pagination over (sort date, location id) - stable
  *   while new mail arrives, no OFFSET.
- * - Read-only: opening a message does NOT set \Seen (that is 2.4), and only
- *   the plain-text body is returned (HTML rendering follows in 2.9).
+ * - Read-only: opening a message does NOT set \Seen by itself (the client
+ *   marks it read via ./message-actions), and only the plain-text body is
+ *   returned (HTML rendering follows in 2.9).
  */
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify'
 import { decryptField, messageFieldAad, unwrapAccountKey, type MessageField } from '@fma/crypto'

@@ -30,7 +30,10 @@ export interface EnqueueOptions {
   runAt?: Date
 }
 
-export async function enqueueJob(pool: pg.Pool, options: EnqueueOptions): Promise<string> {
+export async function enqueueJob(
+  pool: pg.Pool | pg.PoolClient,
+  options: EnqueueOptions,
+): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO job (type, account_id, payload, run_at)
      VALUES ($1, $2, $3, COALESCE($4, now())) RETURNING id`,

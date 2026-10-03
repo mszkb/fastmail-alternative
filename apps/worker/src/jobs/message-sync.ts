@@ -13,6 +13,10 @@
  * locations whose UID vanished on the server (expunged/moved). A message
  * without any remaining location is deleted together with its encrypted
  * body file.
+ *
+ * Optimistic message actions (roadmap 2.4, ./message-action): placeholder
+ * locations of moved messages (uid < 0) are replaced once the moved
+ * message is fetched here, and dropped when no write-back is pending.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
@@ -163,19 +167,23 @@ export async function runMessageSync(
     await reconcileKnownMessages(pool, accountId, folderId, serverUidvalidity, serverFlags)
 
     // Incremental: UIDs above the highest synced one of THIS uidvalidity;
-    // initial sync: the newest MESSAGE_SYNC_LIMIT messages.
-    const { rows: maxRows } = await pool.query<{ max_uid: string | null }>(
-      `SELECT max(uid)::text AS max_uid FROM message_location
+    // initial sync: the newest MESSAGE_SYNC_LIMIT messages. Unknown UIDs
+    // inside the newest window are fetched as well: this self-heals local
+    // optimistic changes the server never applied (e.g. a message_action
+    // write-back that failed for good restores the message here).
+    const { rows: knownRows } = await pool.query<{ uid: string }>(
+      `SELECT uid::text AS uid FROM message_location
        WHERE folder_id = $1 AND uidvalidity = $2`,
       [folderId, serverUidvalidity.toString()],
     )
-    const highestSynced = maxRows[0]?.max_uid ? Number(maxRows[0].max_uid) : 0
-    let targetUids: number[]
-    if (highestSynced > 0) {
-      targetUids = allUids.filter((uid) => uid > highestSynced)
-    } else {
-      targetUids = allUids.slice(-MESSAGE_SYNC_LIMIT)
-    }
+    const knownUids = new Set(knownRows.map((row) => Number(row.uid)))
+    let highestSynced = 0
+    for (const uid of knownUids) if (uid > highestSynced) highestSynced = uid
+    const windowStart = allUids.length - MESSAGE_SYNC_LIMIT
+    const targetUids = allUids.filter(
+      (uid, index) =>
+        !knownUids.has(uid) && (index >= windowStart || (highestSynced > 0 && uid > highestSynced)),
+    )
 
     if (targetUids.length > 0) {
       const hmacKey = deriveHmacKey(ctx.dek, 'thread')
@@ -302,6 +310,13 @@ export async function runMessageSync(
             message.modseq != null ? BigInt(message.modseq) : null,
           ],
         )
+        // The message arrived here through an optimistic move (message
+        // actions): its placeholder location is replaced by the real one.
+        await pool.query(
+          `DELETE FROM message_location
+           WHERE folder_id = $1 AND message_id = $2 AND uid < 0`,
+          [folderId, dbMessageId],
+        )
 
         // Raw body + plaintext: for new messages and for messages whose body
         // fetch was interrupted earlier.
@@ -334,6 +349,8 @@ export async function runMessageSync(
       }
     }
 
+    await dropStalePlaceholders(pool, accountId, folderId)
+
     // Update folder sync state.
     await pool.query(
       `UPDATE folder SET uidvalidity = $2, uidnext = $3, last_synced_at = now(),
@@ -348,6 +365,40 @@ export async function runMessageSync(
     lock?.release()
     client.close()
   }
+}
+
+/**
+ * Removes placeholder locations (optimistic moves, uid < 0) of a folder that
+ * no pending message_action job will resolve anymore: the move either
+ * failed for good or the moved message was not found in this sync. Messages
+ * left without any location are removed; the source folder's sync restores
+ * them if they are still on the server.
+ */
+async function dropStalePlaceholders(
+  pool: Pool,
+  accountId: string,
+  folderId: string,
+): Promise<void> {
+  const { rows } = await pool.query<{ message_id: string }>(
+    `DELETE FROM message_location
+     WHERE folder_id = $1 AND uid < 0
+       AND NOT EXISTS (
+         SELECT 1 FROM job
+         WHERE type = 'message_action' AND account_id = $2 AND state IN ('queued', 'running')
+       )
+     RETURNING message_id::text`,
+    [folderId, accountId],
+  )
+  if (rows.length === 0) return
+  const messagesRemoved = await removeOrphanMessages(
+    pool,
+    accountId,
+    rows.map((row) => row.message_id),
+  )
+  log.info(
+    { accountId, folderId, placeholdersRemoved: rows.length, messagesRemoved },
+    'stale move placeholders removed',
+  )
 }
 
 function sameFlags(a: string[], b: string[]): boolean {
@@ -395,10 +446,26 @@ async function reconcileKnownMessages(
     [vanished],
   )
   const candidates = [...new Set(removed.map((row) => row.message_id))]
+  const messagesRemoved = await removeOrphanMessages(pool, accountId, candidates)
+  log.info(
+    { accountId, folderId, locationsRemoved: removed.length, messagesRemoved },
+    'expunged messages reconciled',
+  )
+}
 
-  // Orphans: messages of this account without any remaining location (a
-  // message may still live in another folder). message_body rows cascade;
-  // storage refs are read first so the files can be removed afterwards.
+/**
+ * Deletes the given messages of an account if they no longer have any
+ * location (a message may still live in another folder), including their
+ * encrypted raw file in the mail-data volume. Returns the number removed.
+ */
+export async function removeOrphanMessages(
+  pool: Pool,
+  accountId: string,
+  candidates: string[],
+): Promise<number> {
+  if (candidates.length === 0) return 0
+  // message_body rows cascade; storage refs are read first so the files can
+  // be removed afterwards.
   const { rows: orphans } = await pool.query<{ id: string; storage_ref: string | null }>(
     `WITH orphan AS (
        SELECT m.id FROM message m
@@ -423,10 +490,7 @@ async function reconcileKnownMessages(
     if (!dir.startsWith(root + path.sep)) continue // never leave the volume
     await rm(dir, { recursive: true, force: true })
   }
-  log.info(
-    { accountId, folderId, locationsRemoved: removed.length, messagesRemoved: orphans.length },
-    'expunged messages reconciled',
-  )
+  return orphans.length
 }
 
 /**
