@@ -21,5 +21,10 @@ RUN apk add --no-cache postgresql17-client
 COPY --from=build /repo/LICENSE ./LICENSE
 COPY --from=build /repo/apps/worker/dist ./dist
 
+# Owned by the runtime user: when Docker initializes the mail-data volume
+# from this directory, the worker (USER node) must be able to create
+# account/message directories in it.
+RUN mkdir -p /app/mail-data && chown node:node /app/mail-data
+
 USER node
 CMD ["node", "dist/main.js"]
