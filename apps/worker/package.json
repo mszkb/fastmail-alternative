@@ -14,5 +14,9 @@
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@fma/shared": "workspace:*",
+    "pino": "^10.3.1"
   }
 }

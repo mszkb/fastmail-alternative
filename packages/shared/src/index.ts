@@ -5,11 +5,16 @@
  * `@fma` scope once the project has a final product name.
  */
 
+export * from './redact'
+
 export type ServiceName = 'api' | 'worker' | 'web'
 
-/** Response shape of the `GET /health` endpoint. */
+/** Response shape of the `GET /api/health` endpoint. */
 export interface HealthStatus {
-  status: 'ok'
+  status: 'ok' | 'degraded'
   service: ServiceName
   version: string
+  checks?: {
+    database: 'ok' | 'down'
+  }
 }
