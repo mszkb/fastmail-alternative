@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// Account list in the settings (roadmap 2.1/3.1): edit, signature, remove.
 interface Account {
   id: string
   displayName: string
@@ -6,21 +7,33 @@ interface Account {
   imap: { host: string; port: number }
   smtp: { host: string; port: number }
   status: string
+  sortOrder?: number
 }
 
 defineProps<{ accounts: Account[] }>()
-const emit = defineEmits<{ deleted: [id: string] }>()
+const emit = defineEmits<{ deleted: [id: string]; changed: [id: string] }>()
 
 const busy = ref(false)
 const error = ref('')
 // Account whose signature editor is open.
 const editing = ref('')
+// Account whose edit form is open (also opened from the mail view, e.g.
+// "Zugangsdaten aktualisieren").
+const editingAccount = defineModel<string>('edit', { default: '' })
+
+function onSaved(id: string): void {
+  editingAccount.value = ''
+  emit('changed', id)
+}
 
 async function remove(account: Account): Promise<void> {
   if (busy.value) return
   if (
     !confirm(
-      `Konto „${account.displayName}“ wirklich entfernen? Gespeicherte Zugangsdaten werden gelöscht.`,
+      `Konto „${account.displayName}“ wirklich entfernen?\n\n` +
+        'Zugangsdaten, Ordner, zwischengespeicherte Nachrichten und der Postausgang dieses ' +
+        'Kontos werden auf diesem Server gelöscht. Die Nachrichten beim Mailanbieter bleiben ' +
+        'unverändert.',
     )
   )
     return
@@ -57,6 +70,14 @@ async function remove(account: Account): Promise<void> {
           <button
             type="button"
             class="neutral"
+            :aria-expanded="editingAccount === account.id"
+            @click="editingAccount = editingAccount === account.id ? '' : account.id"
+          >
+            Bearbeiten
+          </button>
+          <button
+            type="button"
+            class="neutral"
             :aria-expanded="editing === account.id"
             @click="editing = editing === account.id ? '' : account.id"
           >
@@ -64,6 +85,12 @@ async function remove(account: Account): Promise<void> {
           </button>
           <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
         </span>
+        <AccountForm
+          v-if="editingAccount === account.id"
+          :account="account"
+          @saved="onSaved(account.id)"
+          @cancel="editingAccount = ''"
+        />
         <IdentitySignatures v-if="editing === account.id" :account-id="account.id" />
       </li>
     </ul>

@@ -14,6 +14,7 @@ interface Account {
   imap: { host: string; port: number }
   smtp: { host: string; port: number }
   status: string
+  sortOrder?: number
 }
 
 interface DeviceInfo {
@@ -35,6 +36,8 @@ const info = ref('')
 const currentEmail = ref('')
 const devices = ref<DeviceInfo[]>([])
 const accounts = ref<Account[]>([])
+// Account whose edit form is open in the settings.
+const editAccountId = ref('')
 
 async function loadAccounts(): Promise<void> {
   try {
@@ -234,7 +237,12 @@ onMounted(loadStatus)
           <button type="button" :disabled="busy" @click="logout">Abmelden</button>
         </div>
 
-        <AccountList :accounts="accounts" @deleted="loadAccounts" />
+        <AccountList
+          v-model:edit="editAccountId"
+          :accounts="accounts"
+          @deleted="loadAccounts"
+          @changed="loadAccounts"
+        />
         <AccountForm @created="loadAccounts" />
 
         <div class="card">

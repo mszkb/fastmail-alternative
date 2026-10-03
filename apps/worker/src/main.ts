@@ -3,8 +3,8 @@
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. This loop only processes
- * short-lived jobs (folder sync, message sync, message actions, SMTP send;
- * later: push, cleanup).
+ * short-lived jobs (folder sync, message sync, message actions, SMTP send,
+ * account cleanup; later: push).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.
  *
@@ -15,6 +15,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { MAX_JOB_ATTEMPTS, claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
 import { createPool, type Pool } from '@fma/db'
+import { runAccountCleanup } from './jobs/account-cleanup'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
 import { runMessageSync } from './jobs/message-sync'
@@ -31,7 +32,13 @@ const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
 const SCHEDULER_TICK_MS = 15_000
 /** Job types this worker instance processes. */
-const JOB_TYPES = ['folder_sync', 'message_sync', 'message_action', 'send_message']
+const JOB_TYPES = [
+  'folder_sync',
+  'message_sync',
+  'message_action',
+  'send_message',
+  'account_cleanup',
+]
 /**
  * Claimed before all other types: user actions are small and interactive,
  * and writing them back before the next sync keeps the sync from briefly
@@ -95,6 +102,12 @@ async function processJob(
       })
       await completeJob(pool, jobId)
       log.info({ jobId, accountId, outcome }, 'send_message done')
+      break
+    }
+    case 'account_cleanup': {
+      const outcome = await runAccountCleanup(pool, job.payload)
+      await completeJob(pool, jobId)
+      log.info({ jobId, outcome }, 'account_cleanup done')
       break
     }
     default:
