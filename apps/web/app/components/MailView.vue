@@ -13,8 +13,14 @@
 // with a count badge; the detail pane shows the whole conversation across
 // folders (e.g. own replies in Sent), older messages collapsed, the newest
 // and the opened one expanded. Actions and replies apply to the opened one.
-import { createDraft } from '@fma/shared'
+// Account switch (3.2): accounts stay separate; the sidebar lists them with
+// their INBOX unread count (select on mobile), keys 1-9 / Ctrl+1-9 switch.
+// Switching closes message, thread and compose of the previous account,
+// aborts its in-flight requests and drops late responses (RequestScope from
+// @fma/shared), so the view never mixes data of two accounts.
+import { RequestScope, createDraft, isStaleResponse } from '@fma/shared'
 import type {
+  AccountSummary,
   ComposeDraft,
   ComposeIdentity,
   ComposeMode,
@@ -32,11 +38,8 @@ import type {
 } from '@fma/shared'
 import type OutboxPanel from './OutboxPanel.vue'
 
-interface AccountOption {
-  id: string
-  displayName: string
-  emailAddress: string
-}
+type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
+  Partial<Pick<AccountSummary, 'unreadCount' | 'status'>>
 
 const props = defineProps<{ accounts: AccountOption[] }>()
 
@@ -79,6 +82,10 @@ const outbox = ref<InstanceType<typeof OutboxPanel> | null>(null)
 let listRequest = 0
 let detailRequest = 0
 let observer: IntersectionObserver | null = null
+// Account scope: reset on every account switch. Reads of the previous
+// account are aborted, and responses arriving late are dropped (getJson
+// rejects with StaleResponseError), so they never land in the new view.
+const accountScope = new RequestScope()
 
 const currentFolder = computed(() => folders.value.find((f) => f.id === folderId.value) ?? null)
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
@@ -139,13 +146,47 @@ function shortDate(iso: string): string {
     : dateFormat.format(date)
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path)
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { message?: string } | null
-    throw new Error(body?.message ?? `Fehler ${res.status}`)
+function getJson<T>(path: string): Promise<T> {
+  return accountScope.run(async (signal) => {
+    const res = await fetch(path, { signal })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { message?: string } | null
+      throw new Error(body?.message ?? `Fehler ${res.status}`)
+    }
+    return (await res.json()) as T
+  })
+}
+
+/** Unread count shown in the switcher: live folder counts for the active account. */
+function accountUnread(account: AccountOption): number {
+  if (account.id === accountId.value) {
+    const inboxes = folders.value.filter((f) => f.specialUse === 'inbox')
+    if (inboxes.length > 0) return inboxes.reduce((sum, f) => sum + f.unreadCount, 0)
   }
-  return (await res.json()) as T
+  return account.unreadCount ?? 0
+}
+
+/**
+ * Switches the active account. An open compose form belongs to the previous
+ * account and is discarded (after confirmation). Returns false when the user
+ * keeps the current account.
+ */
+function switchAccount(id: string): boolean {
+  if (!id || id === accountId.value) return true
+  if (
+    compose.value &&
+    !window.confirm('Der begonnene Entwurf wird verworfen. Trotzdem das Konto wechseln?')
+  ) {
+    return false
+  }
+  compose.value = null
+  accountId.value = id
+  return true
+}
+
+function onAccountSelect(event: Event): void {
+  const select = event.target as HTMLSelectElement
+  if (!switchAccount(select.value)) select.value = accountId.value
 }
 
 function readStoredAccount(): string {
@@ -172,6 +213,7 @@ async function loadIdentities(): Promise<ComposeIdentity[]> {
     if (requestedAccount === accountId.value) identities.value = res.identities
     return res.identities
   } catch {
+    // Offline or a previous account's request: the caller falls back.
     return []
   }
 }
@@ -183,11 +225,13 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   if (mode !== 'new' && !original) return
   const account = original?.accountId ?? accountId.value
   if (!account) return
+  const scope = accountScope.token
   // Fresh identities (the signature may have been edited in the settings);
   // the cached list is the fallback when offline.
   const loaded = account === accountId.value ? await loadIdentities() : []
   const list = loaded.length > 0 ? loaded : identities.value
-  if (compose.value) return
+  // Switched accounts meanwhile: never open a draft for the previous one.
+  if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
   compose.value = { accountId: account, identities: list, draft: createDraft(mode, list, original) }
 }
@@ -212,6 +256,7 @@ async function loadFolders(): Promise<void> {
     const inbox = res.folders.find((f) => f.specialUse === 'inbox') ?? res.folders[0]
     if (inbox) await selectFolder(inbox.id)
   } catch (err) {
+    if (isStaleResponse(err)) return
     error.value = err instanceof Error ? err.message : 'Ordner konnten nicht geladen werden.'
   }
 }
@@ -239,7 +284,7 @@ async function loadMessages(): Promise<void> {
     messages.value = cursor ? [...messages.value, ...res.messages] : res.messages
     nextCursor.value = res.nextCursor
   } catch (err) {
-    if (request === listRequest) {
+    if (request === listRequest && !isStaleResponse(err)) {
       error.value = err instanceof Error ? err.message : 'Nachrichten konnten nicht geladen werden.'
     }
   } finally {
@@ -267,7 +312,7 @@ async function openMessage(id: string): Promise<void> {
     const listed = messages.value.find((m) => m.id === id)
     if (res.threadId && (listed?.threadCount ?? 2) > 1) void loadThread(res.threadId, request)
   } catch (err) {
-    if (request === detailRequest) {
+    if (request === detailRequest && !isStaleResponse(err)) {
       error.value = err instanceof Error ? err.message : 'Nachricht konnte nicht geladen werden.'
     }
   } finally {
@@ -350,6 +395,7 @@ async function runAction(
     if (!ok) return
   }
 
+  const scope = accountScope.token
   // Snapshot for rollback (plain copies, the list is small).
   const snapshot = {
     folderId: folderId.value,
@@ -374,6 +420,8 @@ async function runAction(
       throw new Error(payload?.message ?? `Fehler ${res.status}`)
     }
   } catch (err) {
+    // Another account is shown by now: nothing of this one to roll back.
+    if (!accountScope.isCurrent(scope)) return
     // Roll back only if the user is still looking at the same folder.
     if (folderId.value === snapshot.folderId) {
       messages.value = snapshot.messages
@@ -396,12 +444,26 @@ function onMoveSelect(event: Event): void {
   if (target && detail.value) void runAction('move', [detail.value.id], target)
 }
 
-// Keyboard shortcuts for the open message (ignored while typing).
-function onKeydown(event: KeyboardEvent): void {
-  if (!detail.value || compose.value || event.ctrlKey || event.metaKey || event.altKey) return
+function isTyping(event: KeyboardEvent): boolean {
   const element = event.target as HTMLElement | null
-  if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return
-  if (element?.isContentEditable) return
+  if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return true
+  return !!element?.isContentEditable
+}
+
+// Keyboard shortcuts (ignored while typing): 1-9 / Ctrl+1-9 switch the
+// account (Ctrl+digit only reaches the page in the installed PWA; browsers
+// use it for tabs), the rest acts on the open message.
+function onKeydown(event: KeyboardEvent): void {
+  if (isTyping(event)) return
+  if (/^[1-9]$/.test(event.key) && !event.altKey && !event.shiftKey) {
+    const account = props.accounts[Number(event.key) - 1]
+    if (account) {
+      event.preventDefault()
+      switchAccount(account.id)
+    }
+    return
+  }
+  if (!detail.value || compose.value || event.ctrlKey || event.metaKey || event.altKey) return
   const id = detail.value.id
   switch (event.key) {
     case 'u':
@@ -445,6 +507,12 @@ function closeDetail(): void {
 }
 
 watch(accountId, (id) => {
+  // New scope: abort and ignore everything still in flight for the previous
+  // account; its selection, thread and compose state are dropped.
+  accountScope.reset()
+  listRequest++
+  listLoading.value = false
+  compose.value = null
   storeAccount(id)
   identities.value = []
   void loadFolders()
@@ -476,6 +544,7 @@ watch(sentinel, (element) => {
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
+  accountScope.reset()
   observer?.disconnect()
   window.removeEventListener('keydown', onKeydown)
 })
@@ -487,11 +556,33 @@ onBeforeUnmount(() => {
       <button type="button" class="primary compose-button" @click="openCompose('new')">
         Neue E-Mail
       </button>
+      <nav class="accounts" aria-label="Konten">
+        <button
+          v-for="(account, index) in accounts"
+          :key="account.id"
+          type="button"
+          class="account"
+          :class="{ active: account.id === accountId }"
+          :aria-current="account.id === accountId ? 'true' : undefined"
+          :title="`${account.emailAddress}${index < 9 ? ` – Tastenkürzel: ${index + 1}` : ''}`"
+          @click="switchAccount(account.id)"
+        >
+          <span class="account-name">{{ account.displayName }}</span>
+          <span
+            v-if="accountUnread(account) > 0"
+            class="count"
+            :aria-label="`${accountUnread(account)} ungelesen`"
+            >{{ accountUnread(account) }}</span
+          >
+        </button>
+      </nav>
+      <!-- Mobile: compact account switcher -->
       <label class="account-picker">
         <span class="visually-hidden">Konto</span>
-        <select v-model="accountId">
+        <select :value="accountId" @change="onAccountSelect">
           <option v-for="account in accounts" :key="account.id" :value="account.id">
-            {{ account.displayName }}
+            {{ account.displayName
+            }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : '' }}
           </option>
         </select>
       </label>
@@ -741,8 +832,46 @@ select {
 }
 
 .account-picker {
-  display: block;
+  display: none;
   margin-bottom: 0.75rem;
+}
+
+.accounts {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e4e9ee;
+}
+
+.account {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account:hover {
+  background: #e4e9ee;
+}
+
+.account.active {
+  background: #1f2933;
+  color: #fff;
+}
+
+.account-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 button.primary {
@@ -1063,11 +1192,13 @@ button.secondary {
   }
 
   .folders,
+  .accounts,
   .desktop-title {
     display: none;
   }
 
-  .mobile-folders {
+  .mobile-folders,
+  .account-picker {
     display: block;
   }
 

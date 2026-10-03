@@ -1,20 +1,13 @@
 <script setup lang="ts">
 // Auth UI (roadmap 1.6), mail view (roadmap 2.3) and settings with account
-// management (roadmap 2.1) and devices.
+// management (roadmap 2.1/3.1) and devices. The account list (with unread
+// counts for the switcher, 3.2) is refreshed periodically and on focus.
+import type { AccountListResponse, AccountSummary } from '@fma/shared'
+
 interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email?: string
-}
-
-interface Account {
-  id: string
-  displayName: string
-  emailAddress: string
-  imap: { host: string; port: number }
-  smtp: { host: string; port: number }
-  status: string
-  sortOrder?: number
 }
 
 interface DeviceInfo {
@@ -35,20 +28,28 @@ const error = ref('')
 const info = ref('')
 const currentEmail = ref('')
 const devices = ref<DeviceInfo[]>([])
-const accounts = ref<Account[]>([])
+const accounts = ref<AccountSummary[]>([])
 // Account whose edit form is open in the settings.
 const editAccountId = ref('')
+
+const ACCOUNT_REFRESH_MS = 60_000
+let accountTimer: ReturnType<typeof setInterval> | undefined
 
 async function loadAccounts(): Promise<void> {
   try {
     const res = await fetch('/api/accounts')
     if (res.ok) {
-      const body = (await res.json()) as { accounts: Account[] }
+      const body = (await res.json()) as AccountListResponse
       accounts.value = body.accounts
     }
   } catch {
-    accounts.value = []
+    // Offline: keep the last known list (and counts).
   }
+}
+
+/** Unread counts and status of all accounts; quiet background refresh. */
+function refreshAccounts(): void {
+  if (view.value === 'app' && document.visibilityState === 'visible') void loadAccounts()
 }
 
 function guessPlatform(): string {
@@ -151,12 +152,24 @@ async function logout(): Promise<void> {
   email.value = ''
   password.value = ''
   devices.value = []
+  accounts.value = []
   currentEmail.value = ''
   info.value = ''
   await loadStatus()
 }
 
-onMounted(loadStatus)
+onMounted(() => {
+  void loadStatus()
+  accountTimer = setInterval(refreshAccounts, ACCOUNT_REFRESH_MS)
+  window.addEventListener('focus', refreshAccounts)
+  document.addEventListener('visibilitychange', refreshAccounts)
+})
+
+onBeforeUnmount(() => {
+  clearInterval(accountTimer)
+  window.removeEventListener('focus', refreshAccounts)
+  document.removeEventListener('visibilitychange', refreshAccounts)
+})
 </script>
 
 <template>

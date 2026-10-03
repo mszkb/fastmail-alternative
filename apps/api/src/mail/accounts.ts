@@ -20,6 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { enqueueJob } from '@fma/db/job-queue'
+import type { AccountListResponse, AccountSummary } from '@fma/shared'
 import {
   decryptField,
   encryptField,
@@ -43,6 +44,8 @@ interface MailAccountRow {
   capabilities: string[]
   sort_order: number
   last_sync_at: string | null
+  /** Only selected by the list query. */
+  unread_count?: number
 }
 
 interface CreateAccountBody {
@@ -128,7 +131,7 @@ function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | n
 }
 
 /** Public account shape: never includes credentials or the DEK. */
-function toPublicAccount(row: MailAccountRow): Record<string, unknown> {
+function toPublicAccount(row: MailAccountRow): AccountSummary {
   return {
     id: row.id,
     displayName: row.display_name,
@@ -139,6 +142,7 @@ function toPublicAccount(row: MailAccountRow): Record<string, unknown> {
     capabilities: row.capabilities,
     sortOrder: row.sort_order,
     lastSyncAt: row.last_sync_at,
+    unreadCount: row.unread_count ?? 0,
   }
 }
 
@@ -240,13 +244,20 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   )
 
   app.get('/api/accounts', { preHandler: requireAuth }, async (request, reply) => {
+    // Unread count per account: INBOX only, computed from the synced
+    // locations like the folder counts (optimistic read/unread included).
     const { rows } = await pool.query<MailAccountRow>(
-      `SELECT ${PUBLIC_COLUMNS}
+      `SELECT ${PUBLIC_COLUMNS},
+         (SELECT count(*)::int FROM folder f
+          JOIN message_location ml ON ml.folder_id = f.id
+          WHERE f.account_id = mail_account.id AND f.special_use = 'inbox'
+            AND NOT ('\\Seen' = ANY(ml.flags))) AS unread_count
        FROM mail_account WHERE user_id = $1
        ORDER BY sort_order, created_at`,
       [request.auth!.userId],
     )
-    await reply.send({ accounts: rows.map(toPublicAccount) })
+    const body: AccountListResponse = { accounts: rows.map(toPublicAccount) }
+    await reply.send(body)
   })
 
   app.patch<{ Params: { id: string }; Body: UpdateAccountBody }>(

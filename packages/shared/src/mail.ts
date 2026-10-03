@@ -260,3 +260,26 @@ export interface OutboxContent {
   subject: string
   text: string
 }
+
+/** One mail account as the api lists it (never credentials or keys). */
+export interface AccountSummary {
+  id: string
+  displayName: string
+  emailAddress: string
+  imap: { host: string; port: number }
+  smtp: { host: string; port: number }
+  status: string
+  capabilities: string[]
+  sortOrder: number
+  lastSyncAt: string | null
+  /**
+   * Unread messages in the INBOX (special-use `inbox`) - the number shown in
+   * the account switcher, computed like the folder counts.
+   */
+  unreadCount: number
+}
+
+/** `GET /api/accounts` */
+export interface AccountListResponse {
+  accounts: AccountSummary[]
+}

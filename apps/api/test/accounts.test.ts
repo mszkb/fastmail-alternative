@@ -164,6 +164,44 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     expect(accounts[0]).not.toHaveProperty('wrappedDek')
   })
 
+  it('lists the INBOX unread count per account', async () => {
+    const list = await inject('GET', '/api/accounts', { token: authToken })
+    const id = list.json().accounts[0].id as string
+    expect(list.json().accounts[0].unreadCount).toBe(0)
+
+    const inbox = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path, special_use) VALUES ($1, 'INBOX', 'inbox') RETURNING id`,
+      [id],
+    )
+    const other = await pool.query<{ id: string }>(
+      `INSERT INTO folder (account_id, path) VALUES ($1, 'Projekte') RETURNING id`,
+      [id],
+    )
+    const flagsList = [[], ['\\Seen'], [], ['\\Flagged']]
+    for (const [index, flags] of flagsList.entries()) {
+      for (const folderId of [inbox.rows[0]!.id, other.rows[0]!.id]) {
+        const messageId = randomUUID()
+        await pool.query(
+          `INSERT INTO message (id, account_id, message_id_header, subject_enc, from_enc,
+             recipients_enc, snippet_enc)
+           VALUES ($1, $2, $3, '\\x00', '\\x00', '\\x00', '\\x00')`,
+          [messageId, id, `<${messageId}@x>`],
+        )
+        await pool.query(
+          `INSERT INTO message_location (message_id, folder_id, uidvalidity, uid, flags)
+           VALUES ($1, $2, 1, $3, $4)`,
+          [messageId, folderId, index + 1, flags],
+        )
+      }
+    }
+
+    const after = await inject('GET', '/api/accounts', { token: authToken })
+    // 3 unread in INBOX; unread mail in other folders does not count.
+    expect(after.json().accounts[0].unreadCount).toBe(3)
+    await pool.query('DELETE FROM message WHERE account_id = $1', [id])
+    await pool.query('DELETE FROM folder WHERE account_id = $1', [id])
+  })
+
   it('stores the DEK wrapped and credentials encrypted in the database', async () => {
     const { rows } = await pool.query<{
       wrapped_dek: Buffer
