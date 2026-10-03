@@ -88,7 +88,7 @@ export async function testImap(config: HostConfig): Promise<TestResult> {
       connectionTimeout: CONNECT_TIMEOUT_MS,
       tls: testMode() ? { rejectUnauthorized: false } : undefined,
       // Test mode talks to plain GreenMail ports even when STARTTLS is offered.
-      doSTARTTLS: testMode() ? false : undefined,
+      ...(testMode() ? { doSTARTTLS: false as const } : {}),
     })
 
     await client.connect()

@@ -168,7 +168,8 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
       credential_enc: Buffer
       key_id: string
     }>('SELECT wrapped_dek, credential_enc, key_id FROM mail_account LIMIT 1')
-    const row = rows[0]!
+    const row = rows[0]
+    if (!row) throw new Error('no mail_account row found')
     expect(row.key_id).toBe(process.env.MASTER_KEY_ID ?? 'v1')
     expect(row.wrapped_dek.toString('utf8')).toContain('fma.k1.')
     expect(row.credential_enc.toString('utf8')).toContain('fma.f1.')

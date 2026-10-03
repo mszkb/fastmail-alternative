@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "build": "pnpm -r build",
     "dev:web": "pnpm --filter @fma/web dev",
     "dev:api": "pnpm --filter @fma/api dev",
