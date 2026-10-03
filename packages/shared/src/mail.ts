@@ -113,3 +113,114 @@ export interface MessageActionJobPayload {
   items: { uid: number; locationId: string; messageId: string }[]
   targetFolderId?: string
 }
+
+/** Sending (roadmap 2.7): outbox status of a message handed to the SMTP worker. */
+export type OutboxStatus = 'queued' | 'sending' | 'sent' | 'failed'
+
+/** Copy in the "Sent" folder: skipped for providers that store it themselves (Gmail) or without a Sent folder. */
+export type SentCopyStatus = 'pending' | 'done' | 'skipped' | 'failed'
+
+/** Limits of `POST /api/outbox` (also usable for client-side validation). */
+export const OUTBOX_LIMITS = {
+  /** to + cc + bcc together. */
+  maxRecipients: 100,
+  maxSubjectLength: 998,
+  /** Plain text body, in characters. */
+  maxTextLength: 500_000,
+  maxReferences: 100,
+  maxNameLength: 200,
+} as const
+
+/**
+ * Pragmatic address check (no quoted local parts, no IP literals): one `@`,
+ * no whitespace, no characters with a special meaning in address headers.
+ */
+const ADDRESS_RE = /^[^\s@<>()[\]",;:\\]+@[^\s@<>()[\]",;:\\]+\.[^\s@<>()[\]",;:\\]+$/
+
+export function isValidEmailAddress(address: string): boolean {
+  return address.length <= 320 && ADDRESS_RE.test(address)
+}
+
+/**
+ * `POST /api/outbox` - sends a plain-text message (HTML and attachments
+ * follow later). Recipients are plain addresses or `{ name, address }`.
+ * `identityId` defaults to the account's default identity.
+ * `inReplyTo`/`references` are Message-IDs in angle brackets.
+ */
+export interface SendMessageRequest {
+  accountId: string
+  identityId?: string
+  to: (string | MailPerson)[]
+  cc?: (string | MailPerson)[]
+  bcc?: (string | MailPerson)[]
+  subject: string
+  text: string
+  inReplyTo?: string
+  references?: string[]
+}
+
+/** Stable error codes of a failed send; `message` carries the German text. */
+export type OutboxErrorCode =
+  | 'AUTH_FAILED'
+  | 'SMTP_REJECTED'
+  | 'SMTP_TEMPORARY'
+  | 'HOST_NOT_FOUND'
+  | 'BLOCKED_HOST'
+  | 'CONNECTION_REFUSED'
+  | 'TIMEOUT'
+  | 'TLS_ERROR'
+  | 'UNKNOWN'
+
+export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
+  AUTH_FAILED: 'Der SMTP-Server hat die Zugangsdaten abgelehnt.',
+  SMTP_REJECTED: 'Der SMTP-Server hat die Nachricht abgelehnt (z. B. Empfänger unbekannt).',
+  SMTP_TEMPORARY: 'Der SMTP-Server ist vorübergehend nicht bereit. Neuer Versuch folgt.',
+  HOST_NOT_FOUND: 'SMTP-Server nicht gefunden - bitte Hostnamen prüfen.',
+  BLOCKED_HOST: 'Interner SMTP-Host ist blockiert (SSRF-Schutz).',
+  CONNECTION_REFUSED: 'Verbindung zum SMTP-Server abgelehnt - Host/Port prüfen.',
+  TIMEOUT: 'Zeitüberschreitung beim Verbinden mit dem SMTP-Server.',
+  TLS_ERROR: 'TLS-Fehler - Zertifikat des SMTP-Servers konnte nicht verifiziert werden.',
+  UNKNOWN: 'Versand fehlgeschlagen.',
+}
+
+/** `GET /api/outbox/:id`, entries of `GET /api/accounts/:id/outbox`. */
+export interface OutboxMessage {
+  id: string
+  accountId: string
+  identityId: string | null
+  status: OutboxStatus
+  /** Decrypted content; null once the message is sent and its Sent copy settled. */
+  subject: string | null
+  from: MailPerson | null
+  to: MailPerson[]
+  cc: MailPerson[]
+  bcc: MailPerson[]
+  /** Message-ID header (angle brackets), generated once at submission. */
+  messageId: string
+  attempts: number
+  /** Last error (also while a retry is pending); null after success. */
+  error: { code: OutboxErrorCode; message: string } | null
+  sentCopy: SentCopyStatus | null
+  createdAt: string
+  sentAt: string | null
+}
+
+/** `GET /api/accounts/:id/outbox` - queued, sending and failed messages, newest first. */
+export interface OutboxListResponse {
+  messages: OutboxMessage[]
+}
+
+/** Payload of the `send_message` job (ids only). */
+export interface SendMessageJobPayload {
+  outboxId: string
+}
+
+/** Encrypted content of an outbox message (JSON in `outbox_message.content_enc`). */
+export interface OutboxContent {
+  from: MailPerson
+  to: MailPerson[]
+  cc: MailPerson[]
+  bcc: MailPerson[]
+  subject: string
+  text: string
+}

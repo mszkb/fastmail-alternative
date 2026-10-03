@@ -15,6 +15,7 @@ import { migration0002 } from './migrations/0002_mail_accounts'
 import { migration0003 } from './migrations/0003_jobs_folders'
 import { migration0004 } from './migrations/0004_messages'
 import { migration0005 } from './migrations/0005_message_actions'
+import { migration0006 } from './migrations/0006_outbox'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -33,6 +34,7 @@ export const migrations: Migration[] = [
   migration0003,
   migration0004,
   migration0005,
+  migration0006,
 ]
 
 /**

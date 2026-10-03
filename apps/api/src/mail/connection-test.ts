@@ -8,7 +8,7 @@
  */
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
-import { assertPublicHost } from './ssrf'
+import { assertPublicHost } from '@fma/shared/ssrf'
 
 export interface TestResult {
   ok: boolean

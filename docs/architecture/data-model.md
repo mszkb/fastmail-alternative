@@ -161,7 +161,11 @@ erDiagram
         uuid identity_id FK
         text status "queued | sending | sent | failed"
         int attempts
-        bytea rfc822_enc "bis zum Versand"
+        bytea content_enc "bis Versand + Ablage in Gesendet"
+        text message_id_header
+        text last_error_code "nur Code, kein Inhalt"
+        text sent_copy "pending | done | skipped | failed"
+        timestamptz sent_at
     }
     JOB {
         bigserial id PK
@@ -219,7 +223,7 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
 ### Versand und Jobs
 
-- **`outbox_message`**: Versandauftrag mit Status und Retry-Zähler (Roadmap 2.7). Die verschlüsselte RFC-822-Nachricht wird nach erfolgreichem Versand und Ablage in „Gesendet" gelöscht.
+- **`outbox_message`**: Versandauftrag mit Status und Retry-Zähler (Roadmap 2.7). Gespeichert wird der verschlüsselte Nachrichteninhalt (Absender, Empfänger inkl. Bcc, Betreff, Text als JSON, `content_enc`); der Worker baut daraus bei jedem Versuch die RFC-822-Nachricht mit der einmalig vergebenen `Message-ID`. Der Inhalt wird nach erfolgreichem Versand und Ablage in „Gesendet" gelöscht. `sent_at` markiert die Annahme durch den SMTP-Server – danach wird nie erneut gesendet, nur die Ablage in „Gesendet" wiederholt.
 - **`job`**: **eine eigene, einfache Tabelle** (Vorschlag in ADR-0003). Worker holen Jobs mit `SELECT … FOR UPDATE SKIP LOCKED`. `account_id` dient der Isolation und den Rate Limits. **Der Payload enthält nur IDs, keine Inhalte**, und `last_error` wird vor dem Speichern redacted.
 
 ## Verschlüsselung

@@ -4,7 +4,9 @@
  *
  * The api must never be abused to reach internal infrastructure, so mail
  * hosts are resolved and every resolved address is checked against
- * private/loopback/link-local/reserved ranges before connecting.
+ * private/loopback/link-local/reserved ranges before connecting. Shared by
+ * the api (connection test) and the worker (SMTP send, roadmap 2.7); import
+ * via `@fma/shared/ssrf` (node-only, not part of the browser-safe index).
  *
  * Test/CI note: integration tests run against a local GreenMail container,
  * which is only reachable via loopback/private addresses. Set

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPublicIp, assertPublicHost, PrivateHostError } from '../src/mail/ssrf'
+import { isPublicIp, assertPublicHost, PrivateHostError } from '@fma/shared/ssrf'
 
 describe('isPublicIp (IPv4)', () => {
   it('allows public addresses', () => {

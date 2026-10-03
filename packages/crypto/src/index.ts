@@ -152,6 +152,11 @@ export function messageFieldAad(field: MessageField, messageId: string): string 
   return `message.${field}:${messageId}`
 }
 
+/** AAD context of an outbox message's encrypted content (see migration 0006). */
+export function outboxContentAad(outboxId: string): string {
+  return `outbox_message.content:${outboxId}`
+}
+
 function aadForWrappedKey(keyId: string): Buffer {
   return Buffer.from(`fma.wrapped-dek:${keyId}`, 'utf8')
 }

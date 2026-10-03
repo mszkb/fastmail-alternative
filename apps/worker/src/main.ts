@@ -3,8 +3,8 @@
  *
  * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
  * worker-managed connections added in a later step. This loop only processes
- * short-lived jobs (folder sync, message sync, message actions, later: send,
- * push, cleanup).
+ * short-lived jobs (folder sync, message sync, message actions, SMTP send;
+ * later: push, cleanup).
  * Until IDLE exists, the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account so new mail appears without reload.
  *
@@ -12,12 +12,13 @@
  * (roadmap 1.7).
  */
 import { setTimeout as sleep } from 'node:timers/promises'
-import { claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
+import { MAX_JOB_ATTEMPTS, claimNextJob, completeJob, failJob } from '@fma/db/job-queue'
 import { runMigrations } from '@fma/db/migrate'
 import { createPool, type Pool } from '@fma/db'
 import { runFolderSync } from './jobs/folder-sync'
 import { runMessageAction } from './jobs/message-action'
 import { runMessageSync } from './jobs/message-sync'
+import { markSendGivenUp, runSendMessage } from './jobs/send-message'
 import { log } from './log'
 import {
   enqueueDueSyncs,
@@ -30,13 +31,14 @@ const POLL_INTERVAL_MS = 2_000
 /** How often the scheduler checks for due accounts (cheap single query). */
 const SCHEDULER_TICK_MS = 15_000
 /** Job types this worker instance processes. */
-const JOB_TYPES = ['folder_sync', 'message_sync', 'message_action']
+const JOB_TYPES = ['folder_sync', 'message_sync', 'message_action', 'send_message']
 /**
  * Claimed before all other types: user actions are small and interactive,
  * and writing them back before the next sync keeps the sync from briefly
- * reverting optimistic changes (see jobs/message-action).
+ * reverting optimistic changes (see jobs/message-action). Sending is
+ * user-facing too and must not wait behind a long initial sync.
  */
-const PRIORITY_JOB_TYPES = ['message_action']
+const PRIORITY_JOB_TYPES = ['message_action', 'send_message']
 
 let shuttingDown = false
 
@@ -83,6 +85,16 @@ async function processJob(
       const outcome = await runMessageAction(pool, accountId, job.payload)
       await completeJob(pool, jobId)
       log.info({ jobId, accountId, outcome }, 'message_action done')
+      break
+    }
+    case 'send_message': {
+      if (!accountId) throw new Error('send_message job without account_id')
+      const outcome = await runSendMessage(pool, accountId, job.payload, {
+        attempt: job.attempts,
+        maxAttempts: MAX_JOB_ATTEMPTS,
+      })
+      await completeJob(pool, jobId)
+      log.info({ jobId, accountId, outcome }, 'send_message done')
       break
     }
     default:
@@ -152,6 +164,12 @@ async function main(): Promise<void> {
       await failJob(pool, job.id, job.attempts, message).catch((dbErr) => {
         log.error({ err: dbErr.message }, 'failJob failed')
       })
+      if (job.type === 'send_message' && job.attempts >= MAX_JOB_ATTEMPTS) {
+        // Unexpected error on the last attempt: make the failure visible.
+        await markSendGivenUp(pool, job.payload).catch((dbErr) => {
+          log.error({ err: dbErr.message }, 'markSendGivenUp failed')
+        })
+      }
       log.warn(
         {
           jobId: job.id,
