@@ -272,9 +272,8 @@ export class JobRunner {
   }
 
   private async fail(job: Job, err: unknown): Promise<void> {
-    const error = err as Error & { response?: string; code?: string }
-    const message = error.message ?? String(err)
-    await failJob(this.pool, job.id, job.attempts, message).catch((dbErr: Error) => {
+    const summary = describeJobError(err)
+    await failJob(this.pool, job.id, job.attempts, summary.text).catch((dbErr: Error) => {
       log.error({ err: dbErr.message }, 'failJob failed')
     })
     if (job.type === 'send_message' && job.attempts >= MAX_JOB_ATTEMPTS) {
@@ -288,12 +287,44 @@ export class JobRunner {
         jobId: job.id,
         type: job.type,
         accountId: job.accountId,
-        err: message,
-        imapResponse: error.response,
-        imapCode: error.code,
-        stack: error.stack,
+        errName: summary.name,
+        errCode: summary.code,
+        accountErrorCode: summary.accountErrorCode,
+        stack: summary.frames,
       },
       'job failed',
     )
   }
+}
+
+/**
+ * Content-free description of a job error. Error messages and server
+ * responses (IMAP/SMTP) can echo addresses, mailbox names or subjects, so
+ * neither ends up in logs or in job.last_error (CLAUDE.md rule 6); only the
+ * error class, its code and the stack frames (without the message line) do.
+ */
+export function describeJobError(err: unknown): {
+  name: string
+  code: string | undefined
+  accountErrorCode: string | undefined
+  frames: string | undefined
+  text: string
+} {
+  const error = (err && typeof err === 'object' ? err : {}) as {
+    name?: unknown
+    code?: unknown
+    stack?: unknown
+  }
+  const name = typeof error.name === 'string' ? error.name : typeof err
+  const code = typeof error.code === 'string' ? error.code : undefined
+  const accountErrorCode = classifyAccountError(err)?.code
+  const frames =
+    typeof error.stack === 'string'
+      ? error.stack
+          .split('\n')
+          .filter((line) => line.trimStart().startsWith('at '))
+          .join('\n') || undefined
+      : undefined
+  const text = [name, code, accountErrorCode].filter(Boolean).join(':')
+  return { name, code, accountErrorCode, frames, text }
 }
