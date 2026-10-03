@@ -18,6 +18,9 @@
  * locations of moved messages (uid < 0) are replaced once the moved
  * message is fetched here, and dropped when no write-back is pending.
  *
+ * Threading (roadmap 2.5, ../threading): after each run, unthreaded
+ * messages of the account get a thread_id.
+ *
  * Metadata backfill (migration 0007): messages stored with an outdated
  * metadata_version get their addresses, Reply-To and threading headers
  * re-derived in bounded batches - from the encrypted raw mail in the
@@ -40,6 +43,7 @@ import {
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
+import { assignThreads, removeEmptyThreads } from '../threading'
 
 const MESSAGE_SYNC_LIMIT = 200
 const MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024 // skip bodies above 20 MB
@@ -471,6 +475,17 @@ export async function runMessageSync(
     lock?.release()
     client.close()
   }
+
+  // Threading (roadmap 2.5) for new and backfilled messages of the account;
+  // best effort, unthreaded messages are picked up by the next run.
+  try {
+    await assignThreads(pool, ctx, accountId, MESSAGE_METADATA_VERSION)
+  } catch (err) {
+    log.warn(
+      { accountId, folderId, error: err instanceof Error ? err.name : 'unknown' },
+      'thread assignment failed',
+    )
+  }
 }
 
 /**
@@ -587,6 +602,8 @@ export async function removeOrphanMessages(
        (SELECT storage_ref FROM refs WHERE refs.message_id = m.id) AS storage_ref`,
     [candidates, accountId],
   )
+
+  if (orphans.length > 0) await removeEmptyThreads(pool, accountId)
 
   const root = path.resolve(mailDataDir())
   for (const orphan of orphans) {

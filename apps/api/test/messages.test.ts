@@ -18,7 +18,7 @@ import {
   messageFieldAad,
   wrapDataKey,
 } from '@fma/crypto'
-import type { FolderSummary, MessageListItem } from '@fma/shared'
+import type { FolderSummary, MessageListItem, ThreadDetail } from '@fma/shared'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
@@ -333,6 +333,7 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
       messageId: `<${detailMessageId}@test>`,
       references: [],
       text: 'Hallo Bob,\n<script>alert(1)</script>\nBis bald',
+      threadId: null,
     })
 
     const { rows } = await pool.query<{ flags: string[] }>(
@@ -371,6 +372,90 @@ describe.skipIf(!databaseUrl)('mail read api', () => {
     })
     const body = (await get(`/api/messages/${id}`, authToken)).json()
     expect(body.messageId).toBeNull()
+  })
+
+  describe('threads', () => {
+    let threadId: string
+    let inboxReplyId: string
+    let sentReplyId: string
+    let rootId: string
+    let foreignThreadId: string
+
+    async function createThread(accountId: string, messageIds: string[]): Promise<string> {
+      const id = randomUUID()
+      await pool.query('INSERT INTO thread (id, account_id) VALUES ($1, $2)', [id, accountId])
+      await pool.query('UPDATE message SET thread_id = $1 WHERE id = ANY($2::uuid[])', [
+        id,
+        messageIds,
+      ])
+      return id
+    }
+
+    beforeAll(async () => {
+      const sentId = (
+        await pool.query<{ id: string }>(
+          "SELECT id FROM folder WHERE account_id = $1 AND path = 'Sent'",
+          [account.id],
+        )
+      ).rows[0]!.id
+      rootId = await createMessage(account, inboxId, {
+        subject: 'Konversation',
+        sentAt: '2026-05-01T08:00:00Z',
+        text: 'Start',
+      })
+      sentReplyId = await createMessage(account, sentId, {
+        subject: 'Re: Konversation',
+        sentAt: '2026-05-02T08:00:00Z',
+        text: 'Meine Antwort',
+        from: { name: 'Ich', address: 'me@example.com' },
+      })
+      inboxReplyId = await createMessage(account, inboxId, {
+        subject: 'Re: Re: Konversation',
+        sentAt: '2026-05-03T08:00:00Z',
+        text: 'Ihre Antwort',
+      })
+      threadId = await createThread(account.id, [rootId, sentReplyId, inboxReplyId])
+      foreignThreadId = await createThread(foreignAccountId, [foreignMessageId])
+    })
+
+    it('adds thread id and count to list items and details', async () => {
+      const res = await get(`/api/folders/${inboxId}/messages`, authToken)
+      const items = res.json().messages as MessageListItem[]
+      const reply = items.find((m) => m.id === inboxReplyId)!
+      expect(reply.threadId).toBe(threadId)
+      expect(reply.threadCount).toBe(3) // incl. the reply in Sent
+      const single = items.find((m) => m.subject === 'm1')!
+      expect(single).toMatchObject({ threadId: null, threadCount: 1 })
+
+      const detail = (await get(`/api/messages/${inboxReplyId}`, authToken)).json()
+      expect(detail.threadId).toBe(threadId)
+    })
+
+    it('returns all messages of a thread across folders, oldest first', async () => {
+      const res = await get(`/api/threads/${threadId}`, authToken)
+      expect(res.statusCode).toBe(200)
+      expect(res.body).not.toContain('fma.f1.')
+      const body = res.json() as ThreadDetail
+      expect(body.id).toBe(threadId)
+      expect(body.accountId).toBe(account.id)
+      expect(body.subject).toBe('Re: Re: Konversation')
+      expect(body.messages.map((m) => m.id)).toEqual([rootId, sentReplyId, inboxReplyId])
+      expect(body.messages[1]).toMatchObject({
+        from: { name: 'Ich', address: 'me@example.com' },
+        text: 'Meine Antwort',
+        threadId,
+      })
+      expect(body.messages[1]!.folderIds).not.toContain(inboxId)
+    })
+
+    it('answers 401/404 for anonymous, foreign, unknown and malformed thread ids', async () => {
+      expect((await get(`/api/threads/${threadId}`)).statusCode).toBe(401)
+      for (const id of [foreignThreadId, randomUUID(), 'nope']) {
+        const res = await get(`/api/threads/${id}`, authToken)
+        expect(res.statusCode, id).toBe(404)
+        expect(res.body).not.toContain('Foreign secret')
+      }
+    })
   })
 
   describe('identities', () => {

@@ -80,6 +80,24 @@ function stripPrefixes(subject: string, re: RegExp): string {
   }
 }
 
+/** True when the subject starts with a reply prefix (Re:, AW:, Sv:, ...). */
+export function hasReplyPrefix(subject: string): boolean {
+  return REPLY_PREFIX_RE.test(subject)
+}
+
+/**
+ * Subject without any (interleaved) reply/forward prefixes and with
+ * collapsed whitespace: "Re: AW: Fwd: Termin" -> "Termin".
+ */
+export function baseSubject(subject: string): string {
+  let rest = subject.replace(/\s+/g, ' ').trim()
+  for (;;) {
+    const next = stripPrefixes(stripPrefixes(rest, REPLY_PREFIX_RE), FORWARD_PREFIX_RE)
+    if (next === rest) return rest
+    rest = next
+  }
+}
+
 /** "Re: " exactly once; existing reply prefixes collapse, forward prefixes stay. */
 export function replySubject(subject: string): string {
   return `Re: ${stripPrefixes(subject, REPLY_PREFIX_RE)}`.trimEnd()

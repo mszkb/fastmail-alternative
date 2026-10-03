@@ -11,6 +11,9 @@
  * - Read-only: opening a message does NOT set \Seen by itself (the client
  *   marks it read via ./message-actions), and only the plain-text body is
  *   returned (HTML rendering follows in 2.9).
+ * - Threads (roadmap 2.5): list items carry threadId + threadCount; a
+ *   thread's messages across all folders of the account come from
+ *   GET /api/threads/:id (oldest first, newest MAX_THREAD_MESSAGES).
  */
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify'
 import { decryptField, messageFieldAad, unwrapAccountKey, type MessageField } from '@fma/crypto'
@@ -22,11 +25,14 @@ import type {
   MessageFlags,
   MessageListItem,
   MessageListResponse,
+  ThreadDetail,
 } from '@fma/shared'
 import { requireAuth } from '../auth/routes'
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 100
+/** Newest messages returned per thread. */
+const MAX_THREAD_MESSAGES = 200
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Folder order among siblings: INBOX, special-use folders, then by name. */
@@ -64,11 +70,14 @@ interface ListRow {
   flags: string[]
   sort_at: Date
   sort_key: string
+  thread_id: string | null
+  thread_count: number
 }
 
 interface DetailRow {
   id: string
   account_id: string
+  thread_id: string | null
   wrapped_dek: Buffer
   subject_enc: Buffer
   from_enc: Buffer
@@ -81,6 +90,23 @@ interface DetailRow {
   flags: string[]
   folder_ids: string[]
 }
+
+/**
+ * Message details incl. account DEK; callers add the WHERE clause (always
+ * scoped by a.user_id). Flags: union over all locations of the message (it
+ * may live in several folders of the account).
+ */
+const DETAIL_SELECT = /* sql */ `
+  SELECT m.id, m.account_id, m.thread_id::text AS thread_id, a.wrapped_dek, m.subject_enc,
+         m.from_enc, m.recipients_enc, m.message_id_header, m."references",
+         ${SORT_AT} AS sort_at, m.has_attachments, mb.text_plain_enc,
+         coalesce((SELECT array_agg(DISTINCT flag) FROM message_location ml,
+                     unnest(ml.flags) AS flag WHERE ml.message_id = m.id), '{}') AS flags,
+         coalesce((SELECT array_agg(ml.folder_id::text) FROM message_location ml
+                   WHERE ml.message_id = m.id), '{}') AS folder_ids
+  FROM message m
+  JOIN mail_account a ON a.id = m.account_id
+  LEFT JOIN message_body mb ON mb.message_id = m.id`
 
 /** Decrypts one message field; corrupt ciphertexts degrade to null (logged without content). */
 function decrypt(
@@ -114,6 +140,30 @@ function toPeople(value: unknown): MailPerson[] {
   return value
     .filter((entry): entry is MailPerson => typeof entry?.address === 'string')
     .map((entry) => ({ name: String(entry.name ?? ''), address: entry.address }))
+}
+
+function toMessageDetail(log: FastifyBaseLogger, dek: Buffer, row: DetailRow): MessageDetail {
+  const recipients = (parseJson(decrypt(log, dek, row.recipients_enc, 'recipients', row.id)) ??
+    {}) as { to?: unknown; cc?: unknown; replyTo?: unknown }
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    folderIds: row.folder_ids,
+    subject: decrypt(log, dek, row.subject_enc, 'subject', row.id) ?? '',
+    from: toPeople(parseJson(decrypt(log, dek, row.from_enc, 'from', row.id)))[0] ?? null,
+    to: toPeople(recipients.to),
+    cc: toPeople(recipients.cc),
+    replyTo: toPeople(recipients.replyTo),
+    date: row.sort_at.toISOString(),
+    flags: toFlags(row.flags),
+    hasAttachments: row.has_attachments,
+    // Synthetic ids of messages without a Message-ID are not exposed:
+    // a reply must not reference an id no other client knows.
+    messageId: FALLBACK_MESSAGE_ID_RE.test(row.message_id_header) ? null : row.message_id_header,
+    references: row.references,
+    text: decrypt(log, dek, row.text_plain_enc, 'text', row.id),
+    threadId: row.thread_id,
+  }
 }
 
 function toFlags(flags: string[]): MessageFlags {
@@ -275,7 +325,11 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       const { rows } = await pool.query<ListRow>(
         `SELECT ml.id AS location_id, m.id, m.subject_enc, m.from_enc, m.snippet_enc,
                 m.has_attachments, ml.flags,
-                ${SORT_AT} AS sort_at, (${SORT_AT})::text AS sort_key
+                ${SORT_AT} AS sort_at, (${SORT_AT})::text AS sort_key,
+                m.thread_id::text AS thread_id,
+                CASE WHEN m.thread_id IS NULL THEN 1
+                     ELSE (SELECT count(*)::int FROM message t WHERE t.thread_id = m.thread_id)
+                END AS thread_count
          FROM message_location ml
          JOIN message m ON m.id = ml.message_id
          WHERE ml.folder_id = $1
@@ -296,6 +350,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         snippet: decrypt(request.log, dek, row.snippet_enc, 'snippet', row.id) ?? '',
         flags: toFlags(row.flags),
         hasAttachments: row.has_attachments,
+        threadId: row.thread_id,
+        threadCount: row.thread_count,
       }))
       const last = page[page.length - 1]
       const body: MessageListResponse = {
@@ -316,20 +372,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         await reply.code(404).send({ message: 'Nachricht nicht gefunden.' })
         return
       }
-      // Flags: union over all locations of the message (it may live in
-      // several folders of the account).
       const { rows } = await pool.query<DetailRow>(
-        `SELECT m.id, m.account_id, a.wrapped_dek, m.subject_enc, m.from_enc, m.recipients_enc,
-                m.message_id_header, m."references",
-                ${SORT_AT} AS sort_at, m.has_attachments, mb.text_plain_enc,
-                coalesce((SELECT array_agg(DISTINCT flag) FROM message_location ml,
-                            unnest(ml.flags) AS flag WHERE ml.message_id = m.id), '{}') AS flags,
-                coalesce((SELECT array_agg(ml.folder_id::text) FROM message_location ml
-                          WHERE ml.message_id = m.id), '{}') AS folder_ids
-         FROM message m
-         JOIN mail_account a ON a.id = m.account_id
-         LEFT JOIN message_body mb ON mb.message_id = m.id
-         WHERE m.id = $1 AND a.user_id = $2`,
+        `${DETAIL_SELECT} WHERE m.id = $1 AND a.user_id = $2`,
         [messageId, request.auth!.userId],
       )
       const row = rows[0]
@@ -339,29 +383,47 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const dek = unwrapAccountKey(masterKey(), row.wrapped_dek)
-      const recipients = (parseJson(
-        decrypt(request.log, dek, row.recipients_enc, 'recipients', row.id),
-      ) ?? {}) as { to?: unknown; cc?: unknown; replyTo?: unknown }
-      const body: MessageDetail = {
-        id: row.id,
-        accountId: row.account_id,
-        folderIds: row.folder_ids,
-        subject: decrypt(request.log, dek, row.subject_enc, 'subject', row.id) ?? '',
-        from:
-          toPeople(parseJson(decrypt(request.log, dek, row.from_enc, 'from', row.id)))[0] ?? null,
-        to: toPeople(recipients.to),
-        cc: toPeople(recipients.cc),
-        replyTo: toPeople(recipients.replyTo),
-        date: row.sort_at.toISOString(),
-        flags: toFlags(row.flags),
-        hasAttachments: row.has_attachments,
-        // Synthetic ids of messages without a Message-ID are not exposed:
-        // a reply must not reference an id no other client knows.
-        messageId: FALLBACK_MESSAGE_ID_RE.test(row.message_id_header)
-          ? null
-          : row.message_id_header,
-        references: row.references,
-        text: decrypt(request.log, dek, row.text_plain_enc, 'text', row.id),
+      const body: MessageDetail = toMessageDetail(request.log, dek, row)
+      await reply.send(body)
+    },
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/threads/:id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const threadId = request.params.id
+      if (!UUID_RE.test(threadId)) {
+        await reply.code(404).send({ message: 'Unterhaltung nicht gefunden.' })
+        return
+      }
+      const thread = await pool.query<{ account_id: string; wrapped_dek: Buffer }>(
+        `SELECT t.account_id, a.wrapped_dek
+         FROM thread t JOIN mail_account a ON a.id = t.account_id
+         WHERE t.id = $1 AND a.user_id = $2`,
+        [threadId, request.auth!.userId],
+      )
+      const threadRow = thread.rows[0]
+      if (!threadRow) {
+        await reply.code(404).send({ message: 'Unterhaltung nicht gefunden.' })
+        return
+      }
+
+      // Newest MAX_THREAD_MESSAGES, returned oldest first.
+      const { rows } = await pool.query<DetailRow>(
+        `${DETAIL_SELECT}
+         WHERE m.thread_id = $1 AND m.account_id = $2 AND a.user_id = $3
+         ORDER BY ${SORT_AT} DESC, m.id DESC
+         LIMIT $4`,
+        [threadId, threadRow.account_id, request.auth!.userId, MAX_THREAD_MESSAGES],
+      )
+      const dek = unwrapAccountKey(masterKey(), threadRow.wrapped_dek)
+      const messages = rows.reverse().map((row) => toMessageDetail(request.log, dek, row))
+      const body: ThreadDetail = {
+        id: threadId,
+        accountId: threadRow.account_id,
+        subject: messages[messages.length - 1]?.subject ?? '',
+        messages,
       }
       await reply.send(body)
     },

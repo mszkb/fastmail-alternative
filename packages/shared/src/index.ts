@@ -8,6 +8,7 @@
 export * from './compose'
 export * from './mail'
 export * from './redact'
+export * from './threading'
 
 export type ServiceName = 'api' | 'worker' | 'web'
 

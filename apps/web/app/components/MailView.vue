@@ -9,6 +9,10 @@
 // Compose (2.6): new message, reply, reply all and forward open the
 // ComposeForm (prefilled via createDraft from @fma/shared); submitted
 // messages show up in the OutboxPanel until they are sent.
+// Threading (2.5): the list stays a message list (no conversation grouping)
+// with a count badge; the detail pane shows the whole conversation across
+// folders (e.g. own replies in Sent), older messages collapsed, the newest
+// and the opened one expanded. Actions and replies apply to the opened one.
 import { createDraft } from '@fma/shared'
 import type {
   ComposeDraft,
@@ -24,6 +28,7 @@ import type {
   MessageListResponse,
   IdentityListResponse,
   OutboxMessage,
+  ThreadDetail,
 } from '@fma/shared'
 import type OutboxPanel from './OutboxPanel.vue'
 
@@ -53,6 +58,8 @@ const nextCursor = ref<string | null>(null)
 const listLoading = ref(false)
 const detail = ref<MessageDetail | null>(null)
 const detailLoading = ref(false)
+const thread = ref<ThreadDetail | null>(null)
+const expanded = ref(new Set<string>())
 const selectedId = ref('')
 const error = ref('')
 // Mobile: only one pane is visible at a time (list -> detail).
@@ -77,6 +84,15 @@ const currentFolder = computed(() => folders.value.find((f) => f.id === folderId
 const archiveFolder = computed(() => folders.value.find((f) => f.specialUse === 'archive') ?? null)
 const inTrash = computed(() => currentFolder.value?.specialUse === 'trash')
 const moveTargets = computed(() => folders.value.filter((f) => f.id !== folderId.value))
+// Messages shown in the detail pane: the conversation (with the opened
+// message's live object, so optimistic flag changes show) or just the detail.
+const shownMessages = computed<MessageDetail[]>(() => {
+  const open = detail.value
+  if (!open) return []
+  const messages = thread.value?.messages ?? []
+  if (messages.length < 2 || !messages.some((m) => m.id === open.id)) return [open]
+  return messages.map((m) => (m.id === open.id ? open : m))
+})
 
 function folderLabel(folder: FolderSummary): string {
   return (folder.specialUse && SPECIAL_USE_LABELS[folder.specialUse]) || folder.name
@@ -85,6 +101,22 @@ function folderLabel(folder: FolderSummary): string {
 function personLabel(person: MailPerson | null): string {
   if (!person) return '(unbekannt)'
   return person.name || person.address
+}
+
+function isExpanded(message: MessageDetail): boolean {
+  return shownMessages.value.length < 2 || expanded.value.has(message.id)
+}
+
+function toggleExpanded(id: string): void {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
+}
+
+/** One-line preview of a collapsed message. */
+function preview(message: MessageDetail): string {
+  return (message.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 160)
 }
 
 function personList(people: MailPerson[]): string {
@@ -225,18 +257,34 @@ async function openMessage(id: string): Promise<void> {
   mobilePane.value = 'detail'
   detailLoading.value = true
   detail.value = null
+  thread.value = null
   try {
     const res = await getJson<MessageDetail>(`/api/messages/${id}`)
     if (request !== detailRequest) return
     detail.value = res
     // Opening marks as read (written back to the server by the worker).
     if (!res.flags.seen) void runAction('read', [id])
+    const listed = messages.value.find((m) => m.id === id)
+    if (res.threadId && (listed?.threadCount ?? 2) > 1) void loadThread(res.threadId, request)
   } catch (err) {
     if (request === detailRequest) {
       error.value = err instanceof Error ? err.message : 'Nachricht konnte nicht geladen werden.'
     }
   } finally {
     if (request === detailRequest) detailLoading.value = false
+  }
+}
+
+/** Loads the conversation of the opened message (best effort: single view on errors). */
+async function loadThread(threadId: string, request: number): Promise<void> {
+  try {
+    const res = await getJson<ThreadDetail>(`/api/threads/${threadId}`)
+    if (request !== detailRequest) return
+    thread.value = res
+    const newest = res.messages[res.messages.length - 1]
+    expanded.value = new Set([selectedId.value, ...(newest ? [newest.id] : [])])
+  } catch {
+    // The opened message is shown on its own.
   }
 }
 
@@ -390,6 +438,8 @@ function closeDetail(): void {
   detailRequest++
   selectedId.value = ''
   detail.value = null
+  thread.value = null
+  expanded.value = new Set()
   detailLoading.value = false
   mobilePane.value = 'list'
 }
@@ -501,6 +551,12 @@ onBeforeUnmount(() => {
             <span class="row">
               <span class="subject">{{ message.subject || '(kein Betreff)' }}</span>
               <span class="icons">
+                <span
+                  v-if="message.threadCount > 1"
+                  class="thread-count"
+                  :title="`${message.threadCount} Nachrichten in der Unterhaltung`"
+                  >{{ message.threadCount }}</span
+                >
                 <span v-if="message.flags.answered" title="Beantwortet">&#8617;</span>
                 <span v-if="message.hasAttachments" title="Anhang">&#128206;</span>
                 <span v-if="message.flags.flagged" class="flagged" title="Markiert">&#9873;</span>
@@ -593,23 +649,51 @@ onBeforeUnmount(() => {
           </label>
         </div>
         <h2 class="detail-subject">{{ detail.subject || '(kein Betreff)' }}</h2>
-        <dl class="headers">
-          <dt>Von</dt>
-          <dd>{{ detail.from ? personList([detail.from]) : '(unbekannt)' }}</dd>
-          <template v-if="detail.to.length">
-            <dt>An</dt>
-            <dd>{{ personList(detail.to) }}</dd>
+        <p v-if="shownMessages.length > 1" class="thread-info">
+          {{ shownMessages.length }} Nachrichten in dieser Unterhaltung
+        </p>
+        <div
+          v-for="message in shownMessages"
+          :key="message.id"
+          class="thread-message"
+          :class="{
+            'in-thread': shownMessages.length > 1,
+            opened: shownMessages.length > 1 && message.id === detail.id,
+          }"
+        >
+          <button
+            v-if="shownMessages.length > 1"
+            type="button"
+            class="thread-toggle"
+            :aria-expanded="isExpanded(message)"
+            @click="toggleExpanded(message.id)"
+          >
+            <span class="row">
+              <span class="from">{{ personLabel(message.from) }}</span>
+              <span class="date">{{ shortDate(message.date) }}</span>
+            </span>
+            <span v-if="!isExpanded(message)" class="snippet">{{ preview(message) }}</span>
+          </button>
+          <template v-if="isExpanded(message)">
+            <dl class="headers">
+              <dt>Von</dt>
+              <dd>{{ message.from ? personList([message.from]) : '(unbekannt)' }}</dd>
+              <template v-if="message.to.length">
+                <dt>An</dt>
+                <dd>{{ personList(message.to) }}</dd>
+              </template>
+              <template v-if="message.cc.length">
+                <dt>Cc</dt>
+                <dd>{{ personList(message.cc) }}</dd>
+              </template>
+              <dt>Datum</dt>
+              <dd>{{ fullFormat.format(new Date(message.date)) }}</dd>
+            </dl>
+            <!-- Plain text only: rendered via text interpolation, never v-html. -->
+            <pre v-if="message.text !== null" class="body">{{ message.text }}</pre>
+            <p v-else class="hint">Inhalt wird noch synchronisiert &hellip;</p>
           </template>
-          <template v-if="detail.cc.length">
-            <dt>Cc</dt>
-            <dd>{{ personList(detail.cc) }}</dd>
-          </template>
-          <dt>Datum</dt>
-          <dd>{{ fullFormat.format(new Date(detail.date)) }}</dd>
-        </dl>
-        <!-- Plain text only: rendered via text interpolation, never v-html. -->
-        <pre v-if="detail.text !== null" class="body">{{ detail.text }}</pre>
-        <p v-else class="hint">Inhalt wird noch synchronisiert &hellip;</p>
+        </div>
       </article>
       <p v-else class="hint empty">Keine Nachricht ausgewählt.</p>
     </section>
@@ -869,6 +953,50 @@ button.secondary {
   width: auto;
   padding: 0.3rem;
   font-size: 0.85rem;
+}
+
+.thread-count {
+  display: inline-block;
+  min-width: 1.1rem;
+  margin-right: 0.25rem;
+  padding: 0 0.3rem;
+  border: 1px solid #b8c2cc;
+  border-radius: 999px;
+  color: #3e4c59;
+  text-align: center;
+}
+
+.thread-info {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: #52606d;
+}
+
+.thread-message.in-thread {
+  margin-bottom: 0.6rem;
+  padding: 0.25rem 0.75rem 0.5rem;
+  border: 1px solid #e4e9ee;
+  border-radius: 0.375rem;
+}
+
+.thread-message.opened {
+  border-color: #93c5fd;
+}
+
+.thread-toggle {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-message.in-thread .headers {
+  margin-top: 0.25rem;
 }
 
 .detail-subject {

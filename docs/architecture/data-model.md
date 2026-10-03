@@ -112,13 +112,14 @@ erDiagram
     THREAD {
         uuid id PK
         uuid account_id FK
-        bytea subject_hash "HMAC, nur für Fallback-Threading"
         timestamptz last_message_at
     }
     MESSAGE {
         uuid id PK
         uuid account_id FK
         uuid thread_id FK
+        bytea subject_hash "HMAC, nur für Fallback-Threading"
+        int metadata_version
         text message_id_header
         text in_reply_to
         text[] references
@@ -214,7 +215,11 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 
 ### Threads
 
-- **`thread`**: **pro Konto**. Gebildet über `References`/`In-Reply-To`, Fallback über den normalisierten Betreff innerhalb eines Zeitfensters (Roadmap 2.5). Weil der Betreff verschlüsselt ist, wird für den Fallback ein HMAC des normalisierten Betreffs (`subject_hash`) gespeichert. Der Anzeige-Betreff kommt aus der neuesten Nachricht.
+- **`thread`**: **pro Konto**. Gebildet über `References`/`In-Reply-To`, Fallback über den normalisierten Betreff innerhalb eines Zeitfensters (Roadmap 2.5). Weil der Betreff verschlüsselt ist, wird für den Fallback ein HMAC des normalisierten Betreffs (`message.subject_hash`, pro Nachricht, weil das Zeitfenster pro Nachricht gilt) gespeichert. Der Anzeige-Betreff kommt aus der neuesten Nachricht.
+- **Algorithmus** (vereinfachtes JWZ, reine Funktion `groupThreads` in `@fma/shared`):
+  1. Eine Nachricht gehört zum Thread jeder Message-ID, die sie in `In-Reply-To`/`References` nennt. Fehlende Nachrichten wirken als gemeinsamer Platzhalter-Elternteil; kommt der Elternteil später (z. B. die eigene Antwort in „Gesendet"), werden die Threads zusammengeführt.
+  2. Betreff-Fallback nur für Nachrichten **ohne** Referenz-Header mit Antwort-Präfix (Re/AW/Sv …): Anschluss an die nächstgelegene Nachricht mit gleichem normalisiertem Betreff (Präfixe Re/AW/Fwd/WG entfernt) innerhalb von 30 Tagen, frühere bevorzugt. Gleichlautende Mails ohne Antwort-Präfix („Ihre Rechnung") bleiben getrennt.
+- Der Worker vergibt `thread_id` nach jedem `message_sync` (älteste zuerst, begrenzt pro Lauf, Advisory-Lock pro Konto) für neue und per Backfill aktualisierte Nachrichten; leere Threads werden beim Entfernen von Nachrichten gelöscht.
 
 ### Ansichten
 
@@ -265,7 +270,7 @@ Grundregel: **Alles, was ein Mensch liest, ist verschlüsselt. Im Klartext liegt
 - `message_location (folder_id, uid)` unique: Sync-Abgleich
 - `message_location (folder_id)` + `message (received_at desc)`: Ordnerliste
 - `message (account_id, message_id_header)`: Deduplizierung, Threading
-- `thread (account_id, subject_hash)`: Fallback-Threading
+- `message (account_id, subject_hash)`, `message (account_id, in_reply_to)`, GIN auf `message (references)`, `message (thread_id)`: Threading
 - `mail_account (status, next_retry_at)`: Scheduler für Sync und Backoff
 - `job (state, run_at)`: Job-Abholung
 - `push_subscription (device_id) where disabled_at is null`

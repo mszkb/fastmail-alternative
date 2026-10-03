@@ -40,6 +40,10 @@ export interface MessageListItem {
   snippet: string
   flags: MessageFlags
   hasAttachments: boolean
+  /** Conversation (roadmap 2.5); null until the worker has threaded the message. */
+  threadId: string | null
+  /** Messages in the conversation across all folders of the account (1 = single). */
+  threadCount: number
 }
 
 /** `GET /api/folders/:id/messages` - `nextCursor` is null on the last page. */
@@ -68,6 +72,20 @@ export interface MessageDetail {
   references: string[]
   /** null while the body has not been downloaded by the sync worker yet. */
   text: string | null
+  /** Conversation (roadmap 2.5); null until the worker has threaded the message. */
+  threadId: string | null
+}
+
+/**
+ * `GET /api/threads/:id` - all messages of a conversation across the
+ * account's folders (e.g. including Sent), oldest first. `subject` is the
+ * subject of the newest message.
+ */
+export interface ThreadDetail {
+  id: string
+  accountId: string
+  subject: string
+  messages: MessageDetail[]
 }
 
 /** User-facing message actions (roadmap 2.4). */
