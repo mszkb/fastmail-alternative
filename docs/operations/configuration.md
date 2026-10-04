@@ -44,6 +44,8 @@ Benutzer, Passwort und Datenbankname werden von PostgreSQL nur beim **allererste
 | `IMAP_MAX_CONNECTIONS_PER_HOST` | `4`                | nein    | worker | Gleichzeitige Jobs (= IMAP-Verbindungen) gegen denselben IMAP-Host über alle Konten; IDLE zählt nicht mit. Senken, wenn ein Anbieter über zu viele Verbindungen klagt        |
 | `MAX_RAW_MESSAGE_BYTES`         | `20971520` (20 MB) | nein    | worker | Größere Rohmails werden nicht gespeichert (nur Kopfzeilen und Vorschau). Jede große Mail braucht beim Abgleich bis etwa das 5-Fache ihrer Größe im Worker-RAM (Limit 384 MB) |
 
+Intern (nicht in der `.env`): `WORKER_HEARTBEAT_FILE` (Standard `/tmp/worker-heartbeat`) ist die Heartbeat-Datei des Worker-Healthchecks; nur relevant, wenn der Worker außerhalb von Docker läuft.
+
 **Wenig RAM (1 GB):** `WORKER_CONCURRENCY=2` und/oder `MAX_RAW_MESSAGE_BYTES=10485760` (10 MB) setzen. Faustregel: `WORKER_CONCURRENCY × 5 × MAX_RAW_MESSAGE_BYTES` sollte deutlich unter dem Worker-Limit von 384 MB bleiben.
 
 ## Anhänge (Versand)

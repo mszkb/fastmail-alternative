@@ -26,7 +26,7 @@ Das Skript
 - hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch. Existiert diese Backup-Datei nicht mehr, bricht `upgrade.sh` nicht ab, warnt aber deutlich, dass ein Rollback per Restore nicht möglich ist (ein neues Backup ersetzt sie bewusst nicht, weil es schon migrierte Daten enthalten kann). `scripts/backup.sh` löscht die dort genannte Datei bei der Aufbewahrung (`BACKUP_KEEP_DAYS`) nicht,
 - wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
-- startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Das gilt für Dienste mit Healthcheck (caddy, web, api, postgres); der **Worker hat keinen Healthcheck** und wird nur als „running“ geprüft – ihn danach separat kontrollieren (siehe unten),
+- startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Alle Dienste haben einen Healthcheck; beim Worker heißt `healthy`, dass seine Hauptschleife läuft und die Datenbank erreicht (Heartbeat, siehe [Troubleshooting](troubleshooting.md)),
 - räumt danach alte, unbenutzte Images weg (`docker image prune -f`).
 
 Schlägt ab dem Checkout ein Schritt fehl, gibt das Skript den Rollback-Hinweis mit altem Commit und Backup-Pfad aus.
@@ -47,7 +47,7 @@ docker compose build
 docker compose up -d --wait
 ```
 
-**Worker prüfen:** `--wait` erkennt beim Worker nur, ob der Container läuft. Danach `docker compose ps worker` (Status `running`, nicht `restarting`) und `docker compose logs --tail=50 worker` auf Start- oder Migrationsfehler (z. B. `database schema is newer than this app version`) prüfen.
+**Worker prüfen:** `--wait` wartet auch auf den Worker-Healthcheck (Heartbeat nach erfolgreichem Datenbankzugriff, bis zu 30 s nach dem Start). Er sagt nichts über die Mailkonten aus: Bei Problemen `docker compose logs --tail=50 worker` auf Start- oder Migrationsfehler (z. B. `database schema is newer than this app version`) prüfen; Verbindungsprobleme einzelner Konten zeigt die Kontoliste.
 
 Zwischen Backup und Neustart geschriebene Daten (neue Mails, gesendete Nachrichten) wären bei einem Rollback verloren; neue Mails holt der Worker danach beim Anbieter nach.
 

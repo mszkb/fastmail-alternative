@@ -138,7 +138,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-mail}
-    # No healthcheck yet: the worker gets real jobs (IMAP/SMTP/push) in phase 2.
+    # No HTTP port: the main loop writes a heartbeat file (/tmp/worker-heartbeat,
+    # WORKER_HEARTBEAT_FILE) every 30 s after a successful `SELECT 1`;
+    # dist/healthcheck.js fails if it is older than 120 s (loop stuck or
+    # database unreachable). start_period covers migrations on startup.
+    healthcheck:
+      test: ['CMD', 'node', 'dist/healthcheck.js']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy

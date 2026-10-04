@@ -2,7 +2,8 @@ import { defineConfig } from 'tsup'
 
 export default defineConfig({
   // backup.js: encrypted backup/restore CLI (docs/operations/backup-restore.md).
-  entry: { main: 'src/main.ts', backup: 'src/backup-cli.ts' },
+  // healthcheck.js: Docker healthcheck (heartbeat file, docker-compose.yml).
+  entry: { main: 'src/main.ts', backup: 'src/backup-cli.ts', healthcheck: 'src/healthcheck.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node24',

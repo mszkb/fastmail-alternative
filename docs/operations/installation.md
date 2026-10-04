@@ -97,13 +97,13 @@ Das baut die Images (web, api, worker), startet alle Dienste und wartet, bis cad
 Kontrolle:
 
 ```sh
-docker compose ps                    # alle Dienste "running" bzw. "healthy"
+docker compose ps                    # alle Dienste "healthy"
 docker compose logs --tail=50 api    # "migrations applied"
 docker compose logs --tail=50 worker # keine Fehler, kein Neustart-Loop
 docker compose logs --tail=50 caddy  # Zertifikat erhalten ("certificate obtained")
 ```
 
-Der Worker hat keinen Healthcheck; er sollte dauerhaft `running` sein (nicht `restarting`). Bei Problemen: [Troubleshooting](troubleshooting.md).
+Auch der Worker wird `healthy` (Heartbeat nach erfolgreichem Datenbankzugriff, bis zu 30 s nach dem Start). Bei Problemen: [Troubleshooting](troubleshooting.md).
 
 ## 6. Benutzer anlegen (Ersteinrichtung)
 

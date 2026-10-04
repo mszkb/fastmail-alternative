@@ -12,13 +12,15 @@ docker stats --no-stream                  # RAM/CPU je Container
 df -h && docker system df                 # Plattenplatz
 ```
 
-| Dienst     | Healthcheck                                   | Erwarteter Status              |
-| ---------- | --------------------------------------------- | ------------------------------ |
-| `caddy`    | Admin-API auf Port 2019                       | `healthy`                      |
-| `web`      | `GET /` auf Port 3000                         | `healthy`                      |
-| `api`      | `GET /api/health` (inkl. Datenbankverbindung) | `healthy`                      |
-| `postgres` | `pg_isready`                                  | `healthy`                      |
-| `worker`   | keiner                                        | `running` (nicht `restarting`) |
+| Dienst     | Healthcheck                                                  | Erwarteter Status |
+| ---------- | ------------------------------------------------------------ | ----------------- |
+| `caddy`    | Admin-API auf Port 2019                                      | `healthy`         |
+| `web`      | `GET /` auf Port 3000                                        | `healthy`         |
+| `api`      | `GET /api/health` (inkl. Datenbankverbindung)                | `healthy`         |
+| `postgres` | `pg_isready`                                                 | `healthy`         |
+| `worker`   | Heartbeat-Datei jünger als 120 s (inkl. Datenbankverbindung) | `healthy`         |
+
+Der Worker hat keinen HTTP-Port: Seine Hauptschleife schreibt alle 30 s nach einem erfolgreichen `SELECT 1` einen Zeitstempel nach `/tmp/worker-heartbeat` im Container; `dist/healthcheck.js` meldet `unhealthy`, wenn er älter als 120 s ist (Schleife hängt oder Datenbank nicht erreichbar). Im Log steht dann `heartbeat failed` (mit Fehlercode, einmal pro Ausfall) bzw. `heartbeat restored`. Ursache des letzten Checks: `docker inspect --format '{{json .State.Health}}' $(docker compose ps -q worker)`. Nach dem Start bleibt der Worker bis zu 30 s im Status `starting` (Migrationen, erster Heartbeat).
 
 Von außen: `curl -s https://mail.example.org/api/health` liefert `{"status":"ok",…,"checks":{"database":"ok"}}`; ohne Datenbank antwortet die API mit `503` und `"database":"down"`.
 

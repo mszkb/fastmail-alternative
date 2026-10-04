@@ -10,12 +10,17 @@
  * As a fallback the scheduler (./scheduler) enqueues a periodic
  * folder_sync per account.
  *
+ * Liveness: the main loop writes a heartbeat file after a successful
+ * `SELECT 1` (./heartbeat); the Docker healthcheck (dist/healthcheck.js)
+ * checks that it is fresh.
+ *
  * Logging: structured JSON via pino with the central redaction rules
  * (roadmap 1.7).
  */
 import { runMigrations } from '@fma/db/migrate'
 import { createPool } from '@fma/db'
 import { markSendGivenUp } from './jobs/send-message'
+import { Heartbeat, clearHeartbeat, heartbeatFile } from './heartbeat'
 import { IdleManager, imapIdleEnabled } from './idle'
 import { log } from './log'
 import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
@@ -34,6 +39,9 @@ const SCHEDULER_TICK_MS = 15_000
 let shuttingDown = false
 
 async function main(): Promise<void> {
+  // A heartbeat from before a container restart must not report healthy.
+  const heartbeatPath = heartbeatFile()
+  clearHeartbeat(heartbeatPath)
   const pool = createPool()
   const applied = await runMigrations(pool)
   if (applied.length > 0) {
@@ -91,7 +99,21 @@ async function main(): Promise<void> {
     log.error({ code: (err as { code?: string }).code ?? 'UNKNOWN' }, 'idle start failed')
   })
 
+  const heartbeat = new Heartbeat(pool, heartbeatPath)
+  let heartbeatFailing = false
   while (!shuttingDown) {
+    try {
+      if (await heartbeat.tick()) {
+        if (heartbeatFailing) log.info('heartbeat restored')
+        heartbeatFailing = false
+      }
+    } catch (err) {
+      // Log once per outage; the stale heartbeat marks the container unhealthy.
+      if (!heartbeatFailing) {
+        log.error({ code: (err as { code?: string }).code ?? 'UNKNOWN' }, 'heartbeat failed')
+      }
+      heartbeatFailing = true
+    }
     await schedulerTick()
     await runner.fill()
     // Wake up when a slot frees up, at the latest after the poll interval.
