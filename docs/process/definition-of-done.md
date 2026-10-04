@@ -28,7 +28,7 @@ Ein Issue/PR gilt als erledigt, wenn alle zutreffenden Punkte erfüllt sind.
 - [ ] Nutzer- bzw. Betreiber-Doku aktualisiert, falls Verhalten oder Konfiguration sich ändert
 - [ ] ADR angelegt/aktualisiert, falls eine Architekturentscheidung getroffen wurde
 - [ ] Status in `ROADMAP.md` aktualisiert
-- [ ] Changelog-Eintrag (ab Phase 7)
+- [ ] `CHANGELOG.md` unter `[Unreleased]` ergänzt, falls nutzer- oder betreiberrelevant; Migrationen und Breaking Changes als **Betreiber:** markiert ([Changelog-Prozess](changelog.md))
 
 ## Deployment
 

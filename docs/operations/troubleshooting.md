@@ -24,6 +24,8 @@ Von außen: `curl -s https://mail.example.org/api/health` liefert `{"status":"ok
 
 **Logs enthalten bewusst keine Mailinhalte, Betreffzeilen, Adressen oder Zugangsdaten** – auch keine Fehlertexte der Mailanbieter (die können Inhalte zitieren). Gespeichert werden nur stabile Fehlercodes (z. B. `AUTH_FAILED`), IDs, Zähler und Größen. Ein Logauszug kann deshalb für eine Support-Anfrage weitergegeben werden; die `.env` dagegen **nie** (sie enthält `MASTER_KEY`, VAPID-Privatschlüssel und Datenbankpasswort). Für eine Fehlermeldung genügen: Version (`git rev-parse --short HEAD`), `docker compose ps`, die relevanten Logzeilen und der Fehlercode aus der Kontoliste.
 
+Fehler bitte über die [Issue-Vorlage „Fehler melden“](https://github.com/mszkb/fastmail-alternative/issues/new/choose) melden, Sicherheitslücken ausschließlich vertraulich nach der [Security-Policy](../../SECURITY.md).
+
 ## Start und Installation
 
 | Symptom                                                                      | Ursache / Lösung                                                                                                                                                                         |

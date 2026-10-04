@@ -2,7 +2,7 @@
 
 wip: self hosted fastmail-alternative
 
-→ Planung: [ROADMAP.md](ROADMAP.md) · Doku: [docs/](docs/README.md) · Lizenz: [ISC](LICENSE)
+→ Planung: [ROADMAP.md](ROADMAP.md) · Doku: [docs/](docs/README.md) · Changelog: [CHANGELOG.md](CHANGELOG.md) · Sicherheit: [SECURITY.md](SECURITY.md) · Lizenz: [ISC](LICENSE)
 
 ## Installation
 

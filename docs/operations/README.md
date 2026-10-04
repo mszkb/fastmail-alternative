@@ -15,5 +15,11 @@ Außerdem:
 - [Systemanforderungen](system-requirements.md) – gemessener Ressourcenverbrauch, Hardware-Empfehlung
 - [Umzug auf einen neuen Server](migration.md) – vollständig per Backup oder per Konfigurations-Export
 - [Master-Key-Rotation](../process/key-rotation.md)
+- [Changelog](../../CHANGELOG.md) – vor jedem Upgrade auf **Betreiber:**-Einträge prüfen
+
+## Support
+
+- Fehler oder Wünsche: [GitHub-Issue](https://github.com/mszkb/fastmail-alternative/issues/new/choose) über die Vorlagen – vorher [Troubleshooting](troubleshooting.md#erste-diagnose) lesen. Keine Mailinhalte, Betreffzeilen, Adressen, Zugangsdaten, `.env` oder `MASTER_KEY` posten.
+- Sicherheitslücken **nicht** öffentlich, sondern vertraulich nach der [Security-Policy](../../SECURITY.md) melden.
 
 **Das Wichtigste in einem Satz:** Die `.env` – vor allem der `MASTER_KEY` – getrennt von Server und Backups sichern; ohne ihn sind Datenbank und Backups nicht mehr lesbar.

@@ -1,0 +1,77 @@
+name: Fehler melden
+description: Etwas funktioniert nicht wie erwartet.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Bitte keine sensiblen Daten posten:** keine Mailinhalte, Betreffzeilen, E-Mail-Adressen, Passwörter, OAuth-Tokens, keine `.env` und niemals den `MASTER_KEY`. Logs vorher durchsehen und im Zweifel kürzen.
+
+        **Sicherheitslücken nicht hier melden**, sondern vertraulich nach der [Security-Policy](https://github.com/mszkb/fastmail-alternative/blob/main/SECURITY.md).
+
+        Hilfe zur Diagnose: [Troubleshooting](https://github.com/mszkb/fastmail-alternative/blob/main/docs/operations/troubleshooting.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      description: Ausgabe von `git rev-parse --short HEAD` (bzw. Image-Tag)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installationsart
+      options:
+        - Docker Compose (rootless)
+        - Docker Compose (root)
+        - Entwicklungsumgebung (pnpm dev)
+        - Andere
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Server-Plattform
+      description: z. B. Raspberry Pi 4 / Debian 13 / arm64, oder VPS x86-64
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: Browser und Version, installierte PWA ja/nein, Gerät/OS (z. B. iOS 26 PWA, Firefox 140 Desktop)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zum Nachstellen
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Erwartetes Verhalten
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Tatsächliches Verhalten
+      description: Inkl. Fehlercode aus der Kontoliste (z. B. `AUTH_FAILED`), falls vorhanden
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevante Logs
+      description: Ausgabe von `docker compose ps` und die relevanten Zeilen aus `docker compose logs`. Vorher auf sensible Daten prüfen.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Datenschutz
+      options:
+        - label: Ich habe geprüft, dass dieser Report keine Mailinhalte, Betreffzeilen, Adressen, Zugangsdaten, `.env`-Inhalte oder den `MASTER_KEY` enthält.
+          required: true
