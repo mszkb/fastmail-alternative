@@ -88,7 +88,7 @@ erDiagram
         text key_id "Master-Key-Version"
         text credential_kind "password | oauth2"
         text oauth_provider "microsoft | google | null"
-        timestamptz sync_since "Initial-Sync-Grenze, null = alles"
+        timestamptz sync_since "Sync-Grenze (Tag, Internal Date), null = alles"
         bytea credential_enc
         text status "ok | auth_error | unreachable | disabled"
         int error_count
@@ -216,7 +216,7 @@ erDiagram
 
 ### Konten
 
-- **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Initial-Sync-Grenze (`sync_since`, pro Konto wählbar), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
+- **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Sync-Grenze (`sync_since`, pro Konto wählbar: `message_sync` holt initial und laufend nur Mails, die der Provider per `UID SEARCH SINCE <Tag>` nach Internal Date liefert; `null` = alles; „Ältere Mails laden“ ignoriert die Grenze; bereits gespeicherte ältere Mails bleiben beim Setzen erhalten; API/UI als Kalendertag `YYYY-MM-DD`, UI-Auswahl Alle/30/90 Tage/1 Jahr wird beim Speichern in einen Tag umgerechnet), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
   - Die API darf `credential_enc` nie in Listen- oder Detail-Antworten ausliefern. Dafür ist **ein explizites Spalten-Select** in der Konto-Abfrage Pflicht (kein `SELECT *`).
 - **`identity`**: Absenderadressen pro Konto (Roadmap 3.6), je Konto eindeutig (Adresse ohne Groß-/Kleinschreibung). Beim Anlegen wird eine Identität aus `email_address` erzeugt und als `mail_account.default_identity_id` gesetzt; weitere Aliase legt der Benutzer an. Die Standard-Identität kann nicht gelöscht werden.
 

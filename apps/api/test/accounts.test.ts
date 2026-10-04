@@ -118,6 +118,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     const body = res.json()
     expect(body.account.status).toBe('ok')
     expect(body.account.emailAddress).toBe('testuser@example.com')
+    expect(body.account.syncSince).toBeNull()
     expect(body.test.imap.ok).toBe(true)
     expect(body.test.smtp.ok).toBe(true)
     // Credentials and DEK must never appear anywhere.
@@ -284,6 +285,55 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
       payload: { displayName: 'x' },
     })
     expect(invalid.statusCode).toBe(404)
+  })
+
+  it('sets, validates and clears the sync limit (syncSince)', async () => {
+    const id = await accountId()
+    const today = new Date().toISOString().slice(0, 10)
+    const tomorrowPlus = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    for (const syncSince of [tomorrowPlus, '2026-02-30', '30', 30, '2026-01-01T00:00:00Z', '']) {
+      const bad = await inject('PATCH', `/api/accounts/${id}`, {
+        token: authToken,
+        payload: { syncSince },
+      })
+      expect(bad.statusCode).toBe(400)
+    }
+    const badCreate = await inject('POST', '/api/accounts', {
+      token: authToken,
+      payload: {
+        emailAddress: 'x@example.com',
+        imap: { host: 'imap.example.com', port: 993, user: 'x', password: 'y' },
+        smtp: { host: 'smtp.example.com', port: 465 },
+        syncSince: tomorrowPlus,
+      },
+    })
+    expect(badCreate.statusCode).toBe(400)
+
+    const jobsBefore = await folderSyncJobCount(id)
+    const set = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: '2026-01-15' },
+    })
+    expect(set.statusCode).toBe(200)
+    expect(set.json().account.syncSince).toBe('2026-01-15')
+    // A changed limit triggers a sync (a wider period fills the window).
+    expect(await folderSyncJobCount(id)).toBe(jobsBefore + 1)
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json()
+    expect(listed.accounts.find((a: { id: string }) => a.id === id).syncSince).toBe('2026-01-15')
+
+    const todayRes = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: today },
+    })
+    expect(todayRes.json().account.syncSince).toBe(today)
+    const cleared = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: null },
+    })
+    expect(cleared.statusCode).toBe(200)
+    expect(cleared.json().account.syncSince).toBeNull()
+    const unauth = await inject('PATCH', `/api/accounts/${id}`, { payload: { syncSince: null } })
+    expect(unauth.statusCode).toBe(401)
   })
 
   it('re-tests changed connection data and saves nothing on failure', async () => {

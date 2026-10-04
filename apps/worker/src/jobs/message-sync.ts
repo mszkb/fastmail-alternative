@@ -6,10 +6,13 @@
  * (per-folder UIDs and flags) in sync.
  *
  * Bounded initial fetch: the newest MESSAGE_SYNC_LIMIT messages per folder;
- * incremental runs fetch only UIDs above the highest synced one.
+ * incremental runs fetch only UIDs above the highest synced one. With a
+ * sync limit (mail_account.sync_since, #28) both consider only UIDs the
+ * provider returns for `UID SEARCH SINCE <day>` (internal date).
  * Older messages are loaded on request (POST /api/folders/:id/load-older,
  * payload `loadOlder` of message_sync): additionally the next
- * MESSAGE_SYNC_LIMIT unknown UIDs below the lowest synced one. Nothing
+ * MESSAGE_SYNC_LIMIT unknown UIDs below the lowest synced one, regardless
+ * of the sync limit. Nothing
  * removes them later: reconciliation compares against the whole folder.
  *
  * Reconciliation of already known messages: every run lists UID+FLAGS of
@@ -300,6 +303,11 @@ export async function runMessageSync(
   )
   const folder = folderRows.rows[0]
   if (!folder) throw new Error(`folder ${folderId} not found for account ${accountId}`)
+  const { rows: accountRows } = await pool.query<{ sync_since: Date | null }>(
+    'SELECT sync_since FROM mail_account WHERE id = $1',
+    [accountId],
+  )
+  const syncSince = accountRows[0]?.sync_since ?? null
   // \Noselect container (e.g. "[Gmail]"): no messages, SELECT would fail.
   if (!folder.selectable) return
 
@@ -382,16 +390,37 @@ export async function runMessageSync(
     const knownUids = new Set(knownRows.map((row) => Number(row.uid)))
     let highestSynced = 0
     for (const uid of knownUids) if (uid > highestSynced) highestSynced = uid
-    const windowStart = allUids.length - limit
-    const targetUids = allUids.filter(
+    // Sync limit of the account (mail_account.sync_since, #28): only UIDs the
+    // provider reports for SEARCH SINCE <day> (internal date) are candidates
+    // of the window and the incremental part. Already stored older messages
+    // stay (reconciliation above covers the whole folder).
+    let candidates = allUids
+    let eligible: Set<number> | null = null
+    if (syncSince && allUids.length > 0) {
+      const found = await client.search({ since: syncSince }, { uid: true })
+      // imapflow returns false on a failed SEARCH: retry the job rather than
+      // silently syncing nothing (no provider text in the error).
+      if (!Array.isArray(found)) throw new Error('SEARCH SINCE failed')
+      const matched = new Set(found)
+      eligible = matched
+      candidates = allUids.filter((uid) => matched.has(uid))
+    }
+    const windowStart = candidates.length - limit
+    const targetUids = candidates.filter(
       (uid, index) =>
         !knownUids.has(uid) && (index >= windowStart || (highestSynced > 0 && uid > highestSynced)),
     )
     if (options.loadOlder) {
       // The next `limit` unknown UIDs below the lowest synced (server) UID.
+      // Deliberately ignores the sync limit: the explicit way to get older
+      // messages anyway.
       let lowestSynced = Infinity
       for (const uid of knownUids) if (uid > 0 && uid < lowestSynced) lowestSynced = uid
-      const older = allUids.filter((uid) => uid < lowestSynced && !knownUids.has(uid))
+      // Messages skipped by the sync limit can sit between synced UIDs
+      // (e.g. old mail moved into the folder later); they count as older.
+      const older = allUids.filter(
+        (uid) => !knownUids.has(uid) && (uid < lowestSynced || (eligible && !eligible.has(uid))),
+      )
       const pending = new Set(targetUids)
       for (const uid of older.slice(-limit)) if (!pending.has(uid)) targetUids.push(uid)
       targetUids.sort((a, b) => a - b)

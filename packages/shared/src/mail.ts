@@ -291,6 +291,51 @@ export interface OutboxContent {
   text: string
 }
 
+/**
+ * Choices for the sync period offered in the account settings: a number of
+ * days before today (converted to an absolute `syncSince` date on save),
+ * null = all messages.
+ */
+export const SYNC_SINCE_CHOICES: ReadonlyArray<{ days: number | null; label: string }> = [
+  { days: null, label: 'Alle' },
+  { days: 30, label: '30 Tage' },
+  { days: 90, label: '90 Tage' },
+  { days: 365, label: '1 Jahr' },
+]
+
+const ISO_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/** `YYYY-MM-DD` (UTC) of a date. */
+export function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
+/** `YYYY-MM-DD` of the day `days` days before `now` (UTC). */
+export function syncSinceFromDays(days: number, now: Date = new Date()): string {
+  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  date.setUTCDate(date.getUTCDate() - days)
+  return isoDay(date)
+}
+
+/**
+ * Validates a `syncSince` input (roadmap 2.2, #28): null (no limit) or a
+ * calendar day `YYYY-MM-DD` between 1970-01-01 and today (UTC; one day of
+ * slack for clients east of UTC). IMAP SEARCH SINCE compares days only, so
+ * a time of day carries no meaning. Returns undefined when invalid.
+ */
+export function parseSyncSince(value: unknown, now: Date = new Date()): string | null | undefined {
+  if (value === null) return null
+  if (typeof value !== 'string') return undefined
+  const match = ISO_DAY_RE.exec(value)
+  if (!match) return undefined
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  // Rejects impossible days like 2026-02-30 (Date.UTC rolls them over).
+  if (Number.isNaN(date.getTime()) || isoDay(date) !== value) return undefined
+  if (date.getTime() < 0) return undefined
+  if (value > syncSinceFromDays(-1, now)) return undefined
+  return value
+}
+
 /** One mail account as the api lists it (never credentials or keys). */
 export interface AccountSummary {
   id: string
@@ -306,6 +351,12 @@ export interface AccountSummary {
   capabilities: string[]
   sortOrder: number
   lastSyncAt: string | null
+  /**
+   * Sync limit (roadmap 2.2, #28), `YYYY-MM-DD`: the message sync only
+   * fetches messages whose IMAP internal date is on or after this day;
+   * null = no limit. "Load older messages" ignores it.
+   */
+  syncSince: string | null
   /**
    * Unread messages in the INBOX (special-use `inbox`) - the number shown in
    * the account switcher, computed like the folder counts.
