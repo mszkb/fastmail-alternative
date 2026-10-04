@@ -97,3 +97,29 @@ export class SwipeBack {
     return trigger
   }
 }
+
+/** The parts of a form field needed to tell whether it holds unsaved input. */
+export interface FormFieldState {
+  type?: string
+  value: string
+  defaultValue: string
+  checked?: boolean
+  defaultChecked?: boolean
+}
+
+/**
+ * True when any field differs from its initial state. A swipe "back" in
+ * the settings unmounts the open form, so the view refuses it while this
+ * is true. Fields filled through v-model count as changed (their
+ * `defaultValue` stays empty), which errs on the side of keeping input.
+ */
+export function hasUnsavedInput(fields: Iterable<FormFieldState>): boolean {
+  for (const field of fields) {
+    if (field.type === 'checkbox' || field.type === 'radio') {
+      if (Boolean(field.checked) !== Boolean(field.defaultChecked)) return true
+    } else if (field.value !== field.defaultValue) {
+      return true
+    }
+  }
+  return false
+}

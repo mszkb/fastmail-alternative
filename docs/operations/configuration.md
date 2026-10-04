@@ -90,13 +90,13 @@ Diese Variablen gehören **nicht** in die `.env`: `scripts/backup.sh` liest sie 
 
 Folgende Werte sind in `docker-compose.yml`, `Caddyfile` oder im Code fest und brauchen normalerweise keine Änderung:
 
-| Was               | Wert                                                                                                           |
-| ----------------- | -------------------------------------------------------------------------------------------------------------- |
-| Öffentliche Ports | 80, 443 (caddy); PostgreSQL nur auf `127.0.0.1:5432` (für SSH-Tunnel/Wartung, nicht aus dem Netz erreichbar)   |
-| Interne Ports     | web 3000, api 3001 (nur im Compose-Netz)                                                                       |
-| Volumes           | `postgres-data`, `mail-data` (verschlüsselte Rohmails und Uploads), `caddy-data` (Zertifikate), `caddy-config` |
-| Speicherlimits    | caddy 64 MB, web 64 MB, api 192 MB, worker 384 MB, postgres 256 MB                                             |
-| Request-Timeouts  | Caddy: Header 30 s, Body 2 min; API: 120 s                                                                     |
-| Logs              | json-file, 10 MB × 3 Dateien je Dienst                                                                         |
+| Was               | Wert                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Öffentliche Ports | 80, 443 (caddy); PostgreSQL nur auf `127.0.0.1:5432` (für SSH-Tunnel/Wartung, nicht aus dem Netz erreichbar)                                        |
+| Interne Ports     | web 3000, api 3001 (nur im Compose-Netz)                                                                                                            |
+| Volumes           | `postgres-data`, `mail-data` (verschlüsselte Rohmails; Uploads liegen verschlüsselt in `postgres-data`), `caddy-data` (Zertifikate), `caddy-config` |
+| Speicherlimits    | caddy 64 MB, web 64 MB, api 192 MB, worker 384 MB, postgres 256 MB                                                                                  |
+| Request-Timeouts  | Caddy: Header 30 s, Body 2 min; API: 120 s                                                                                                          |
+| Logs              | json-file, 10 MB × 3 Dateien je Dienst                                                                                                              |
 
 Wer einen eigenen Reverse Proxy betreibt, kann den Dienst `caddy` entfernen und `/api/*` an `api:3001`, alles andere an `web:3000` weiterleiten (siehe `Caddyfile`). web und api haben nur interne Ports; der eigene Proxy muss sie also im Compose-Netz erreichen, oder die Ports werden in der `docker-compose.yml` auf `127.0.0.1` freigegeben.

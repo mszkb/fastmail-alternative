@@ -19,7 +19,7 @@
 // soon as it is back online; queued actions (utils/offline-queue.ts) are
 // replayed first, then the usual sync runs. Logout, an expired or revoked
 // session (401) or another user clear all offline data on this device.
-import { ForegroundSyncPolicy, SwipeBack, unreadBadgeCount } from '@fma/shared'
+import { ForegroundSyncPolicy, SwipeBack, hasUnsavedInput, unreadBadgeCount } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 import {
   clearOfflineData,
@@ -134,6 +134,11 @@ function onSwipeEnd(event: TouchEvent): void {
 /** One navigation step back; does nothing on the top-level mail list. */
 function goBack(): void {
   if (section.value === 'settings') {
+    // Leaving the settings unmounts any open form; never drop unsaved input.
+    const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      '.settings input, .settings textarea',
+    )
+    if (hasUnsavedInput(fields)) return
     if (editAccountId.value) editAccountId.value = ''
     else section.value = 'mail'
     return

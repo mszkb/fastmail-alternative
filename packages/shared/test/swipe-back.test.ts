@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SwipeBack } from '../src/swipe-back'
+import { SwipeBack, hasUnsavedInput } from '../src/swipe-back'
 
 describe('SwipeBack', () => {
   it('goes back after a quick horizontal swipe to the right', () => {
@@ -74,5 +74,35 @@ describe('SwipeBack', () => {
     const swipe = new SwipeBack()
     expect(swipe.move(300, 300)).toBe(0)
     expect(swipe.end(0)).toBe(false)
+  })
+})
+
+describe('hasUnsavedInput', () => {
+  it('is false for untouched fields', () => {
+    expect(
+      hasUnsavedInput([
+        { type: 'text', value: '', defaultValue: '' },
+        {
+          type: 'checkbox',
+          value: 'on',
+          defaultValue: 'on',
+          checked: false,
+          defaultChecked: false,
+        },
+      ]),
+    ).toBe(false)
+  })
+
+  it('is true once a text field or a checkbox changed', () => {
+    expect(hasUnsavedInput([{ type: 'password', value: 'secret', defaultValue: '' }])).toBe(true)
+    expect(
+      hasUnsavedInput([
+        { type: 'checkbox', value: 'on', defaultValue: 'on', checked: true, defaultChecked: false },
+      ]),
+    ).toBe(true)
+  })
+
+  it('is false without fields', () => {
+    expect(hasUnsavedInput([])).toBe(false)
   })
 })
