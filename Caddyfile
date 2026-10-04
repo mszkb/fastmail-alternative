@@ -13,8 +13,8 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# Security headers (roadmap 6.4). App CSP and friends come from the web
-	# container (apps/web/nginx.conf), api headers from the api itself; caddy
+	# Security headers (roadmap 6.4). App CSP and api headers come from the
+	# api itself (apps/api/src/web-app.ts, security/headers.ts); caddy
 	# adds HSTS for the whole origin (ignored by browsers on plain-HTTP
 	# instances with DOMAIN=:80) and fills in nosniff where missing.
 	header {
@@ -23,11 +23,6 @@
 		-Server
 	}
 
-	handle /api/* {
-		reverse_proxy api:3001
-	}
-
-	handle {
-		reverse_proxy web:3000
-	}
+	# The api serves both /api/* and the static PWA.
+	reverse_proxy api:3001
 }

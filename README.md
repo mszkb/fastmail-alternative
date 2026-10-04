@@ -6,7 +6,7 @@ wip: self hosted fastmail-alternative
 
 ## Systemanforderungen
 
-Der komplette Stack (caddy, web, api, worker, postgres) läuft komfortabel auf einem Raspberry Pi mit 2 GB RAM – gemessen im Leerlauf: **~200 MB RAM · ~0 % CPU · ~1 GB Disk**.
+Der komplette Stack (caddy, api, worker, postgres) läuft komfortabel auf einem Raspberry Pi mit 2 GB RAM – gemessen im Leerlauf: **~200 MB RAM · ~0 % CPU · ~1 GB Disk**.
 
 |          | Minimum                    | Empfohlen                         |
 | -------- | -------------------------- | --------------------------------- |

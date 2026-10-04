@@ -21,6 +21,7 @@ import { trustOnePrivateProxy } from './security/client-ip'
 import { registerCsrfProtection } from './security/csrf'
 import { registerSecurityHeaders } from './security/headers'
 import { DEFAULT_RATE_LIMITS, registerRateLimits, type RateLimitRule } from './security/rate-limit'
+import { registerWebApp } from './web-app'
 
 /** Time to receive one complete request (also upload bodies on slow links). */
 export const REQUEST_TIMEOUT_MS = 120_000
@@ -32,19 +33,22 @@ export interface AppOptions {
   logStream?: NodeJS.WritableStream
   /** Rate limit rules (tests lower them); default DEFAULT_RATE_LIMITS. */
   rateLimits?: RateLimitRule[]
+  /** Built PWA to serve next to the api (web-app.ts); default WEB_DIR, unset = api only. */
+  webDir?: string
 }
 
 /**
  * Builds the Fastify instance without starting to listen, so the app can be
  * started standalone and tested in integration tests later on.
  *
- * All routes live under /api/* (caddy forwards /api/* as-is; native clients
- * later use the same paths, see ADR-0010).
+ * All routes live under /api/* (native clients later use the same paths,
+ * see ADR-0010). With a web dir, every other path serves the PWA.
  */
 export function buildApp({
   logger = true,
   logStream,
   rateLimits = DEFAULT_RATE_LIMITS,
+  webDir = process.env.WEB_DIR,
 }: AppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: logger
@@ -126,6 +130,7 @@ export function buildApp({
   app.register(syncRoutes)
   app.register(pushRoutes)
   app.register(configTransferRoutes)
+  if (webDir) registerWebApp(app, webDir)
 
   return app
 }

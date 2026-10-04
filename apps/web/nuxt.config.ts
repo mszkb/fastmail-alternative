@@ -1,8 +1,8 @@
 export default defineNuxtConfig({
   compatibilityDate: '2026-10-02',
   devtools: { enabled: true },
-  // Pure client-side PWA: no SSR runtime, built as static files and served
-  // by nginx (saves a node process on the server).
+  // Pure client-side PWA: no SSR runtime, built as static files that the
+  // api serves (apps/api/src/web-app.ts; no extra process on the server).
   ssr: false,
   // The service worker (scripts/build-sw.mjs) handles new versions with an
   // update prompt; Nuxt's build manifest polling is not needed.

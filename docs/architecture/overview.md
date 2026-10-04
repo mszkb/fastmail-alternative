@@ -8,12 +8,13 @@
                          ┌───────────────────────────────────────────────────────────┐
  iPhone-PWA / Browser    │ Docker Compose                                            │
  (später: native Apps)   │                                                           │
-┌──────────────────────┐ │ ┌────────┐   ┌──────────────┐   ┌──────────────────────┐ │
-│ Nuxt-PWA             │ │ │        │──►│ web (Nuxt)   │   │ api (Fastify)        │ │
-│ - Service Worker     │◄┼►│ caddy  │   └──────────────┘   │ - Auth, Geräte       │ │
-│ - IndexedDB-Cache    │ │ │  TLS   │──────────────────────►│ - Konten, Ordner,    │ │
-│ - Offline-Queue      │ │ │        │                       │   Nachrichten, Suche │ │
-└──────────▲───────────┘ │ └────────┘                       └──────────┬───────────┘ │
+┌──────────────────────┐ │ ┌────────┐                       ┌──────────────────────┐ │
+│ Nuxt-PWA             │ │ │        │                       │ api (Fastify)        │ │
+│ - Service Worker     │◄┼►│ caddy  │                       │ - statische PWA      │ │
+│ - IndexedDB-Cache    │ │ │  TLS   │──────────────────────►│ - Auth, Geräte,      │ │
+│ - Offline-Queue      │ │ │        │                       │   Konten, Ordner,    │ │
+└──────────▲───────────┘ │ └────────┘                       │   Nachrichten, Suche │ │
+           │             │                                  └──────────┬───────────┘ │
            │ Web Push    │                                             │             │
 ┌──────────┴───────────┐ │ ┌──────────────────────┐  ┌───────────────▼───────────┐ │
 │ Push-Dienst (Apple,  │ │ │ worker               │  │ postgres                  │ │
@@ -34,7 +35,7 @@
 | Komponente    | Verantwortung                                                                                                                                                                                                     |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **caddy**     | TLS über Let's Encrypt, Reverse Proxy (ADR-0007)                                                                                                                                                                  |
-| **web**       | Nuxt/Vue-PWA: Service Worker, IndexedDB-Cache, Offline-Queue. Dünner Client ohne eigene Geschäftslogik (ADR-0010)                                                                                                 |
+| **web**       | Nuxt/Vue-PWA (`apps/web`, statisch gebaut, von der API ausgeliefert): Service Worker, IndexedDB-Cache, Offline-Queue. Dünner Client ohne eigene Geschäftslogik (ADR-0010)                                         |
 | **api**       | Fastify, REST/JSON mit OpenAPI-Vertrag (später ggf. SSE für Live-Updates). Keine IMAP-Verbindungen direkt aus Requests: Alles Langlaufende läuft über Jobs. Ausnahme ist die Suche über IMAP `SEARCH` (ADR-0006). |
 | **worker**    | IMAP-Sync (IDLE-Verbindungen pro Konto), SMTP-Versand, Push, Cleanup                                                                                                                                              |
 | **postgres**  | Benutzer, Geräte, Konten, Ordner, Nachrichtenmetadaten (lesbare Felder verschlüsselt), Threads, Jobs, Push-Subscriptions                                                                                          |
@@ -61,7 +62,7 @@
 - Handgeschriebener Service Worker (`apps/web/service-worker/sw.js`) statt `@vite-pwa/nuxt`: wenige Zeilen, keine Workbox-Abhängigkeit, volle Kontrolle darüber, was gecacht wird. Nach `nuxt generate` schreibt `apps/web/scripts/build-sw.mjs` die Precache-Liste (index.html, gehashte Assets, Manifest, Icons) und einen Inhalts-Hash als Cache-Version in `/sw.js`.
 - **Nur die App-Shell wird gecacht.** Navigationen bekommen die gecachte `index.html`, Shell-Dateien kommen cache-first. `/api/*` geht immer ans Netz und landet nie im Cache Storage; Maildaten für offline liegen verschlüsselt in IndexedDB (siehe unten, 4.6).
 - Updates: Eine neue Version wird im Hintergrund installiert und wartet. Die App zeigt „Neue Version verfügbar – Neu laden“; erst der Klick aktiviert sie (`SKIP_WAITING`) und lädt neu. Damit geht kein offener Entwurf durch einen erzwungenen Reload verloren. Geöffnete PWAs suchen beim Wiederanzeigen (höchstens alle 10 min) nach Updates.
-- nginx: `sw.js`, `manifest.webmanifest` und `index.html` mit `no-cache`, `/_nuxt/` (gehasht) `immutable`.
+- Auslieferung durch die API (`apps/api/src/web-app.ts`): `sw.js`, `manifest.webmanifest` und `index.html` mit `no-cache` (plus ETag), `/_nuxt/` (gehasht) `immutable`, `/icons/` einen Tag. Unbekannte Pfade bekommen die App-Shell, außer `/api/*` und fehlende `/_nuxt/`-Dateien (404).
 
 ## Offline-first (Roadmap 4.6)
 
@@ -84,7 +85,7 @@ Die Regeln gelten für jeden Client gleich (ADR-0010); die Logik liegt testbar i
 
 ## Deployment
 
-- Docker Compose (ADR-0007): `caddy`, `web`, `api`, `worker`, `postgres`; Volumes `postgres-data`, `mail-data`, `caddy-data`.
+- Docker Compose (ADR-0007): `caddy`, `api` (inkl. PWA), `worker`, `postgres`; Volumes `postgres-data`, `mail-data`, `caddy-data`.
 - Konfiguration über `.env` (Domain, `MASTER_KEY`, VAPID, OAuth-Client-Daten).
 - Healthchecks für alle Services; Migrationen laufen beim Start der API.
 

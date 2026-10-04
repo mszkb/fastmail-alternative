@@ -61,7 +61,7 @@ Zusätzlich bleiben die Login-Sperre (5 Fehlversuche in 15 min → 15 min gesper
 ## Security-Header
 
 - **API** (`apps/api/src/security/headers.ts`), nur wenn die Route den Header nicht selbst setzt (Anhänge und HTML-Ansicht behalten ihre strengeren Werte, z. B. CSP `sandbox`): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store`.
-- **PWA** (nginx im `web`-Container, Snippet wird beim Build von `apps/web/scripts/build-csp.mjs` erzeugt, gilt also auch hinter einem eigenen Reverse Proxy):
+- **PWA** (von der API ausgeliefert, `apps/api/src/web-app.ts`; die Header erzeugt `apps/web/scripts/build-csp.mjs` beim Build als `security-headers.json`, sie gelten also auch hinter einem eigenen Reverse Proxy):
   - CSP `default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
   - `script-src` ohne `'unsafe-inline'`: Die zwei Inline-Skripte von Nuxt (Import-Map, Runtime-Config) werden per SHA-256-Hash erlaubt, der beim Build berechnet wird.
   - `style-src 'unsafe-inline'` und `img-src http: https:` sind nötig, weil das `srcdoc`-iframe der HTML-Mailanzeige die CSP der App erbt und Mail-HTML `<style>`, `style`-Attribute und (nach Opt-in) entfernte Bilder enthält. Skripte bleiben dort durch Sandbox und eigene CSP blockiert.

@@ -1,17 +1,16 @@
 # Systemanforderungen & gemessener Ressourcenverbrauch
 
-> Gemessen auf dem Referenz-Deployment: Raspberry Pi (arm64, 2 GB RAM, SD-Karte), Debian 13, rootless Docker. Stand: 2026-10-02, Phase 1 (Skeleton ohne Mail-Daten).
+> Gemessen auf dem Referenz-Deployment: Raspberry Pi (arm64, 2 GB RAM, SD-Karte), Debian 13, rootless Docker. Stand: 2026-10-02, Phase 1 (Skeleton ohne Mail-Daten). Damals lief die PWA noch in einem eigenen `web`-Container (nginx, 5 MB); seit 2026-10-04 liefert die API sie aus, die Werte unten sind entsprechend bereinigt, aber nicht neu gemessen.
 
 ## Gemessener Verbrauch (Stack im Leerlauf, alles healthy)
 
-| Service                 | RAM         | CPU (idle)                                |
-| ----------------------- | ----------- | ----------------------------------------- |
-| `api` (Fastify)         | 78 MB       | ~0 %                                      |
-| `worker`                | 49 MB       | ~0 %                                      |
-| `caddy`                 | 44 MB       | ~0 %                                      |
-| `postgres` (getunt)     | 19 MB       | ~0 %                                      |
-| `web` (nginx, statisch) | 5 MB        | ~0 %                                      |
-| **Stack gesamt**        | **~195 MB** | **0 %** (0 CPU-Sekunden in 30 s Wandzeit) |
+| Service             | RAM         | CPU (idle)                                |
+| ------------------- | ----------- | ----------------------------------------- |
+| `api` (Fastify)     | 78 MB       | ~0 %                                      |
+| `worker`            | 49 MB       | ~0 %                                      |
+| `caddy`             | 44 MB       | ~0 %                                      |
+| `postgres` (getunt) | 19 MB       | ~0 %                                      |
+| **Stack gesamt**    | **~190 MB** | **0 %** (0 CPU-Sekunden in 30 s Wandzeit) |
 
 Auf dem Referenzsystem sind inklusive Betriebssystem 546 MB von 1,8 GB belegt – der Stack nutzt ~10 % des RAM.
 
@@ -19,7 +18,7 @@ Auf dem Referenzsystem sind inklusive Betriebssystem 546 MB von 1,8 GB belegt �
 
 | Was                                               | Größe          |
 | ------------------------------------------------- | -------------- |
-| Images (web, api, worker, postgres, caddy)        | ~810 MB        |
+| Images (api, worker, postgres, caddy)             | ~760 MB        |
 | Volumes (postgres-data, caddy-*, noch ohne Mails) | ~75 MB         |
 | Root-Dateisystem gesamt (inkl. OS)                | 7,8 GB / 29 GB |
 
