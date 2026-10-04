@@ -16,7 +16,9 @@
     "build": "pnpm -r build",
     "dev:web": "pnpm --filter @fma/web dev",
     "dev:api": "pnpm --filter @fma/api dev",
-    "dev:worker": "pnpm --filter @fma/worker dev"
+    "dev:worker": "pnpm --filter @fma/worker dev",
+    "start": "node scripts/native.mjs start",
+    "backup": "node scripts/native.mjs backup"
   },
   "devDependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",

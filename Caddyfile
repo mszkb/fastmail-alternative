@@ -23,6 +23,7 @@
 		-Server
 	}
 
-	# The api serves both /api/* and the static PWA.
-	reverse_proxy api:3001
+	# The api serves both /api/* and the static PWA. Without Docker, run
+	# caddy with API_UPSTREAM=127.0.0.1:3001 (docs/operations/install-native.md).
+	reverse_proxy {$API_UPSTREAM:api:3001}
 }

@@ -16,6 +16,9 @@ coverage/
 # encrypted backups (scripts/backup.sh)
 backups/
 
+# encrypted mails of a native install (scripts/native.mjs)
+/data/
+
 # logs & os
 *.log
 .DS_Store

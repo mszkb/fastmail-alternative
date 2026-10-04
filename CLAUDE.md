@@ -28,7 +28,7 @@ Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktue
 
 Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
-1. **Self-hosted first.** Alles Grundlegende muss mit `docker compose up` auf einem eigenen Server laufen. Kein Feature darf eine Managed Cloud oder das Hosted Push Relay voraussetzen.
+1. **Self-hosted first.** Alles Grundlegende muss mit `docker compose up` auf einem eigenen Server laufen – und genauso ohne Docker mit Node und PostgreSQL (`pnpm build && pnpm start`, siehe `docs/operations/install-native.md`). Kein Feature darf eine Managed Cloud oder das Hosted Push Relay voraussetzen.
 2. **Keine künstliche Paywall** für PWA, Export, Grundfunktionen oder eigene Instanz.
 3. **Push ist nur ein Hinweis.** Push ist nie die Quelle der Wahrheit. Die App synchronisiert beim Start und bei Fokuswechsel.
 4. **Keine Mailinhalte in Push-Payloads.** Nur Ereignistyp, Installations-ID, Badge-Zahl. Keine Betreffzeilen, Absender oder Bodies.
@@ -71,6 +71,7 @@ Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
 | `pnpm test`                               | Tests (Vitest) über alle Pakete                     |
 | `pnpm build`                              | Alle Apps bauen (web, api, worker)                  |
 | `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                       |
+| `pnpm start` / `pnpm backup`              | Betrieb ohne Docker (nach `pnpm build`)             |
 
 Struktur: `apps/web` (Nuxt-PWA, statisch gebaut und von der API ausgeliefert), `apps/api` (Fastify, Port 3001), `apps/worker` (Jobs), `packages/shared` (geteilte Typen/Domänenlogik), `packages/crypto` (Envelope-Encryption), `packages/db` (pg-Pool + Migration-Runner) – Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 

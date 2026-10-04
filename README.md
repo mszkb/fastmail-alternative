@@ -17,6 +17,11 @@ Der komplette Stack (caddy, api, worker, postgres) läuft komfortabel auf einem 
 
 Details & Messung: [docs/operations/system-requirements.md](docs/operations/system-requirements.md)
 
+## Betrieb
+
+- **Mit Docker** (Standard): `node scripts/setup-env.mjs && docker compose up -d`
+- **Ohne Docker** (Node + PostgreSQL): `pnpm install && pnpm build && node scripts/setup-env.mjs && pnpm start` – Details: [docs/operations/install-native.md](docs/operations/install-native.md)
+
 ## Entwicklung
 
 ```bash

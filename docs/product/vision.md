@@ -30,7 +30,7 @@ Daraus folgen die Qualitätsziele: **Geschwindigkeit, gutes UI, konfigurierbare 
 
 ## Produktprinzipien
 
-- **Self-hosted first:** Docker-Deployment, klare Konfiguration, Backups und Migrationen.
+- **Self-hosted first:** Docker-Deployment oder Start ohne Docker (Node + PostgreSQL), klare Konfiguration, Backups und Migrationen.
 - **Privacy by design:** Mailinhalte bleiben standardmäßig auf dem eigenen Server und werden nicht an ein Push-Relay übertragen.
 - **Keine künstliche Paywall** für PWA, Export, Grundfunktionen oder eigene Serverinstanz.
 - **Push ist ein Hinweis**, niemals die Quelle der Wahrheit. Die App synchronisiert beim Start und bei Fokuswechsel.
