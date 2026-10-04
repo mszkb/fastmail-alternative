@@ -40,7 +40,7 @@ Im Projektverzeichnis (auf dem Pi `~/fastmail-alternative`):
 ./scripts/backup.sh
 ```
 
-Das Skript stoppt kurz den Worker (damit Datenbank und `mail-data` zusammenpassen; die API läuft weiter), schreibt das Backup nach `./backups/`, startet den Worker wieder und löscht Backups, die älter als `BACKUP_KEEP_DAYS` (Standard 14) Tage sind. Händisch entspricht das:
+Das Skript stoppt kurz den Worker (damit Datenbank und `mail-data` zusammenpassen; die API läuft weiter), schreibt das Backup nach `./backups/`, startet den Worker wieder und löscht Backups, die älter als `BACKUP_KEEP_DAYS` (Standard 14) Tage sind. Ein anderes Zielverzeichnis lässt sich mit `BACKUP_DIR` setzen (Standard `./backups`); beide Variablen kommen aus der Shell-Umgebung, nicht aus der `.env` (z. B. `BACKUP_KEEP_DAYS=30 ./scripts/backup.sh`). Händisch entspricht das:
 
 ```sh
 docker compose stop worker
