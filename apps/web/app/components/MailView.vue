@@ -99,8 +99,14 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
     >
   >
 
-const props = defineProps<{ accounts: AccountOption[] }>()
-const emit = defineEmits<{ editAccount: [id: string]; syncRequested: [] }>()
+// unifiedInbox: the opt-in unified inbox (3.7) is switched on; its entry
+// "Alle Posteingänge" then sits above the accounts (emit openUnified).
+const props = defineProps<{ accounts: AccountOption[]; unifiedInbox?: boolean }>()
+const emit = defineEmits<{
+  editAccount: [id: string]
+  syncRequested: []
+  openUnified: []
+}>()
 
 const SPECIAL_USE_LABELS: Record<string, string> = {
   inbox: 'Posteingang',
@@ -111,6 +117,8 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   trash: 'Papierkorb',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
+/** Value of the "Alle Posteingänge" entry in the mobile account picker. */
+const UNIFIED_OPTION = '__unified__'
 /** Messages of a folder list kept offline (three pages of 50). */
 const CACHED_LIST_MESSAGES = 150
 const LIST_CACHE_DELAY_MS = 500
@@ -120,6 +128,10 @@ interface CachedList {
 }
 
 const accountId = ref('')
+// Message opened from the unified inbox in another account: opened once
+// that account's folders (and its INBOX) are loaded.
+let pendingOpen = ''
+
 const folders = ref<FolderSummary[]>([])
 const folderId = ref('')
 const messages = ref<MessageListItem[]>([])
@@ -351,6 +363,7 @@ function accountUnread(account: AccountOption): number {
  */
 function switchAccount(id: string): boolean {
   if (!id || id === accountId.value) return true
+  pendingOpen = ''
   // The open draft belongs to the previous account: save it, then close.
   void composeForm.value?.flush()
   compose.value = null
@@ -360,6 +373,11 @@ function switchAccount(id: string): boolean {
 
 function onAccountSelect(event: Event): void {
   const select = event.target as HTMLSelectElement
+  if (select.value === UNIFIED_OPTION) {
+    select.value = accountId.value
+    emit('openUnified')
+    return
+  }
   if (!switchAccount(select.value)) select.value = accountId.value
 }
 
@@ -507,7 +525,13 @@ async function loadFolders(): Promise<void> {
       const inbox = defaultFolder(res.folders)
       if (inbox) await selectFolder(inbox.id)
     }
+    if (pendingOpen && requestedAccount === accountId.value) {
+      const id = pendingOpen
+      pendingOpen = ''
+      void openMessage(id)
+    }
   } catch (err) {
+    pendingOpen = ''
     if (isStaleResponse(err) || cached) return
     error.value = err instanceof Error ? err.message : 'Ordner konnten nicht geladen werden.'
   }
@@ -1065,7 +1089,22 @@ function goBack(): boolean {
   return true
 }
 
-defineExpose({ goBack })
+/**
+ * Opens a message from the unified inbox (3.7) in the view of its own
+ * account (INBOX), so actions and replies use that account.
+ */
+async function openFromUnified(account: string, messageId: string): Promise<void> {
+  if (account !== accountId.value) {
+    switchAccount(account)
+    pendingOpen = messageId
+    return
+  }
+  const inbox = defaultFolder(folders.value)
+  if (inbox && inbox.id !== folderId.value) await selectFolder(inbox.id)
+  await openMessage(messageId)
+}
+
+defineExpose({ goBack, openFromUnified })
 
 function closeDetail(): void {
   detailRequest++
@@ -1163,6 +1202,9 @@ onBeforeUnmount(() => {
         Neue E-Mail
       </button>
       <nav class="accounts" aria-label="Konten">
+        <button v-if="unifiedInbox" type="button" class="account" @click="emit('openUnified')">
+          <span class="account-name">Alle Posteingänge</span>
+        </button>
         <button
           v-for="(account, index) in accounts"
           :key="account.id"
@@ -1195,6 +1237,7 @@ onBeforeUnmount(() => {
       <label class="account-picker">
         <span class="visually-hidden">Konto</span>
         <select :value="accountId" @change="onAccountSelect">
+          <option v-if="unifiedInbox" :value="UNIFIED_OPTION">Alle Posteingänge</option>
           <option v-for="account in accounts" :key="account.id" :value="account.id">
             {{ account.displayName
             }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : ''

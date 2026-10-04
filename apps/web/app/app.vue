@@ -20,7 +20,7 @@
 // replayed first, then the usual sync runs. Logout, an expired or revoked
 // session (401) or another user clear all offline data on this device.
 import { ForegroundSyncPolicy, SwipeBack, hasUnsavedInput, unreadBadgeCount } from '@fma/shared'
-import type { AccountListResponse, AccountSummary } from '@fma/shared'
+import type { AccountListResponse, AccountSummary, UserSettings } from '@fma/shared'
 import {
   clearOfflineData,
   cacheDeleteAccount,
@@ -83,7 +83,10 @@ const syncPolicy = new ForegroundSyncPolicy()
 // (message -> list, account form -> settings, settings -> mail). The
 // gesture logic lives in SwipeBack (@fma/shared); listeners are passive,
 // so scrolling is never delayed.
-const mailView = ref<{ goBack: () => boolean } | null>(null)
+const mailView = ref<{
+  goBack: () => boolean
+  openFromUnified: (accountId: string, messageId: string) => Promise<void>
+} | null>(null)
 const swipe = new SwipeBack()
 const swipeDistance = ref(0)
 const swipeArmed = ref(false)
@@ -177,6 +180,10 @@ function goBack(): void {
     if (hasUnsavedInput(states)) return
     if (editAccountId.value) editAccountId.value = ''
     else section.value = 'mail'
+    return
+  }
+  if (unifiedOpen.value) {
+    unifiedOpen.value = false
     return
   }
   mailView.value?.goBack()
@@ -376,6 +383,7 @@ async function enterApp(userEmail: string): Promise<void> {
   await loadQueue()
   await replayQueue()
   await loadDevices()
+  await loadSettings()
   await loadAccounts()
   void syncNow(true)
 }
@@ -445,6 +453,51 @@ async function submit(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+// Optional unified inbox (3.7): server-side setting, off by default. While
+// it is on, the mail view offers "Alle Posteingänge" above the accounts.
+const unifiedEnabled = ref(false)
+const unifiedOpen = ref(false)
+const unifiedBusy = ref(false)
+
+async function loadSettings(): Promise<void> {
+  try {
+    const res = await api<UserSettings>('/api/settings')
+    unifiedEnabled.value = res.unifiedInbox
+  } catch {
+    // Offline or failed: keep the current value (default off).
+  }
+  if (!unifiedEnabled.value) unifiedOpen.value = false
+}
+
+async function setUnifiedInbox(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  unifiedBusy.value = true
+  error.value = ''
+  try {
+    const res = await api<UserSettings>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ unifiedInbox: input.checked }),
+    })
+    unifiedEnabled.value = res.unifiedInbox
+  } catch (err) {
+    error.value =
+      err instanceof Error ? err.message : 'Einstellung konnte nicht gespeichert werden.'
+  } finally {
+    input.checked = unifiedEnabled.value
+    // Saved immediately: the toggle never counts as unsaved input.
+    fieldBaseline.set(input, { value: input.value, checked: input.checked })
+    unifiedBusy.value = false
+    if (!unifiedEnabled.value) unifiedOpen.value = false
+  }
+}
+
+/** A message picked in the unified inbox opens in its own account's view. */
+async function openUnifiedMessage(accountId: string, messageId: string): Promise<void> {
+  unifiedOpen.value = false
+  await nextTick()
+  await mailView.value?.openFromUnified(accountId, messageId)
 }
 
 async function loadDevices(): Promise<void> {
@@ -626,10 +679,19 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-if="section === 'mail'">
+        <UnifiedInbox
+          v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen"
+          :accounts="accounts"
+          @open="openUnifiedMessage"
+          @back="unifiedOpen = false"
+        />
         <MailView
           v-if="accounts.length > 0"
+          v-show="!(unifiedEnabled && unifiedOpen)"
           ref="mailView"
           :accounts="accounts"
+          :unified-inbox="unifiedEnabled"
+          @open-unified="unifiedOpen = true"
           @edit-account="editAccount"
           @sync-requested="onManualSync"
         />
@@ -676,6 +738,24 @@ onBeforeUnmount(() => {
               </button>
             </li>
           </ul>
+        </div>
+
+        <div class="card">
+          <h2>Posteingang</h2>
+          <label class="checkbox">
+            <input
+              type="checkbox"
+              :checked="unifiedEnabled"
+              :disabled="unifiedBusy"
+              @change="setUnifiedInbox"
+            />
+            Gemeinsamer Posteingang (alle Konten)
+          </label>
+          <p class="hint">
+            Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Posteingänge“ die
+            Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem Konto; geantwortet
+            wird immer aus dem Konto der Nachricht. Nur online verfügbar.
+          </p>
         </div>
 
         <PasswordChange @changed="loadDevices" />
@@ -834,6 +914,12 @@ button.link {
 h2 {
   margin: 0 0 0.25rem;
   font-size: 1.1rem;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .hint {

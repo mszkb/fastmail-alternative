@@ -14,6 +14,7 @@ import { messageActionRoutes } from './mail/message-actions'
 import { attachmentRoutes } from './mail/attachments'
 import { messageHtmlRoutes } from './mail/message-html'
 import { messageRoutes } from './mail/messages'
+import { unifiedRoutes } from './mail/unified'
 import { outboxRoutes } from './mail/outbox'
 import { searchRoutes } from './mail/search'
 import { storageRoutes } from './mail/storage'
@@ -120,6 +121,7 @@ export function buildApp({
   registerAuth(app, pool)
   app.register(accountRoutes)
   app.register(messageRoutes)
+  app.register(unifiedRoutes)
   app.register(folderRoutes)
   app.register(messageActionRoutes)
   app.register(messageHtmlRoutes)

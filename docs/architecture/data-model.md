@@ -251,7 +251,7 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 ### Ansichten
 
 - **Standard:** ein Konto ist aktiv; Ordnerbaum und Liste zeigen nur dessen Daten. Gewechselt wird über den Kontowechsler.
-- **Optionale Unified Inbox:** nur wenn `user.unified_inbox_enabled`. Sie ist eine Abfrage über die Inbox-Ordner aller Konten des Benutzers, sortiert nach `thread.last_message_at`, mit Konto-Kennzeichnung. Dafür gibt es keine eigene Tabelle und keine eigene Sync-Logik.
+- **Optionale Unified Inbox:** nur wenn `user.unified_inbox_enabled`. Sie ist eine Abfrage über die INBOX-Ordner (IMAP-Name `INBOX`) aller Konten des Benutzers, sortiert wie die Ordnerliste nach Nachrichtendatum (Keyset-Pagination), mit Konto-Kennzeichnung (`accountId` je Nachricht). Sie nutzt den vorhandenen Index `message_location_folder_idx`; Öffnen und Antworten laufen immer über das Konto der Nachricht. Dafür gibt es keine eigene Tabelle und keine eigene Sync-Logik.
 
 ### Versand und Jobs
 

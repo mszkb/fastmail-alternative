@@ -56,6 +56,27 @@ export interface MessageListResponse {
   nextCursor: string | null
 }
 
+/**
+ * Optional unified inbox (roadmap 3.7): list entry with the account and the
+ * INBOX folder it belongs to. Opening/replying always uses that account.
+ */
+export interface UnifiedMessageListItem extends MessageListItem {
+  accountId: string
+  folderId: string
+}
+
+/** `GET /api/unified/inbox` - 404 while the setting is off. */
+export interface UnifiedMessageListResponse {
+  messages: UnifiedMessageListItem[]
+  nextCursor: string | null
+}
+
+/** `GET/PUT /api/settings` - per-user settings. */
+export interface UserSettings {
+  /** Unified inbox across all accounts (opt-in, default off). */
+  unifiedInbox: boolean
+}
+
 /** `GET /api/messages/:id` - plain text body; the HTML body comes from MessageHtmlResponse. */
 export interface MessageDetail {
   id: string
