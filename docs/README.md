@@ -10,6 +10,7 @@
 | [adr/](adr/README.md)                                                  | Architecture Decision Records                                                     |
 | [process/definition-of-done.md](process/definition-of-done.md)         | Definition of Done                                                                |
 | [process/changelog.md](process/changelog.md)                           | Changelog-Prozess (Keep a Changelog, SemVer)                                      |
+| [process/release.md](process/release.md)                               | Release-Prozess: SemVer, signierte Multi-Arch-Images, Signatur prüfen             |
 | [process/external-dependencies.md](process/external-dependencies.md)   | Externe Abhängigkeiten und Risiken                                                |
 | [process/key-rotation.md](process/key-rotation.md)                     | Master-Key-Rotation und Crypto-Shredding                                          |
 | [operations/](operations/README.md)                                    | **Betreiber-Doku:** Installation, Konfiguration, Backup, Upgrade, Troubleshooting |

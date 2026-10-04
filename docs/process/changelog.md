@@ -15,8 +15,10 @@ Das [`CHANGELOG.md`](../../CHANGELOG.md) im Repo-Root folgt [Keep a Changelog](h
 
 ## Beim Release
 
-1. Versionsnummer nach [SemVer](https://semver.org/lang/de/) wählen: Breaking Change → Major (vor 1.0: Minor), neue Funktion → Minor, nur Fixes → Patch.
-2. `## [Unreleased]` in `## [x.y.z] – JJJJ-MM-TT` umbenennen und einen neuen, leeren `## [Unreleased]`-Abschnitt darüber anlegen.
-3. Version taggen; die Release-Images (Roadmap 7.2) verweisen auf den Abschnitt.
+1. Versionsnummer nach [SemVer](https://semver.org/lang/de/) wählen: Breaking Change → Major (vor 1.0: Minor), neue Migration oder Funktion → Minor, nur Fixes → Patch.
+2. `## [Unreleased]` in `## [x.y.z] - JJJJ-MM-TT` umbenennen und einen neuen, leeren `## [Unreleased]`-Abschnitt darüber anlegen.
+3. Version taggen (`vX.Y.Z`); der Release-Workflow baut und signiert die Images.
+
+Vollständiger Ablauf mit Versionsregeln, Image-Tags und Signaturprüfung: [Release-Prozess](release.md).
 
 Eine automatische CI-Prüfung gibt es bewusst nicht; die Pflege ist Teil der [Definition of Done](definition-of-done.md) und der PR-Checkliste.

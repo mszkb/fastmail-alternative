@@ -51,6 +51,23 @@ docker compose up -d --wait
 
 Zwischen Backup und Neustart geschriebene Daten (neue Mails, gesendete Nachrichten) wären bei einem Rollback verloren; neue Mails holt der Worker danach beim Anbieter nach.
 
+## Fertige Images statt lokal bauen
+
+Optional, statt `docker compose build` auf dem Server (Standard auf dem Pi bleibt der lokale Build per `upgrade.sh`). Ablauf wie oben, nur mit den signierten Release-Images ([Release-Prozess](../process/release.md)):
+
+```sh
+./scripts/backup.sh                  # Backup der bisherigen Version, Pfad notieren
+git fetch --tags origin && git checkout v1.2.0   # Compose-Datei/Doku zur Version
+export FMA_VERSION=1.2.0
+cosign verify --certificate-identity-regexp '^https://github\.com/mszkb/fastmail-alternative/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/mszkb/fastmail-alternative-api:$FMA_VERSION   # optional, ebenso worker/web
+docker compose -f docker-compose.yml -f docker-compose.release.yml pull
+docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+```
+
+`scripts/upgrade.sh` baut immer lokal; bei Release-Images die Schritte oben von Hand ausführen und `PREVIOUS_REF`/`PREVIOUS_BACKUP` wie im händischen Ablauf in `backups/upgrade-previous` festhalten. Rollback: alte Version mit `FMA_VERSION=<alt>` plus Backup-Restore wie unter [Rollback](#rollback). Patch-Releases enthalten keine Migrationen und lassen sich ohne Restore zurücksetzen.
+
 ## Wie Migrationen laufen
 
 - Migrationen sind reines SQL, werden in fester Reihenfolge angewendet und in `schema_migrations` vermerkt ([ADR-0002](../adr/0002-database.md)). Ein erneuter Start wendet nichts doppelt an.

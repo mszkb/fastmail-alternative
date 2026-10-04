@@ -24,6 +24,8 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Periodische Cleanup-Jobs für verwaiste Nachrichten, Dateien, Uploads und alte Jobs
 - Strukturierte Logs, `/api/health` und optionale Prometheus-Metriken
 - Betreiber-Doku (Installation, Konfiguration, Backup, Upgrade, Troubleshooting), Issue-Templates und Security-Policy
+- Release-Prozess nach SemVer: Tags `vX.Y.Z` erzeugen signierte Multi-Arch-Images (amd64, arm64) für api, worker und web in der GitHub Container Registry; Signaturprüfung mit `cosign verify`; `/api/health` meldet die Release-Version ([Release-Prozess](docs/process/release.md), #62)
+- **Betreiber:** Optional `docker-compose.release.yml` (mit `FMA_VERSION`, optional `FMA_IMAGE_PREFIX`) für fertige Images statt lokalem Build; der lokale Build bleibt Standard, keine `.env`-Änderung nötig
 
 ### Changed
 

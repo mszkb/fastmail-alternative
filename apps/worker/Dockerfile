@@ -13,6 +13,10 @@ RUN pnpm --filter @fma/worker build
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Release version (set by .github/workflows/release.yml from the tag);
+# reported by /api/health. Local builds without the arg stay 0.0.0-dev.
+ARG APP_VERSION=0.0.0-dev
+ENV APP_VERSION=$APP_VERSION
 
 # pg_dump/pg_restore for the backup CLI (dist/backup.js, roadmap 6.2); the
 # major version must be >= the postgres service (docker-compose.yml).
