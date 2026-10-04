@@ -37,9 +37,12 @@ import {
   type SearchResponse,
   type SearchResultItem,
 } from '@fma/shared'
-import { assertPublicHost } from '@fma/shared/ssrf'
+import {
+  imapTransportOptions,
+  isSecurePort,
+  isStartTlsUnavailable,
+} from '@fma/shared/mail-transport'
 import { requireAuth } from '../auth/routes'
-import { isSecurePort } from './connection-test'
 import { LIST_COLUMNS, toListItem, type ListRow } from './messages'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -73,7 +76,7 @@ interface ProviderResult {
 /** Error with a stable code (no provider text: it may echo the query). */
 class SearchError extends Error {
   constructor(
-    readonly code: 'AUTH_FAILED' | 'BLOCKED_HOST' | 'TIMEOUT' | 'UNREACHABLE',
+    readonly code: 'AUTH_FAILED' | 'BLOCKED_HOST' | 'TIMEOUT' | 'TLS_REQUIRED' | 'UNREACHABLE',
     readonly status: number,
     message: string,
   ) {
@@ -134,10 +137,6 @@ function cachePut(key: string, result: ProviderResult): void {
 
 // --- provider search ------------------------------------------------------
 
-function testMode(): boolean {
-  return process.env.MAIL_ALLOW_PRIVATE_HOSTS === '1'
-}
-
 /** IMAP SEARCH criteria of a query (dates as UTC days). */
 export function toSearchObject(query: SearchQuery): SearchObject {
   const criteria: SearchObject = {}
@@ -184,22 +183,23 @@ async function searchProvider(
   folders: { id: string; path: string }[],
   criteria: SearchObject,
 ): Promise<ProviderResult> {
+  let transport
   try {
-    if (!testMode()) await assertPublicHost(account.host)
+    transport = await imapTransportOptions({
+      host: account.host,
+      port: account.port,
+      secure: isSecurePort(account.port),
+    })
   } catch {
     throw new SearchError('BLOCKED_HOST', 502, 'Interner IMAP-Host ist blockiert (SSRF-Schutz).')
   }
   const client = new ImapFlow({
-    host: account.host,
-    port: account.port,
-    secure: isSecurePort(account.port),
+    ...transport,
     auth: { user: account.user, pass: account.password },
     logger: false,
     connectionTimeout: CONNECT_TIMEOUT_MS,
     greetingTimeout: CONNECT_TIMEOUT_MS,
     socketTimeout: SOCKET_TIMEOUT_MS,
-    tls: testMode() ? { rejectUnauthorized: false } : undefined,
-    ...(testMode() ? { doSTARTTLS: false as const } : {}),
   })
   let timedOut = false
   const deadline = setTimeout(() => {
@@ -210,6 +210,13 @@ async function searchProvider(
     try {
       await client.connect()
     } catch (err) {
+      if (isStartTlsUnavailable(err)) {
+        throw new SearchError(
+          'TLS_REQUIRED',
+          502,
+          'Der Mailserver bietet keine verschlüsselte Verbindung (STARTTLS) an.',
+        )
+      }
       if ((err as { authenticationFailed?: boolean }).authenticationFailed) {
         throw new SearchError('AUTH_FAILED', 502, 'Der Anbieter hat die Zugangsdaten abgelehnt.')
       }

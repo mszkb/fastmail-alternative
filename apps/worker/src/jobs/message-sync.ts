@@ -58,7 +58,7 @@ import {
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { assertMailHost, mailTestMode } from '../ports'
+import { imapTransportOptions } from '@fma/shared/mail-transport'
 import { purgeLocationlessMessages } from './cleanup'
 import { enqueuePushNotify } from './push-notify'
 import { assignThreads, removeEmptyThreads } from '../threading'
@@ -314,15 +314,13 @@ export async function runMessageSync(
   // \Noselect container (e.g. "[Gmail]"): no messages, SELECT would fail.
   if (!folder.selectable) return
 
+  // SSRF check + mandatory STARTTLS before anything connects.
+  const transport = await imapTransportOptions(ctx.imap)
   const client = new ImapFlow({
-    host: ctx.imap.host,
-    port: ctx.imap.port,
-    secure: ctx.imap.secure,
+    ...transport,
     auth: { user: ctx.imap.user, pass: ctx.imap.password },
     logger: false,
     greetingTimeout: 15_000,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
   const unregister = closeOnJobAbort(() => client.close())
@@ -330,7 +328,6 @@ export async function runMessageSync(
   // New unseen INBOX messages of an incremental run (push hint, roadmap 4.3).
   let newUnseen = 0
   try {
-    await assertMailHost(ctx.imap.host)
     await client.connect()
     lock = await client.getMailboxLock(folder.path)
     const selected = (

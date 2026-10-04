@@ -38,3 +38,6 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Logs, Fehlermeldungen und Push-Payloads ohne Mailinhalte, Adressen, Zugangsdaten oder Fehlertexte der Anbieter
 - Rate Limits, CSRF-Origin-Prüfung, Session-Härtung, Security-Header/CSP, Login-Lockout
 - SSRF-Schutz bei Kontoverbindungen, Härtung der Uploads gegen Speicher-DoS, Anhänge in Sandbox ausgeliefert
+- ASVS-Review (#56): STARTTLS ist auf IMAP-/SMTP-Ports ohne implizites TLS jetzt Pflicht – ohne STARTTLS wird vor der Anmeldung abgebrochen (neuer Fehlercode `TLS_REQUIRED`), kein Passwort mehr im Klartext bei Downgrade-Angriffen. **Betreiber:** Konten bei Anbietern ohne STARTTLS auf Port 143/587 schlagen nun fehl; auf 993/465 umstellen
+- SSRF-Schutz normalisiert IPv6-Literale vollständig (IPv4-mapped/-compatible, NAT64, 6to4 in jeder Schreibweise) und verbindet mit der geprüften Adresse statt erneut aufzulösen (DNS-Rebinding)
+- AES-GCM-Entschlüsselung erzwingt 16-Byte-Tags; Metrics-Token wird in konstanter Zeit verglichen; Verbindungstest loggt nur Fehlercodes und gibt keine Servertexte mehr zurück

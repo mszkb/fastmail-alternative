@@ -46,7 +46,11 @@ import type { OutboxContent, OutboxErrorCode, OutboxStatus, SentCopyStatus } fro
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { assertMailHost, mailTestMode } from '../ports'
+import {
+  imapTransportOptions,
+  isStartTlsUnavailable,
+  smtpTransportOptions,
+} from '@fma/shared/mail-transport'
 import { enqueueMessageSync } from '../scheduler'
 import { composerAttachments, loadUploads, type OutgoingAttachment } from '../uploads'
 
@@ -95,6 +99,9 @@ export function classifySmtpError(err: unknown): { code: OutboxErrorCode; perman
   const error = (err ?? {}) as { code?: string; responseCode?: number; message?: string }
   const text = String(error.message ?? err)
   if (error.code === 'PRIVATE_HOST_BLOCKED') return { code: 'BLOCKED_HOST', permanent: true }
+  // Checked before the response codes: a stripped/rejected STARTTLS comes
+  // with a 5xx reply, but retrying can help (the downgrade may be transient).
+  if (isStartTlsUnavailable(err)) return { code: 'TLS_REQUIRED', permanent: false }
   if (error.code === 'EAUTH' || error.code === 'ENOAUTH') {
     return { code: 'AUTH_FAILED', permanent: true }
   }
@@ -164,17 +171,12 @@ async function sendViaSmtp(
   raw: Buffer,
   envelope: { from: string; to: string[] },
 ): Promise<void> {
-  await assertMailHost(ctx.smtp.host)
   const transporter = nodemailer.createTransport({
-    host: ctx.smtp.host,
-    port: ctx.smtp.port,
-    secure: ctx.smtp.secure,
+    ...(await smtpTransportOptions(ctx.smtp)),
     auth: { user: ctx.smtp.user, pass: ctx.smtp.password },
     connectionTimeout: CONNECT_TIMEOUT_MS,
     greetingTimeout: CONNECT_TIMEOUT_MS,
     socketTimeout: SOCKET_TIMEOUT_MS,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ignoreTLS: mailTestMode(),
   })
   const unregister = closeOnJobAbort(() => transporter.close())
   try {
@@ -186,16 +188,11 @@ async function sendViaSmtp(
 }
 
 async function appendToSent(ctx: AccountContext, path: string, raw: Buffer, date: Date) {
-  await assertMailHost(ctx.imap.host)
   const client = new ImapFlow({
-    host: ctx.imap.host,
-    port: ctx.imap.port,
-    secure: ctx.imap.secure,
+    ...(await imapTransportOptions(ctx.imap)),
     auth: { user: ctx.imap.user, pass: ctx.imap.password },
     logger: false,
     greetingTimeout: CONNECT_TIMEOUT_MS,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
   const unregister = closeOnJobAbort(() => client.close())
   try {

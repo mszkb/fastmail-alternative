@@ -32,7 +32,7 @@ import { decryptField, draftContentAad } from '@fma/crypto'
 import { parseAddressList, type DraftContent, type MailPerson } from '@fma/shared'
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
-import { assertMailHost, mailTestMode } from '../ports'
+import { imapTransportOptions } from '@fma/shared/mail-transport'
 import { enqueueMessageSync } from '../scheduler'
 import { composerAttachments, loadUploads, type OutgoingAttachment } from '../uploads'
 
@@ -62,16 +62,13 @@ interface FolderRef {
   path: string
 }
 
-function connect(ctx: AccountContext): ImapFlow {
+/** SSRF check + mandatory STARTTLS, then a not yet connected client. */
+async function connect(ctx: AccountContext): Promise<ImapFlow> {
   return new ImapFlow({
-    host: ctx.imap.host,
-    port: ctx.imap.port,
-    secure: ctx.imap.secure,
+    ...(await imapTransportOptions(ctx.imap)),
     auth: { user: ctx.imap.user, pass: ctx.imap.password },
     logger: false,
     greetingTimeout: CONNECT_TIMEOUT_MS,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 }
 
@@ -225,8 +222,7 @@ export async function runDraftSync(
     upload = { raw: await buildDraft(row, content, from, messageId, attachments), messageId }
   }
 
-  await assertMailHost(ctx.imap.host)
-  const client = connect(ctx)
+  const client = await connect(ctx)
   const unregister = closeOnJobAbort(() => client.close())
   const touched = new Set<string>()
   try {

@@ -201,12 +201,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Connection test FIRST: broken accounts are not persisted.
-      const imapResult = await testImap(parsed.imap)
+      const imapResult = await testImap(parsed.imap, { log: request.log })
       if (!imapResult.ok) {
         await reply.code(422).send({ stage: 'imap', test: imapResult })
         return
       }
-      const smtpResult = await testSmtp(parsed.smtp)
+      const smtpResult = await testSmtp(parsed.smtp, { log: request.log })
       if (!smtpResult.ok) {
         await reply.code(422).send({ stage: 'smtp', test: smtpResult })
         return
@@ -352,12 +352,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         const merged = mergeConnection(current, stored, update)
 
         // Connection test FIRST: nothing is saved when the new data fails.
-        const imapResult = await testImap(merged.imap)
+        const imapResult = await testImap(merged.imap, { log: request.log })
         if (!imapResult.ok) {
           await reply.code(422).send({ stage: 'imap', test: imapResult })
           return
         }
-        const smtpResult = await testSmtp(merged.smtp)
+        const smtpResult = await testSmtp(merged.smtp, { log: request.log })
         if (!smtpResult.ok) {
           await reply.code(422).send({ stage: 'smtp', test: smtpResult })
           return

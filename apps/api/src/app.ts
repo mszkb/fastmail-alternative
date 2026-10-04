@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { HealthStatus } from '@fma/shared'
 import { registerAuth } from './auth/routes'
@@ -106,7 +107,7 @@ export function buildApp({
       await reply.code(404).send({ message: 'Not found' })
       return
     }
-    if (request.headers.authorization !== `Bearer ${expected}`) {
+    if (!tokenMatches(request.headers.authorization, `Bearer ${expected}`)) {
       await reply.code(401).send({ message: 'Invalid metrics token' })
       return
     }
@@ -130,4 +131,10 @@ export function buildApp({
   app.register(configTransferRoutes)
 
   return app
+}
+
+/** Constant-time comparison (SHA-256 digests: equal length, no length leak). */
+function tokenMatches(given: string | undefined, expected: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest()
+  return timingSafeEqual(digest(given ?? ''), digest(expected))
 }

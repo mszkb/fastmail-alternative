@@ -19,7 +19,7 @@ import { detectFolderRoles, resolveFolderRoles } from '@fma/shared'
 import { loadAccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { assertMailHost, mailTestMode } from '../ports'
+import { imapTransportOptions } from '@fma/shared/mail-transport'
 import { purgeLocationlessMessages } from './cleanup'
 
 interface ListedMailbox {
@@ -42,20 +42,16 @@ export async function runFolderSync(pool: Pool, accountId: string): Promise<void
     process.env.MASTER_KEY ?? '',
   )
 
+  const transport = await imapTransportOptions(credentials)
   const client = new ImapFlow({
-    host: credentials.host,
-    port: credentials.port,
-    secure: credentials.secure,
+    ...transport,
     auth: { user: credentials.user, pass: credentials.password },
     logger: false,
     greetingTimeout: 15_000,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
   const unregister = closeOnJobAbort(() => client.close())
   try {
-    await assertMailHost(credentials.host)
     await client.connect()
     const mailboxes = (await client.list()) as unknown as ListedMailbox[]
     // Containers without messages never get a role.

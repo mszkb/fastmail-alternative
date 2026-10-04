@@ -28,7 +28,7 @@ import type { MessageActionJobPayload, MessageActionOperation } from '@fma/share
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { assertMailHost, mailTestMode } from '../ports'
+import { imapTransportOptions } from '@fma/shared/mail-transport'
 import { enqueueMessageSync } from '../scheduler'
 import { removeOrphanMessages } from './message-sync'
 
@@ -157,22 +157,18 @@ export async function runMessageAction(
   }
 
   const ctx = context ?? (await loadAccountContext(pool, accountId, process.env.MASTER_KEY ?? ''))
+  const transport = await imapTransportOptions(ctx.imap)
   const client = new ImapFlow({
-    host: ctx.imap.host,
-    port: ctx.imap.port,
-    secure: ctx.imap.secure,
+    ...transport,
     auth: { user: ctx.imap.user, pass: ctx.imap.password },
     logger: false,
     greetingTimeout: 15_000,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
 
   const unregister = closeOnJobAbort(() => client.close())
   let lock: MailboxLockObject | null = null
   let outcome: MessageActionOutcome = 'done'
   try {
-    await assertMailHost(ctx.imap.host)
     await client.connect()
     lock = await client.getMailboxLock(sourcePath)
     const selected = (

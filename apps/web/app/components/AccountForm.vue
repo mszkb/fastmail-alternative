@@ -69,6 +69,8 @@ const ERROR_TEXT: Record<string, string> = {
   CONNECTION_REFUSED: 'Verbindung abgelehnt – Host und Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden.',
   TLS_ERROR: 'TLS-Fehler – das Server-Zertifikat konnte nicht verifiziert werden.',
+  TLS_REQUIRED:
+    'Der Server bietet keine verschlüsselte Verbindung (STARTTLS) an – das Passwort wurde nicht gesendet. Einen TLS-Port (IMAP 993, SMTP 465) verwenden.',
 }
 
 function testErrorText(stage: 'imap' | 'smtp', test: { code?: string; message?: string }): string {

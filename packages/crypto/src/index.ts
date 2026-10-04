@@ -79,7 +79,13 @@ export function unwrapDataKey(
   const keyId = buf.subarray(1, 1 + keyIdLen).toString('utf8')
   const nonce = buf.subarray(1 + keyIdLen, 1 + keyIdLen + NONCE_BYTES)
   const ct = buf.subarray(1 + keyIdLen + NONCE_BYTES)
-  const decipher = createDecipheriv(ALGORITHM, masterKey, nonce)
+  // Fixed 16-byte tag: a shortened tag must never be accepted as valid.
+  if (nonce.length !== NONCE_BYTES || ct.length < TAG_BYTES) {
+    throw new Error('invalid wrapped key: too short')
+  }
+  const decipher = createDecipheriv(ALGORITHM, masterKey, nonce, {
+    authTagLength: TAG_BYTES,
+  })
   decipher.setAAD(aadForWrappedKey(keyId))
   decipher.setAuthTag(ct.subarray(ct.length - TAG_BYTES))
   const dataKey = Buffer.concat([
@@ -107,9 +113,13 @@ export function encryptField(dataKey: Buffer, plaintext: string, aad: string): s
 export function decryptField(dataKey: Buffer, envelope: string, aad: string): string {
   expectPrefix(envelope, FIELD_PREFIX)
   const buf = Buffer.from(envelope.slice(FIELD_PREFIX.length), 'base64')
+  // Fixed 16-byte tag: a shortened tag must never be accepted as valid.
+  if (buf.length < NONCE_BYTES + TAG_BYTES) throw new Error('invalid envelope: too short')
   const nonce = buf.subarray(0, NONCE_BYTES)
   const ct = buf.subarray(NONCE_BYTES)
-  const decipher = createDecipheriv(ALGORITHM, dataKey, nonce)
+  const decipher = createDecipheriv(ALGORITHM, dataKey, nonce, {
+    authTagLength: TAG_BYTES,
+  })
   decipher.setAAD(Buffer.from(aad, 'utf8'))
   decipher.setAuthTag(ct.subarray(ct.length - TAG_BYTES))
   return Buffer.concat([
@@ -153,7 +163,9 @@ function decryptRaw(dataKey: Buffer, buf: Buffer, aad: string): Buffer {
   if (buf.length < NONCE_BYTES + TAG_BYTES) throw new Error('invalid envelope: too short')
   const nonce = buf.subarray(0, NONCE_BYTES)
   const ct = buf.subarray(NONCE_BYTES, buf.length - TAG_BYTES)
-  const decipher = createDecipheriv(ALGORITHM, dataKey, nonce)
+  const decipher = createDecipheriv(ALGORITHM, dataKey, nonce, {
+    authTagLength: TAG_BYTES,
+  })
   decipher.setAAD(Buffer.from(aad, 'utf8'))
   decipher.setAuthTag(buf.subarray(buf.length - TAG_BYTES))
   const plaintext = decipher.update(ct)
@@ -352,7 +364,9 @@ export function createBackupDecryptStream(masterKey: Buffer): Transform {
     if (!key) throw new BackupDecryptError('not a backup file')
     if (sealed.length < TAG_BYTES) throw new BackupDecryptError('backup file is truncated')
     try {
-      const decipher = createDecipheriv(ALGORITHM, key, backupNonce(counter++, final))
+      const decipher = createDecipheriv(ALGORITHM, key, backupNonce(counter++, final), {
+        authTagLength: TAG_BYTES,
+      })
       decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES))
       const plaintext = decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES))
       const rest = decipher.final()

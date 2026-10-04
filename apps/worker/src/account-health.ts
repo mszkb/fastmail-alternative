@@ -26,6 +26,7 @@
  */
 import type { Pool } from '@fma/db'
 import { ACCOUNT_ERROR_MESSAGES, type AccountErrorCode } from '@fma/shared'
+import { isStartTlsUnavailable } from '@fma/shared/mail-transport'
 
 export type AccountErrorKind = 'auth' | 'unreachable'
 
@@ -125,6 +126,8 @@ export function classifyAccountError(err: unknown): AccountError | null {
   if (error.authenticationFailed === true || error.serverResponseCode === 'AUTHENTICATIONFAILED') {
     return { code: 'AUTH_FAILED', kind: 'auth' }
   }
+  // Before the auth/response checks: no LOGIN/AUTH was sent at all.
+  if (isStartTlsUnavailable(err)) return { code: 'TLS_REQUIRED', kind: 'unreachable' }
   const code = typeof error.code === 'string' ? error.code : ''
   if (code === 'EAUTH' || code === 'ENOAUTH') return { code: 'AUTH_FAILED', kind: 'auth' }
   if (isThrottleError(err)) return { code: 'RATE_LIMITED', kind: 'unreachable' }

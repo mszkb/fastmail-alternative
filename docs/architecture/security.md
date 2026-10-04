@@ -85,6 +85,16 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 | Datenabfluss über Logs         | Zentrale Redaction, Tests dafür; Request-URLs ohne Query-String (Suchbegriffe, ADR-0006)                                                                                                                                                                                                                                                                                                 |
 | Datenabfluss über Push         | Inhaltsfreie Payloads (siehe [push.md](push.md))                                                                                                                                                                                                                                                                                                                                         |
 
+## Verbindungen zu Mailanbietern (IMAP/SMTP)
+
+Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und Suche in der api, alle Worker-Jobs und IMAP IDLE – läuft über einen zentralen Helfer (`packages/shared/src/mail-transport.ts`):
+
+- **TLS-Pflicht:** Ports 993 (IMAP) und 465 (SMTP) nutzen implizites TLS. Auf allen anderen Ports (143, 587, 25 …) ist **STARTTLS Pflicht** (ImapFlow `doSTARTTLS: true`, nodemailer `requireTLS: true`). Bietet der Server kein STARTTLS an – oder entfernt ein Angreifer im Netz die Fähigkeit (Downgrade) –, bricht die Verbindung **vor** `LOGIN`/`AUTH` ab; das Passwort geht nie im Klartext über die Leitung. Fehlercode `TLS_REQUIRED` mit deutscher Meldung, im Log nur Fehlername/-code.
+- **Zertifikatsprüfung** immer gegen den konfigurierten Hostnamen (SNI/`servername`).
+- **SSRF-Schutz:** Der Hostname wird einmal aufgelöst, **alle** Adressen müssen öffentlich sein (`assertPublicHost`). IPv6-Literale werden vor der Prüfung vollständig normalisiert (alle Schreibweisen wie `0:0:0:0:0:ffff:127.0.0.1`, `0::ffff:a00:1`, Großbuchstaben, Zone-IDs); Bereiche mit eingebetteter IPv4 (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible `::/96`, SIIT `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) werden über die eingebettete IPv4-Adresse geprüft; Teredo, lokales NAT64 (`64:ff9b:1::/48`) und Dokumentationsbereiche sind gesperrt.
+- **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. (Push-Endpoints: noch Prüfung + erneute Auflösung durch `fetch`, siehe Offene Punkte.)
+- **Ausnahme für Tests/Entwicklung:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (GreenMail auf Loopback ohne TLS) erlaubt private Hosts **und** schaltet Zertifikatsprüfung und STARTTLS-Pflicht ab. Nie in Produktion setzen – wer einen internen Mailserver damit freigibt, verliert auch die Transportverschlüsselung.
+
 ## HTML-Mails
 
 Umgesetzt in Roadmap 2.9. Drei unabhängige Schichten, jede für sich soll Script-Ausführung und ungewolltes Nachladen verhindern:
@@ -117,3 +127,5 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 ## Offene Punkte
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
+- DNS-Rebinding bei Push-Endpoints: `fetch` löst nach der SSRF-Prüfung erneut auf (eigener undici-`connect`-Lookup nötig).
+- `MAIL_ALLOW_PRIVATE_HOSTS` trennen in „private Hosts erlauben" und „Testmodus ohne TLS" (Audit N7).
