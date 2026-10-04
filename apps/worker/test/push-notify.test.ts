@@ -16,9 +16,12 @@ import { decrypt } from 'http_ece'
 import { runMigrations } from '@fma/db/migrate'
 import { encryptField, generateDataKey, loadMasterKey, pushKeysAad, wrapDataKey } from '@fma/crypto'
 import { PUSH_PAYLOAD_FIELDS } from '@fma/shared'
+import { PrivateHostError } from '@fma/shared/ssrf'
 import {
   PUSH_MAX_FAILURES,
+  checkedLookup,
   enqueuePushNotify,
+  sendPushRequest,
   endpointRef,
   runPushNotify,
   type VapidConfig,
@@ -243,5 +246,88 @@ describe.skipIf(!databaseUrl)('push_notify job', () => {
     expect(ref.pushHost).toBe('web.push.apple.com')
     expect(ref.endpointHash).toMatch(/^[0-9a-f]{12}$/)
     expect(JSON.stringify(ref)).not.toContain('QGuQ')
+  })
+})
+
+describe('push connection pinning (DNS rebinding, ASVS N1)', () => {
+  /** Rebinding resolver: public address first, private on every later call. */
+  function rebindingResolver(): {
+    calls: number
+    resolve: (host: string) => Promise<{ address: string; family: number }[]>
+  } {
+    const state = {
+      calls: 0,
+      resolve: async () => {
+        state.calls++
+        return [{ address: state.calls === 1 ? '93.184.216.34' : '127.0.0.1', family: 4 }]
+      },
+    }
+    return state
+  }
+
+  function lookupOnce(
+    lookup: ReturnType<typeof checkedLookup>,
+    all: boolean,
+  ): Promise<{ err: Error | null; result: unknown; family?: number }> {
+    return new Promise((resolve) => {
+      lookup('push.example', { all }, ((err: Error | null, result: unknown, family?: number) =>
+        resolve({ err, result, family })) as never)
+    })
+  }
+
+  it('resolves once and connects to the checked public address', async () => {
+    const resolver = rebindingResolver()
+    const lookup = checkedLookup(resolver.resolve)
+    const single = await lookupOnce(lookup, false)
+    expect(single).toEqual({ err: null, result: '93.184.216.34', family: 4 })
+    expect(resolver.calls).toBe(1)
+
+    const all = await lookupOnce(checkedLookup(rebindingResolver().resolve), true)
+    expect(all.result).toEqual([{ address: '93.184.216.34', family: 4 }])
+  })
+
+  it('rejects a host with any private address', async () => {
+    const lookup = checkedLookup(async () => [
+      { address: '93.184.216.34', family: 4 },
+      { address: '10.0.0.5', family: 4 },
+    ])
+    const { err } = await lookupOnce(lookup, true)
+    expect(err).toBeInstanceOf(PrivateHostError)
+  })
+
+  it('never connects when the endpoint resolves to a private address', async () => {
+    let connections = 0
+    const target = createServer((_req, res) => res.end())
+    target.on('connection', () => connections++)
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', resolve))
+    const port = (target.address() as AddressInfo).port
+    let calls = 0
+    try {
+      const resolve = async () => {
+        calls++
+        return [{ address: '127.0.0.1', family: 4 }]
+      }
+      await expect(
+        sendPushRequest(
+          `https://push.example:${port}/x`,
+          { method: 'POST', headers: {} },
+          { resolve },
+        ),
+      ).rejects.toBeInstanceOf(PrivateHostError)
+      await expect(
+        sendPushRequest(`https://127.0.0.1:${port}/x`, { method: 'POST', headers: {} }),
+      ).rejects.toBeInstanceOf(PrivateHostError)
+      await expect(
+        sendPushRequest(
+          `http://push.example:${port}/x`,
+          { method: 'POST', headers: {} },
+          { resolve },
+        ),
+      ).rejects.toThrow('not https')
+      expect(calls).toBeGreaterThanOrEqual(1)
+      expect(connections).toBe(0)
+    } finally {
+      await new Promise((resolve) => target.close(resolve))
+    }
   })
 })

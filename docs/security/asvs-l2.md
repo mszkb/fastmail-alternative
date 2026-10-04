@@ -10,7 +10,7 @@ Audit für Roadmap 6.1 / Issue #56, Stand 2026-10-04. Leitfaden ist [OWASP ASVS 
 | M2 Brute-Force-Schutz nur pro IP              | Mittel  | ◐ teilweise       | Paket B: Security-Events für fehlgeschlagene Logins/Passwortwechsel; Lockout bleibt pro IP (siehe Abweichungen)     |
 | M3 SSRF per IPv6-Literal                      | Mittel  | ✅ behoben        | Paket A (`7210395`)                                                                                                 |
 | M4 STARTTLS nur opportunistisch               | Mittel  | ✅ behoben        | Paket A (`7210395`), Fehlercode `TLS_REQUIRED`                                                                      |
-| N1 DNS-Rebinding                              | Niedrig | ◐ teilweise       | Mail-Hosts in Paket A behoben; Push-Endpoints offen                                                                 |
+| N1 DNS-Rebinding                              | Niedrig | ✅ behoben        | Mail-Hosts in Paket A; Push-Endpoints per geprüftem Socket-`lookup`                                                 |
 | N2 beliebige Ziel-Ports                       | Niedrig | ❌ offen          | Port-Allowlist oder Doku-Korrektur                                                                                  |
 | N3 kein zentraler Error-Handler               | Niedrig | ✅ behoben        | Paket B: `setErrorHandler`, UUID-/Typprüfung                                                                        |
 | N4 `console.warn` umgeht Redaction            | Niedrig | ✅ behoben        | Paket A (`7210395`)                                                                                                 |
@@ -237,7 +237,7 @@ eingestuft. M4 betrifft echte Zugangsdaten gegenüber einem Netzwerkangreifer un
 
 **N1 – DNS-Rebinding-TOCTOU bei Mail-Hosts und Push-Endpoints**
 
-- **Status:** Mail-Hosts behoben in `7210395` (Verbindung zur geprüften Adresse, Hostname als TLS-`servername`). Push-Endpoints offen.
+- **Status:** behoben. Mail-Hosts in `7210395` (Verbindung zur geprüften Adresse, Hostname als TLS-`servername`). Push-Endpoints: Versand über `node:https` mit eigenem Socket-`lookup` (`checkedLookup` in `push-notify.ts`), der den Host genau einmal auflöst, jede Adresse prüft und nur eine geprüfte Adresse an die Verbindung gibt; TLS prüft weiter gegen den Hostnamen.
 - Beleg: `connection-test.ts:80` prüft per `assertPublicHost(config.host)`, danach löst `new ImapFlow({ host: config.host })` (`:82-84`) den Namen erneut auf. Dasselbe Muster in `worker/src/ports.ts:17-19` + Jobs und in `push-notify.ts:218` + `fetch(details.endpoint)` (`:229`).
 - Angriff: Ein Angreifer-DNS mit TTL 0 liefert zuerst eine öffentliche, dann eine interne Adresse. Damit sind die gleichen Ziele erreichbar wie in M3 (Push: HTTPS-POST an ein internes Ziel, Antwort wird verworfen).
 - Fix: Die von `assertPublicHost` zurückgegebene Adresse für die Verbindung verwenden (`host: resolved[0].address`, `servername: originalHost` für TLS/SNI) oder ein eigenes `lookup` an `net.connect` bzw. undici `connect` übergeben.
