@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSyncSince, syncSinceFromDays } from '../src'
+import { isoDay, parseSyncSince, syncSinceFromDays, utcMidnight } from '../src'
 
 describe('sync limit (syncSince)', () => {
   const now = new Date('2026-10-04T10:00:00Z')
@@ -21,5 +21,11 @@ describe('sync limit (syncSince)', () => {
   it('converts a period in days to a UTC day', () => {
     expect(syncSinceFromDays(30, now)).toBe('2026-09-04')
     expect(syncSinceFromDays(365, now)).toBe('2025-10-04')
+  })
+
+  it('converts a day to UTC midnight and back', () => {
+    expect(utcMidnight('2026-01-15').toISOString()).toBe('2026-01-15T00:00:00.000Z')
+    expect(isoDay(utcMidnight('2026-12-31'))).toBe('2026-12-31')
+    expect(utcMidnight(null)).toBeNull()
   })
 })

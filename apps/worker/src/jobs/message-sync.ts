@@ -307,6 +307,9 @@ export async function runMessageSync(
     'SELECT sync_since FROM mail_account WHERE id = $1',
     [accountId],
   )
+  // Stored as UTC midnight of the chosen day (api binds utcMidnight());
+  // ImapFlow formats SEARCH SINCE via toISOString(), i.e. in UTC, so the
+  // calendar day is independent of the worker's process time zone.
   const syncSince = accountRows[0]?.sync_since ?? null
   // \Noselect container (e.g. "[Gmail]"): no messages, SELECT would fail.
   if (!folder.selectable) return

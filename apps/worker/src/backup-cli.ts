@@ -17,6 +17,7 @@ import {
   BackupError,
   createBackup,
   fileSize,
+  pendingOutboxCount,
   pgTargetFromEnv,
   restoreBackup,
   type BackupSummary,
@@ -89,6 +90,16 @@ async function main(): Promise<void> {
       verifyOnly: command === 'verify',
     })
     console.log(`${command === 'verify' ? 'backup ok' : 'restore complete'}: ${describe(summary)}`)
+    if (command === 'restore') {
+      const pending = await pendingOutboxCount(common.db)
+      if (pending > 0) {
+        console.warn(
+          `warning: ${pending} unsent outbox message(s) - they may already have been sent ` +
+            'after this backup was taken; check them before starting the worker ' +
+            '(docs/operations/upgrade.md, Rollback)',
+        )
+      }
+    }
     return
   }
 

@@ -22,11 +22,11 @@ Das Skript
 
 - bricht ab, wenn der Checkout lokale Änderungen hat,
 - holt die neuen Stände (`git fetch`) und löst das Ziel auf – bei einem Branch-Namen den Stand von `origin/<branch>`, nicht einen evtl. veralteten lokalen Branch – und bricht ab, wenn das Ziel **kein Nachfolger** des aktuellen Commits ist (ein Downgrade ist ein [Rollback](#rollback) und braucht das Backup der alten Version),
-- erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter),
+- erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter) und verwendet nur eine Datei, die **dieser Lauf** geschrieben hat (Marker-Datei vor dem Backup, `find -newer`) – nie ein älteres Backup,
 - hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch,
 - wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
-- startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird,
+- startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Das gilt für Dienste mit Healthcheck (caddy, web, api, postgres); der **Worker hat keinen Healthcheck** und wird nur als „running“ geprüft – ihn danach separat kontrollieren (siehe unten),
 - räumt danach alte, unbenutzte Images weg (`docker image prune -f`).
 
 Schlägt ab dem Checkout ein Schritt fehl, gibt das Skript den Rollback-Hinweis mit altem Commit und Backup-Pfad aus.
@@ -39,12 +39,15 @@ Händisch entspricht das:
 git fetch --tags origin
 git merge-base --is-ancestor HEAD v1.2.0   # Ziel muss Nachfolger sein
 ./scripts/backup.sh
+# PREVIOUS_BACKUP = die Datei, die backup.sh eben ausgegeben hat ("backup written: …")
 printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\n' "$(git rev-parse HEAD)" \
-  "$(ls -1t backups/fma-backup-*.fmabk | head -n 1)" > backups/upgrade-previous
+  "backups/fma-backup-<zeitstempel>.fmabk" > backups/upgrade-previous
 git checkout v1.2.0
 docker compose build
 docker compose up -d --wait
 ```
+
+**Worker prüfen:** `--wait` erkennt beim Worker nur, ob der Container läuft. Danach `docker compose ps worker` (Status `running`, nicht `restarting`) und `docker compose logs --tail=50 worker` auf Start- oder Migrationsfehler (z. B. `database schema is newer than this app version`) prüfen.
 
 Zwischen Backup und Neustart geschriebene Daten (neue Mails, gesendete Nachrichten) wären bei einem Rollback verloren; neue Mails holt der Worker danach beim Anbieter nach.
 
@@ -69,8 +72,18 @@ docker compose build
 docker compose stop api worker
 docker compose run --rm --user root -v "$PWD/backups:/backups:ro" worker \
   node dist/backup.js restore "/backups/$(basename "$PREVIOUS_BACKUP")" --force
-docker compose up -d --wait
+docker compose up -d --wait caddy web api postgres   # Worker bleibt gestoppt
+# Nicht gesendete Postausgangs-Einträge anzeigen (nur IDs/Zeiten, keine Inhalte):
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+  SELECT id, account_id, status, created_at FROM outbox_message
+  WHERE sent_at IS NULL AND status IN ('"'"'queued'"'"', '"'"'sending'"'"') ORDER BY created_at"'
+# ... mit den Gesendet-Ordnern beim Anbieter abgleichen, bereits gesendete entfernen:
+# docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+#   DELETE FROM outbox_message WHERE id = '"'"'<id>'"'"'"'
+docker compose up -d --wait worker
 ```
+
+**Doppelversand vermeiden:** Das Backup kann Postausgangs-Einträge enthalten, die damals noch nicht gesendet waren, inzwischen (nach dem Backup) aber per SMTP verschickt wurden. Nach dem Restore stehen sie wieder als ungesendet in der Datenbank – ein Start des Workers würde sie **erneut senden**. Deshalb den Worker erst starten, nachdem die ausstehenden Einträge geprüft wurden: Was laut Gesendet-Ordner beim Anbieter schon verschickt ist, entfernen. `restore` weist auf solche Einträge hin (`warning: N unsent outbox message(s) …`, nur die Anzahl).
 
 Maßgeblich ist das in `backups/upgrade-previous` festgehaltene Backup – nicht einfach das neueste in `backups/`: ein späterer Cron-Lauf oder ein erneuter Aufruf von `upgrade.sh` kann inzwischen ein Backup mit bereits migrierter Datenbank geschrieben haben. `restore --force` prüft das Backup vollständig, bevor es Datenbank und `mail-data` ersetzt. Details: [Backup & Restore](backup-restore.md).
 

@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { decryptField, unwrapAccountKey } from '@fma/crypto'
 import { runMigrations } from '@fma/db/migrate'
+import { isoDay, utcMidnight } from '@fma/shared'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
@@ -334,6 +335,30 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     expect(cleared.json().account.syncSince).toBeNull()
     const unauth = await inject('PATCH', `/api/accounts/${id}`, { payload: { syncSince: null } })
     expect(unauth.statusCode).toBe(401)
+  })
+
+  it('keeps the syncSince day in a session TimeZone east of UTC', async () => {
+    const id = await accountId()
+    const client = await pool.connect()
+    try {
+      await client.query("SET TimeZone = 'Europe/Berlin'")
+      const store = async (value: unknown) =>
+        (
+          await client.query<{ sync_since: Date }>(
+            'UPDATE mail_account SET sync_since = $1 WHERE id = $2 RETURNING sync_since',
+            [value, id],
+          )
+        ).rows[0]!.sync_since
+      // The bare day string is read in the session TimeZone (previous UTC day) ...
+      expect(isoDay(await store('2026-01-15'))).toBe('2026-01-14')
+      // ... UTC midnight (as bound by create/update) keeps the day.
+      expect(isoDay(await store(utcMidnight('2026-01-15')))).toBe('2026-01-15')
+    } finally {
+      await client.query('RESET TimeZone')
+      client.release()
+    }
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json()
+    expect(listed.accounts.find((a: { id: string }) => a.id === id).syncSince).toBe('2026-01-15')
   })
 
   it('re-tests changed connection data and saves nothing on failure', async () => {

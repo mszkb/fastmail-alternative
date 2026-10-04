@@ -48,7 +48,7 @@ In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-li
 | Regel          | Routen                                                                          | Limit/min |
 | -------------- | ------------------------------------------------------------------------------- | --------- |
 | `global`       | alle Anfragen                                                                   | 600       |
-| `auth`         | `POST /api/auth/login`, `POST /api/auth/setup`                                  | 10        |
+| `auth`         | `POST /api/auth/login`, `POST /api/auth/setup`, `POST /api/auth/password`       | 10        |
 | `account-test` | `POST /api/accounts`, `PATCH /api/accounts/:id` (Verbindungstest beim Provider) | 10        |
 | `send`         | `POST /api/outbox`, `POST /api/outbox/:id/retry`                                | 60        |
 | `upload`       | `POST /api/accounts/:id/uploads`                                                | 60        |

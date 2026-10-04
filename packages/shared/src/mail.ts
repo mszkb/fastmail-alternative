@@ -310,6 +310,17 @@ export function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
+/**
+ * UTC midnight of a `YYYY-MM-DD` day, for binding to the timestamptz column
+ * `mail_account.sync_since`. Binding the bare day string would let Postgres
+ * interpret it in the session TimeZone (east of UTC: previous UTC day).
+ */
+export function utcMidnight(day: string): Date
+export function utcMidnight(day: string | null): Date | null
+export function utcMidnight(day: string | null): Date | null {
+  return day === null ? null : new Date(`${day}T00:00:00.000Z`)
+}
+
 /** `YYYY-MM-DD` of the day `days` days before `now` (UTC). */
 export function syncSinceFromDays(days: number, now: Date = new Date()): string {
   const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))

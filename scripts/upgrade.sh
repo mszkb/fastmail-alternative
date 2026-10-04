@@ -52,10 +52,19 @@ if ! git merge-base --is-ancestor "$PREVIOUS" "$TARGET_COMMIT"; then
 fi
 
 echo "upgrade: 2/5 backup"
-./scripts/backup.sh
-BACKUP_FILE="$(ls -1t "$BACKUP_DIR"/fma-backup-*.fmabk 2>/dev/null | head -n 1)"
+# Only a backup written by this run counts (never an older file): the
+# marker is created before the backup, the new file is newer than it.
+mkdir -p "$BACKUP_DIR"
+MARKER="$(mktemp "$BACKUP_DIR/.upgrade-marker.XXXXXX")"
+if ! ./scripts/backup.sh; then
+  rm -f "$MARKER"
+  echo "upgrade: backup failed" >&2
+  exit 1
+fi
+BACKUP_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -name 'fma-backup-*.fmabk' -newer "$MARKER" | sort | tail -n 1)"
+rm -f "$MARKER"
 if [ -z "$BACKUP_FILE" ]; then
-  echo "upgrade: backup file not found in $BACKUP_DIR" >&2
+  echo "upgrade: no new backup file found in $BACKUP_DIR" >&2
   exit 1
 fi
 

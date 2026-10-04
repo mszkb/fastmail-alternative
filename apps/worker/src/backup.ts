@@ -106,6 +106,24 @@ function pgPool(target: PgTarget): pg.Pool {
   return new pg.Pool({ ...target, max: 1 })
 }
 
+/**
+ * Number of outbox messages not yet accepted by SMTP (queued/sending). After
+ * a restore these may already have been sent after the backup was taken -
+ * starting the worker would send them again (docs/operations/upgrade.md).
+ */
+export async function pendingOutboxCount(target: PgTarget): Promise<number> {
+  const pool = pgPool(target)
+  try {
+    const { rows } = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM outbox_message
+       WHERE sent_at IS NULL AND status IN ('queued', 'sending')`,
+    )
+    return rows[0]?.n ?? 0
+  } finally {
+    await pool.end()
+  }
+}
+
 /** Environment for pg_dump/pg_restore: credentials never on the command line. */
 function pgToolEnv(target: PgTarget): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {

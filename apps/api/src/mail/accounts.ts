@@ -25,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 import { enqueueJob } from '@fma/db/job-queue'
 import {
   isoDay,
+  utcMidnight,
   parseSyncSince,
   type AccountErrorCode,
   type AccountListResponse,
@@ -246,7 +247,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
           keyId,
           credentialEnc,
           imapResult.capabilities ?? [],
-          parsed.syncSince,
+          utcMidnight(parsed.syncSince),
         ],
       )
       if (!inserted.rows[0]) throw new Error('account insert returned no id')
@@ -340,7 +341,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       if (update.sortOrder !== undefined) set('sort_order', update.sortOrder)
       // Takes effect with the next message_sync; already stored older
       // messages are kept (no deletion when the period gets shorter).
-      if (update.syncSince !== undefined) set('sync_since', update.syncSince)
+      if (update.syncSince !== undefined) set('sync_since', utcMidnight(update.syncSince))
 
       let test: { imap: TestResult; smtp: TestResult } | undefined
       if (update.imap || update.smtp) {

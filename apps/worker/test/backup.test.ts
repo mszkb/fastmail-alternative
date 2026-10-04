@@ -29,6 +29,7 @@ import { loadAccountContext } from '../src/accounts'
 import {
   BackupError,
   createBackup,
+  pendingOutboxCount,
   pgTargetFromEnv,
   restoreBackup,
   type PgTarget,
@@ -219,6 +220,23 @@ describe.skipIf(!databaseUrl)('backup and restore', () => {
         'SELECT name FROM schema_migrations ORDER BY name',
       )
       expect(applied.rows.map((r) => r.name)).toEqual(migrations.map((m) => m.name))
+
+      // Unsent outbox messages are counted (restore CLI warning), sent ones not.
+      expect(await pendingOutboxCount(target)).toBe(0)
+      for (const [status, sentAt] of [
+        ['queued', null],
+        ['sending', null],
+        ['sent', new Date()],
+        ['failed', null],
+      ] as const) {
+        await restored.query(
+          `INSERT INTO outbox_message (id, account_id, status, message_id_header, sent_at)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [randomUUID(), accountId, status, `<${randomUUID()}@example.org>`, sentAt],
+        )
+      }
+      expect(await pendingOutboxCount(target)).toBe(2)
+      await restored.query('DELETE FROM outbox_message')
     } finally {
       await restored.end()
     }
