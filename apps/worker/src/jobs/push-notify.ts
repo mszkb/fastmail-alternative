@@ -212,7 +212,7 @@ async function deliver(
   vapid: VapidConfig,
 ): Promise<number> {
   const url = new URL(subscription.endpoint)
-  // Test mode: local fake push service on http/loopback (like the mail hosts).
+  // MAIL_INSECURE_TRANSPORT=1 (dev/test): local fake push service on http/loopback.
   if (!mailTestMode()) {
     if (url.protocol !== 'https:') throw new Error('push endpoint is not https')
     await assertPublicHost(url.hostname.replace(/^\[|\]$/g, ''))

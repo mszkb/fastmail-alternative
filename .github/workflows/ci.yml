@@ -49,6 +49,8 @@ jobs:
     env:
       DATABASE_URL: postgres://mail:mail@localhost:5432/mail_test
       MAIL_ALLOW_PRIVATE_HOSTS: '1'
+      # GreenMail without TLS; vitest.config.ts sets it for tests as well.
+      MAIL_INSECURE_TRANSPORT: '1'
       GREENMAIL_HOST: '127.0.0.1'
       GREENMAIL_IMAP_PORT: '3143'
       GREENMAIL_SMTP_PORT: '3025'

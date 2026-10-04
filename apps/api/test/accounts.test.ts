@@ -7,6 +7,7 @@
  * Requires DATABASE_URL (Postgres) and a GreenMail instance:
  *   GREENMAIL_HOST, GREENMAIL_IMAP_PORT, GREENMAIL_SMTP_PORT,
  *   GREENMAIL_USER, GREENMAIL_PASSWORD, MAIL_ALLOW_PRIVATE_HOSTS=1
+ *   (MAIL_INSECURE_TRANSPORT=1 comes from vitest.config.ts)
  * CI provides both as service containers; skipped when unset.
  */
 import { randomBytes, randomUUID } from 'node:crypto'

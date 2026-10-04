@@ -34,15 +34,19 @@ import type {
   VapidKeyResponse,
 } from '@fma/shared'
 import { assertPublicHost } from '@fma/shared/ssrf'
+import { mailTestMode } from '@fma/shared/mail-transport'
 import { requireAuth } from '../auth/routes'
 
 const MAX_ENDPOINT_LENGTH = 2048
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/
 
-/** Test/CI only: local fake push services on http/loopback (see ssrf.ts). */
+/**
+ * Dev/test only (MAIL_INSECURE_TRANSPORT=1): local fake push services on
+ * http/loopback. MAIL_ALLOW_PRIVATE_HOSTS covers mail hosts, never push.
+ */
 function allowPrivatePushHosts(): boolean {
-  return process.env.MAIL_ALLOW_PRIVATE_HOSTS === '1'
+  return mailTestMode()
 }
 
 export class InvalidSubscriptionError extends Error {}

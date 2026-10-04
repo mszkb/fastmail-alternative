@@ -106,3 +106,81 @@ describe('connection test: mandatory STARTTLS', () => {
     expect(result.message).not.toContain('secret internal banner')
   })
 })
+
+describe('connection test: environment policy (audit N7)', () => {
+  const saved = {
+    allow: process.env.MAIL_ALLOW_PRIVATE_HOSTS,
+    insecure: process.env.MAIL_INSECURE_TRANSPORT,
+  }
+  afterEach(() => {
+    for (const [name, value] of [
+      ['MAIL_ALLOW_PRIVATE_HOSTS', saved.allow],
+      ['MAIL_INSECURE_TRANSPORT', saved.insecure],
+    ] as const) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+
+  it('MAIL_ALLOW_PRIVATE_HOSTS alone keeps STARTTLS mandatory (IMAP + SMTP)', async () => {
+    process.env.MAIL_ALLOW_PRIVATE_HOSTS = '1'
+    delete process.env.MAIL_INSECURE_TRANSPORT
+    const imapReceived: string[] = []
+    const imapPort = await fake(
+      '* OK ready\r\n',
+      (line) => {
+        const [tag, verb = ''] = line.split(' ')
+        if (verb.toUpperCase() === 'CAPABILITY')
+          return `* CAPABILITY IMAP4rev1\r\n${tag} OK done\r\n`
+        return `${tag} OK fine\r\n`
+      },
+      imapReceived,
+    )
+    const imap = await testImap({
+      host: '127.0.0.1',
+      port: imapPort,
+      secure: false,
+      user: 'user@example.com',
+      password: PASSWORD,
+    })
+    expect(imap).toMatchObject({ ok: false, code: 'TLS_REQUIRED' })
+    expect(imapReceived.some((line) => /\bLOGIN\b|\bAUTHENTICATE\b/i.test(line))).toBe(false)
+
+    const smtpReceived: string[] = []
+    const smtpPort = await fake(
+      '220 fake ESMTP\r\n',
+      (line) => {
+        const verb = (line.split(' ')[0] ?? '').toUpperCase()
+        if (verb === 'EHLO') return '250-fake\r\n250 AUTH PLAIN LOGIN\r\n'
+        if (verb === 'AUTH') return '235 accepted\r\n'
+        return '502 unknown\r\n'
+      },
+      smtpReceived,
+    )
+    const smtp = await testSmtp({
+      host: '127.0.0.1',
+      port: smtpPort,
+      secure: false,
+      user: 'user@example.com',
+      password: PASSWORD,
+    })
+    expect(smtp).toMatchObject({ ok: false, code: 'TLS_REQUIRED' })
+    expect(smtpReceived.some((line) => /^AUTH\b/i.test(line))).toBe(false)
+  })
+
+  it('private hosts stay blocked without MAIL_ALLOW_PRIVATE_HOSTS', async () => {
+    delete process.env.MAIL_ALLOW_PRIVATE_HOSTS
+    process.env.MAIL_INSECURE_TRANSPORT = '1'
+    const received: string[] = []
+    const port = await fake('* OK ready\r\n', () => '', received)
+    const result = await testImap({
+      host: '127.0.0.1',
+      port,
+      secure: false,
+      user: 'u',
+      password: PASSWORD,
+    })
+    expect(result).toMatchObject({ ok: false, code: 'BLOCKED_HOST' })
+    expect(received).toHaveLength(0)
+  })
+})

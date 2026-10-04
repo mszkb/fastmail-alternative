@@ -8,9 +8,8 @@
  * the api (connection test) and the worker (SMTP send, roadmap 2.7); import
  * via `@fma/shared/ssrf` (node-only, not part of the browser-safe index).
  *
- * Test/CI note: integration tests run against a local GreenMail container,
- * which is only reachable via loopback/private addresses. Set
- * MAIL_ALLOW_PRIVATE_HOSTS=1 there (never in production).
+ * Exception: MAIL_ALLOW_PRIVATE_HOSTS=1 allows private mail hosts (own
+ * server in the LAN, local GreenMail in tests); see mail-transport.ts.
  */
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'

@@ -86,7 +86,7 @@ describe.skipIf(!databaseUrl)('push_notify job', () => {
   }
 
   beforeAll(async () => {
-    process.env.MAIL_ALLOW_PRIVATE_HOSTS = '1'
+    process.env.MAIL_INSECURE_TRANSPORT = '1'
     pool = new pg.Pool({ connectionString: databaseUrl })
     await runMigrations(pool)
 

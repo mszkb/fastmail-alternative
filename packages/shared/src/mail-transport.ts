@@ -14,16 +14,27 @@
  *   without STARTTLS is rejected before LOGIN/AUTH, so passwords never go
  *   over the wire in plain text.
  *
- * Test/CI exception: MAIL_ALLOW_PRIVATE_HOSTS=1 (GreenMail on loopback,
- * plain ports, self-signed) allows private hosts and disables certificate
- * checks and STARTTLS. Never set it in production.
+ * Environment switches (independent of each other):
+ * - MAIL_ALLOW_PRIVATE_HOSTS=1 skips the SSRF check, e.g. for an own mail
+ *   server in the LAN. STARTTLS and certificate checks stay mandatory.
+ * - MAIL_INSECURE_TRANSPORT=1 (dev/test only, GreenMail on plain ports with
+ *   a self-signed certificate) disables STARTTLS and certificate checks.
+ *   Never set it in production.
  */
 import { isIP } from 'node:net'
 import { assertPublicHost, type Lookup } from './ssrf'
 
-/** True when MAIL_ALLOW_PRIVATE_HOSTS=1 (CI/local GreenMail only). */
-export function mailTestMode(): boolean {
+/** True when MAIL_ALLOW_PRIVATE_HOSTS=1: private/LAN mail hosts allowed (TLS stays on). */
+export function allowPrivateMailHosts(): boolean {
   return process.env.MAIL_ALLOW_PRIVATE_HOSTS === '1'
+}
+
+/**
+ * True when MAIL_INSECURE_TRANSPORT=1 (dev/test only): plain text without
+ * STARTTLS, no certificate check; also lets push go to local http fakes.
+ */
+export function mailTestMode(): boolean {
+  return process.env.MAIL_INSECURE_TRANSPORT === '1'
 }
 
 /** Implicit TLS for IMAP 993 / SMTP 465, otherwise STARTTLS. */
@@ -44,7 +55,7 @@ export interface MailEndpoint {
 export interface MailTransportPolicy {
   /** Skip the SSRF check (default: MAIL_ALLOW_PRIVATE_HOSTS=1). */
   allowPrivateHosts?: boolean
-  /** No certificate check, no STARTTLS (default: MAIL_ALLOW_PRIVATE_HOSTS=1). */
+  /** No certificate check, no STARTTLS (default: MAIL_INSECURE_TRANSPORT=1). */
   insecureTransport?: boolean
   /** DNS resolver (default: node:dns/promises lookup). */
   lookup?: Lookup
@@ -60,7 +71,7 @@ interface ConnectTarget {
 
 async function resolveTarget(host: string, policy: MailTransportPolicy): Promise<ConnectTarget> {
   const insecure = policy.insecureTransport ?? mailTestMode()
-  if (policy.allowPrivateHosts ?? mailTestMode()) return { host, insecure }
+  if (policy.allowPrivateHosts ?? allowPrivateMailHosts()) return { host, insecure }
   const addresses = await assertPublicHost(host, policy.lookup)
   // Prefer IPv4: containers (rootless Docker) often lack IPv6 routes, and
   // connecting to a fixed address skips Node's happy-eyeballs fallback.

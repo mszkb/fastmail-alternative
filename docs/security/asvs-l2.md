@@ -18,7 +18,7 @@ Audit für Roadmap 6.1 / Issue #56, Stand 2026-10-04. Leitfaden ist [OWASP ASVS 
 | N6 AES-GCM-Tag-Länge                          | Niedrig | ✅ behoben        | Paket A (`7210395`)                                                                                                 |
 | N7 Metrics-Token konstantzeitig               | Niedrig | ✅ behoben        | Paket A (`7210395`)                                                                                                 |
 | N7 Cookie `__Host-`-Präfix                    | Niedrig | ❌ zurückgestellt | siehe Abweichungen                                                                                                  |
-| N7 `MAIL_ALLOW_PRIVATE_HOSTS` trennen         | Niedrig | ❌ offen          | Doku warnt (security.md)                                                                                            |
+| N7 `MAIL_ALLOW_PRIVATE_HOSTS` trennen         | Niedrig | ✅ behoben        | `MAIL_ALLOW_PRIVATE_HOSTS` nur SSRF (TLS bleibt Pflicht), `MAIL_INSECURE_TRANSPORT` nur Dev/Test                    |
 | N7 `Secure`-Cookie bei `DOMAIN=:80`           | Niedrig | ❌ offen          | Doku-Hinweis/`COOKIE_SECURE`-Override                                                                               |
 
 „Paket B" ist der Commit „Harden first-run setup, error handling and supply chain (ASVS review)".
@@ -151,7 +151,7 @@ Legende: ✅ erfüllt · ◐ teilweise · ❌ offen · n. a. nicht anwendbar
 | ------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 10.3.2 Integrität von Abhängigkeiten | ◐      | `pnpm install --frozen-lockfile` (Dockerfiles), aber Basis-Images nur per Tag (`node:24-alpine`, `nginx:alpine`, `caddy:2-alpine`, `postgres:17-alpine`), kein Digest-Pin (N5) |
 | 14.2.1/10.x Schwachstellen-Scan      | ❌     | kein `pnpm audit`/Dependabot/Renovate in `.github/` (N5)                                                                                                                       |
-| 10.2.x keine Hintertüren/Phone-home  | ✅     | keine Telemetrie gefunden; Testmodus nur per `MAIL_ALLOW_PRIVATE_HOSTS`                                                                                                        |
+| 10.2.x keine Hintertüren/Phone-home  | ✅     | keine Telemetrie gefunden; Testmodus nur per `MAIL_INSECURE_TRANSPORT`                                                                                                         |
 
 ### V12 Dateien und Ressourcen
 
@@ -182,7 +182,7 @@ Legende: ✅ erfüllt · ◐ teilweise · ❌ offen · n. a. nicht anwendbar
 | ----------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 14.1.x reproduzierbarer Build | ✅     | Multi-Stage-Dockerfiles, Lockfile                                                                                                                                                                             |
 | 14.2.x Abhängigkeiten aktuell | ◐      | siehe V10                                                                                                                                                                                                     |
-| 14.3.2 kein Debug in Prod     | ✅     | `NODE_ENV=production`, `MAIL_ALLOW_PRIVATE_HOSTS` nicht in Compose                                                                                                                                            |
+| 14.3.2 kein Debug in Prod     | ✅     | `NODE_ENV=production`, `MAIL_INSECURE_TRANSPORT` nicht in Compose                                                                                                                                             |
 | 14.3.3 keine Versions-Header  | ✅     | `-Server` (Caddy), `server_tokens off` (`nginx.conf:5`); `/api/health` liefert App-Version (unkritisch)                                                                                                       |
 | 14.4.1 Content-Type + charset | ✅     | Fastify JSON `charset=utf-8`                                                                                                                                                                                  |
 | 14.4.3 CSP                    | ◐      | API `default-src 'none'` (`security/headers.ts:14-15`); PWA ohne `unsafe-inline` für Skripte, aber `style-src 'unsafe-inline'` und `img-src http: https:` (`apps/web/scripts/build-csp.mjs`) – bewusst, s. u. |
@@ -280,7 +280,7 @@ eingestuft. M4 betrifft echte Zugangsdaten gegenüber einem Netzwerkangreifer un
 
 - Metrics-Token-Vergleich nicht konstantzeitig (`apps/api/src/app.ts:109`); im Netz praktisch nicht ausnutzbar. Fix: `timingSafeEqual` auf SHA-256-Digests. **Status:** behoben in `7210395`.
 - Cookie ohne `__Host-`-Präfix (`auth/routes.ts:31`). Fix: `__Host-fma_session`, wenn `Secure` aktiv ist (Migration: altes Cookie einmalig mitlesen). **Status:** zurückgestellt (siehe Abweichungen).
-- `MAIL_ALLOW_PRIVATE_HOSTS=1` schaltet SSRF-Schutz **und** TLS-Prüfung/STARTTLS ab (`connection-test.ts:37-39,89-91,137-138`, `worker/src/ports.ts:9-11`). `security.md` beschreibt die Freigabe interner Mailserver als Betreiber-Option. Wer sie nutzt, verliert unbemerkt auch die Transportverschlüsselung. Fix: getrennte Flags (`MAIL_ALLOW_PRIVATE_HOSTS` nur SSRF, `MAIL_TEST_MODE` für TLS) oder die Doku korrigieren. **Status:** offen; `security.md` warnt inzwischen ausdrücklich.
+- `MAIL_ALLOW_PRIVATE_HOSTS=1` schaltet SSRF-Schutz **und** TLS-Prüfung/STARTTLS ab (`connection-test.ts:37-39,89-91,137-138`, `worker/src/ports.ts:9-11`). `security.md` beschreibt die Freigabe interner Mailserver als Betreiber-Option. Wer sie nutzt, verliert unbemerkt auch die Transportverschlüsselung. Fix: getrennte Flags (`MAIL_ALLOW_PRIVATE_HOSTS` nur SSRF, `MAIL_TEST_MODE` für TLS) oder die Doku korrigieren. **Status:** offen; `security.md` warnt inzwischen ausdrücklich. **Behoben:** `MAIL_ALLOW_PRIVATE_HOSTS=1` erlaubt nur noch private Ziele (STARTTLS-Pflicht und Zertifikatsprüfung bleiben, per Compose durchgereicht); Klartext/ohne Zertifikatsprüfung und http-Push-Fakes nur mit `MAIL_INSECURE_TRANSPORT=1` (nur Dev/Test, nicht in Compose). Test: `apps/api/test/connection-test-tls.test.ts`.
 - `Secure`-Cookie hängt an `DOMAIN != :80` (`auth/routes.ts:35-37`). Hinter einem eigenen TLS-Proxy mit `DOMAIN=:80` fehlt `Secure`. Fix: Doku-Hinweis oder `COOKIE_SECURE`-Override. **Status:** offen.
 
 ---

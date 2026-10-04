@@ -23,7 +23,7 @@ process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 const databaseUrl = process.env.DATABASE_URL
 const TABLES = 'session, device, "user", push_subscription'
 const PASSWORD = 'correct horse battery'
-const ALLOW_PRIVATE = process.env.MAIL_ALLOW_PRIVATE_HOSTS
+const INSECURE_TRANSPORT = process.env.MAIL_INSECURE_TRANSPORT
 
 let app: FastifyInstance
 let token: string
@@ -92,8 +92,8 @@ describe.skipIf(!databaseUrl)('push subscriptions', () => {
 
   afterEach(async () => {
     await pool.query('TRUNCATE push_subscription')
-    if (ALLOW_PRIVATE === undefined) delete process.env.MAIL_ALLOW_PRIVATE_HOSTS
-    else process.env.MAIL_ALLOW_PRIVATE_HOSTS = ALLOW_PRIVATE
+    if (INSECURE_TRANSPORT === undefined) delete process.env.MAIL_INSECURE_TRANSPORT
+    else process.env.MAIL_INSECURE_TRANSPORT = INSECURE_TRANSPORT
   })
 
   afterAll(async () => {
@@ -207,7 +207,7 @@ describe.skipIf(!databaseUrl)('push subscriptions', () => {
   })
 
   it('blocks http and private hosts outside of test mode (SSRF)', async () => {
-    process.env.MAIL_ALLOW_PRIVATE_HOSTS = '0'
+    process.env.MAIL_INSECURE_TRANSPORT = '0'
     for (const url of [
       'http://93.184.216.34/push',
       'https://127.0.0.1/push',

@@ -3,7 +3,7 @@
  * refuse to authenticate when the server does not offer STARTTLS (or an
  * attacker stripped it). Fake IMAP/SMTP servers record every command; the
  * production policy is forced via `insecureTransport: false` (the test env
- * sets MAIL_ALLOW_PRIVATE_HOSTS=1 for GreenMail), private hosts stay allowed
+ * sets MAIL_INSECURE_TRANSPORT=1 for GreenMail), private hosts stay allowed
  * because the fakes listen on loopback.
  */
 import net from 'node:net'

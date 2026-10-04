@@ -93,7 +93,8 @@ Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und 
 - **Zertifikatsprüfung** immer gegen den konfigurierten Hostnamen (SNI/`servername`).
 - **SSRF-Schutz:** Der Hostname wird einmal aufgelöst, **alle** Adressen müssen öffentlich sein (`assertPublicHost`). IPv6-Literale werden vor der Prüfung vollständig normalisiert (alle Schreibweisen wie `0:0:0:0:0:ffff:127.0.0.1`, `0::ffff:a00:1`, Großbuchstaben, Zone-IDs); Bereiche mit eingebetteter IPv4 (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible `::/96`, SIIT `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) werden über die eingebettete IPv4-Adresse geprüft; Teredo, lokales NAT64 (`64:ff9b:1::/48`) und Dokumentationsbereiche sind gesperrt.
 - **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. (Push-Endpoints: noch Prüfung + erneute Auflösung durch `fetch`, siehe Offene Punkte.)
-- **Ausnahme für Tests/Entwicklung:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (GreenMail auf Loopback ohne TLS) erlaubt private Hosts **und** schaltet Zertifikatsprüfung und STARTTLS-Pflicht ab. Nie in Produktion setzen – wer einen internen Mailserver damit freigibt, verliert auch die Transportverschlüsselung.
+- **Mailserver im LAN:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (api + worker, per `.env`) erlaubt private/interne Ziele, z. B. einen eigenen Mailserver im Heimnetz, und schaltet damit den SSRF-Schutz für Mail-Hosts ab. STARTTLS-Pflicht und Zertifikatsprüfung bleiben **an**; der Server braucht ein gültiges Zertifikat für den konfigurierten Hostnamen. Push-Endpoints sind davon nicht betroffen (immer https auf öffentlichem Host).
+- **Nur Entwicklung/Tests:** `MAIL_INSECURE_TRANSPORT=1` erlaubt Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Fakes zu (GreenMail auf Plain-Ports, selbstsigniert). Standard aus, nicht in Compose/`.env.example`; die Vitest-Configs und die CI setzen ihn. Niemals produktiv setzen. Beide Schalter sind unabhängig (Audit N7).
 
 ## HTML-Mails
 
@@ -136,5 +137,4 @@ Der vollständige Audit nach OWASP ASVS 4.0.3 Level 2 mit Status jedes Befunds u
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
 - DNS-Rebinding bei Push-Endpoints: `fetch` löst nach der SSRF-Prüfung erneut auf (eigener undici-`connect`-Lookup nötig).
-- `MAIL_ALLOW_PRIVATE_HOSTS` trennen in „private Hosts erlauben" und „Testmodus ohne TLS" (Audit N7).
 - Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy, Fastify-JSON-Schemas): siehe [asvs-l2.md](../security/asvs-l2.md).
