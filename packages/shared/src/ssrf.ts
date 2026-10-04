@@ -123,7 +123,7 @@ function isPublicIpv6(address: string): boolean {
   }
   if (g0 === 0x2001 && g1 === 0) return false // Teredo 2001::/32 (obfuscated IPv4)
   if (g0 === 0x2001 && g1 === 0xdb8) return false // documentation 2001:db8::/32
-  if ((g0 & 0xfff0) === 0x3ff0) return false // documentation 3fff::/20
+  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return false // documentation 3fff::/20
   if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return false // discard-only 100::/64
   if ((g0 & 0xffc0) === 0xfe80) return false // link-local fe80::/10
   if ((g0 & 0xffc0) === 0xfec0) return false // deprecated site-local fec0::/10

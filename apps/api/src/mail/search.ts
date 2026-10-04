@@ -190,8 +190,12 @@ async function searchProvider(
       port: account.port,
       secure: isSecurePort(account.port),
     })
-  } catch {
-    throw new SearchError('BLOCKED_HOST', 502, 'Interner IMAP-Host ist blockiert (SSRF-Schutz).')
+  } catch (err) {
+    // Only the SSRF check means "blocked"; DNS failures are just unreachable.
+    if ((err as { code?: unknown }).code === 'PRIVATE_HOST_BLOCKED') {
+      throw new SearchError('BLOCKED_HOST', 502, 'Interner IMAP-Host ist blockiert (SSRF-Schutz).')
+    }
+    throw new SearchError('UNREACHABLE', 502, 'Der Mailanbieter ist nicht erreichbar.')
   }
   const client = new ImapFlow({
     ...transport,

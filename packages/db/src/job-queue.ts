@@ -136,10 +136,12 @@ export async function failJob(
   // Redact + truncate: error strings may reference user content.
   const safeError = errorMessage.slice(0, 500)
   if (attempts >= MAX_JOB_ATTEMPTS) {
-    await pool.query(`UPDATE job SET state = 'failed', last_error = $2 WHERE id = $1`, [
-      jobId,
-      safeError,
-    ])
+    // run_at records when the job finally failed: the CONDSTORE flag sync
+    // compares it with folder.last_synced_at to force a full flag refresh.
+    await pool.query(
+      `UPDATE job SET state = 'failed', run_at = now(), last_error = $2 WHERE id = $1`,
+      [jobId, safeError],
+    )
     return
   }
   const backoff = Math.min(BACKOFF_BASE_MS * 2 ** (attempts - 1), BACKOFF_MAX_MS)

@@ -104,6 +104,12 @@ describe('isPublicIp (IPv6)', () => {
     expect(isPublicIp('2002:808:808::1')).toBe(true) // 8.8.8.8
     expect(isPublicIp('2002:5db8:d822::1')).toBe(true) // 93.184.216.34
   })
+
+  it('blocks only 3fff::/20, not its neighbours', () => {
+    expect(isPublicIp('3fff:fff::1')).toBe(false)
+    expect(isPublicIp('3fff:1000::1')).toBe(true)
+    expect(isPublicIp('3ff0::1')).toBe(true)
+  })
 })
 
 describe('assertPublicHost', () => {
