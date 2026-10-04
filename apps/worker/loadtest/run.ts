@@ -171,9 +171,11 @@ async function main(): Promise<void> {
 
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL })
   let runner: InstanceType<typeof JobRunner> | undefined
+  let apiApp: ReturnType<typeof buildApp> | undefined
   try {
     await runMigrations(pool)
     const app = buildApp({ logger: false, rateLimits: [] })
+    apiApp = app
     const setup = await app.inject({
       method: 'POST',
       url: '/api/auth/setup',
@@ -334,7 +336,6 @@ async function main(): Promise<void> {
       )
     }
     const failed = await failedJobs()
-    await app.close()
 
     const totalJobs = await jobCount()
     report.push(
@@ -371,8 +372,9 @@ async function main(): Promise<void> {
         'obere Schranke für jeden der beiden Container.',
     )
     console.log(report.join('\n'))
-    await apiPool.end()
   } finally {
+    if (apiApp) await apiApp.close().catch(() => undefined)
+    await apiPool.end().catch(() => undefined)
     if (runner) await runner.drain()
     await pool.end()
     await rm(dataDir, { recursive: true, force: true })

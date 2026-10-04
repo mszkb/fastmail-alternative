@@ -94,10 +94,10 @@ docker compose up -d --build --wait
 
 Das baut die Images (web, api, worker), startet alle Dienste und wartet, bis caddy, web, api und postgres `healthy` sind. Beim ersten Start legt die API das Datenbankschema an (Migrationen).
 
-**Optional: fertige Images statt lokal bauen.** Für jedes Release gibt es signierte Multi-Arch-Images (amd64, arm64) in der GitHub Container Registry. Das spart auf schwacher Hardware den Build; lokal bauen bleibt der Standard und braucht keine Registry:
+**Optional: fertige Images statt lokal bauen.** Wenn ein Release veröffentlicht und signiert ist, gibt es dafür Multi-Arch-Images (amd64, arm64) in der GitHub Container Registry. Das spart auf schwacher Hardware den Build; lokal bauen bleibt der Standard und braucht keine Registry. Die Versionsnummer unten ist nur ein Beispiel – vorhandene Releases stehen auf der Release-Seite des Repositorys:
 
 ```sh
-export FMA_VERSION=0.1.0   # gewünschtes Release ohne "v"
+export FMA_VERSION=0.1.0   # Beispiel: gewünschtes Release ohne "v"
 docker compose -f docker-compose.yml -f docker-compose.release.yml pull
 docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
 ```
@@ -117,7 +117,7 @@ Auch der Worker wird `healthy` (Heartbeat nach erfolgreichem Datenbankzugriff, b
 
 ## 6. Benutzer anlegen (Ersteinrichtung)
 
-`https://mail.example.org` im Browser öffnen. Solange noch kein Benutzer existiert, erscheint **„Einrichtung“**: Setup-Code, E-Mail-Adresse (dient nur als Login-Name) und Passwort (mindestens 10 Zeichen) eingeben, **„Konto erstellen“**.
+Die Instanz im Browser öffnen: `https://<deine-domain>` (z. B. `https://mail.example.org`) bei echter Domain, `http://<server-ip>` beim LAN-Test mit `DOMAIN=:80`. Solange noch kein Benutzer existiert, erscheint **„Einrichtung“**: Setup-Code, E-Mail-Adresse (dient nur als Login-Name) und Passwort (mindestens 10 Zeichen) eingeben, **„Konto erstellen“**.
 
 Den **Setup-Code** schreibt die api beim Start ins Log, solange noch kein Benutzer existiert:
 

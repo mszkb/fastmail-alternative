@@ -62,6 +62,10 @@ describe.skipIf(!databaseUrl)('job queue', () => {
       expect(claimed?.id).toBe(id)
       expect(claimed?.attempts).toBe(attempt)
 
+      if (attempt === MAX_JOB_ATTEMPTS) {
+        // Backdate run_at so the assertion below proves failJob restamps it.
+        await pool.query(`UPDATE job SET run_at = now() - interval '1 day' WHERE id = $1`, [id])
+      }
       await failJob(pool, claimed!.id, claimed!.attempts, 'boom')
       if (attempt < MAX_JOB_ATTEMPTS) {
         // Backoff: not immediately eligible again.
