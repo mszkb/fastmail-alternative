@@ -13,6 +13,7 @@ Doku für alle, die eine eigene Instanz betreiben. In dieser Reihenfolge lesen:
 Außerdem:
 
 - [Systemanforderungen](system-requirements.md) – gemessener Ressourcenverbrauch, Hardware-Empfehlung
+- [Lasttest](load-test.md) – viele Konten, große Postfächer: Methode, Messwerte, Ausführung auf dem Pi
 - [Umzug auf einen neuen Server](migration.md) – vollständig per Backup oder per Konfigurations-Export
 - [Master-Key-Rotation](../process/key-rotation.md)
 - [Changelog](../../CHANGELOG.md) – vor jedem Upgrade auf **Betreiber:**-Einträge prüfen

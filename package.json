@@ -16,7 +16,8 @@
     "build": "pnpm -r build",
     "dev:web": "pnpm --filter @fma/web dev",
     "dev:api": "pnpm --filter @fma/api dev",
-    "dev:worker": "pnpm --filter @fma/worker dev"
+    "dev:worker": "pnpm --filter @fma/worker dev",
+    "loadtest": "pnpm --filter @fma/worker loadtest"
   },
   "devDependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",

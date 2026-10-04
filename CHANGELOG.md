@@ -23,6 +23,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Verschlüsselte Backups mit Restore (inkl. Restore-Test in CI), getesteter Upgrade-Pfad mit `scripts/upgrade.sh`
 - Periodische Cleanup-Jobs für verwaiste Nachrichten, Dateien, Uploads und alte Jobs
 - Strukturierte Logs, `/api/health` und optionale Prometheus-Metriken
+- Lasttest-Harness `pnpm loadtest` (viele Konten, große Postfächer) mit Markdown-Bericht; Methode, erste Messwerte und Anleitung für den Raspberry Pi in [docs/operations/load-test.md](docs/operations/load-test.md)
 - Optionaler gemeinsamer Posteingang aller Konten (Einstellungen → „Gemeinsamer Posteingang (alle Konten)“, standardmäßig aus) mit Konto-Kennzeichen je Nachricht; Antworten immer aus dem Ursprungskonto. **Betreiber:** keine Migration nötig (die Spalte `user.unified_inbox_enabled` existiert seit Migration 0001, Default aus); neue API-Routen `GET/PUT /api/settings` und `GET /api/unified/inbox`
 - Betreiber-Doku (Installation, Konfiguration, Backup, Upgrade, Troubleshooting), Issue-Templates und Security-Policy
 - Release-Prozess nach SemVer: Tags `vX.Y.Z` erzeugen signierte Multi-Arch-Images (amd64, arm64) für api, worker und web in der GitHub Container Registry; Signaturprüfung mit `cosign verify`; `/api/health` meldet die Release-Version ([Release-Prozess](docs/process/release.md), #62)
