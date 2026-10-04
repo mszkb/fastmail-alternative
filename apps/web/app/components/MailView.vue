@@ -1053,6 +1053,20 @@ function onKeydown(event: KeyboardEvent): void {
   event.preventDefault()
 }
 
+/**
+ * Swipe back (4.9): one step back inside the mail view. Returns false when
+ * there is nothing to go back to here. With an open composer the swipe is
+ * swallowed (true) so a draft is never closed by accident.
+ */
+function goBack(): boolean {
+  if (compose.value) return true
+  if (mobilePane.value !== 'detail' && !selectedId.value) return false
+  closeDetail()
+  return true
+}
+
+defineExpose({ goBack })
+
 function closeDetail(): void {
   detailRequest++
   selectedId.value = ''

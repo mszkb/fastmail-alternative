@@ -19,7 +19,7 @@
 // soon as it is back online; queued actions (utils/offline-queue.ts) are
 // replayed first, then the usual sync runs. Logout, an expired or revoked
 // session (401) or another user clear all offline data on this device.
-import { ForegroundSyncPolicy, unreadBadgeCount } from '@fma/shared'
+import { ForegroundSyncPolicy, SwipeBack, unreadBadgeCount } from '@fma/shared'
 import type { AccountListResponse, AccountSummary } from '@fma/shared'
 import {
   clearOfflineData,
@@ -77,6 +77,69 @@ let sessionVerified = false
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
+
+// Swipe navigation (4.9): a swipe to the right goes one step back
+// (message -> list, account form -> settings, settings -> mail). The
+// gesture logic lives in SwipeBack (@fma/shared); listeners are passive,
+// so scrolling is never delayed.
+const mailView = ref<{ goBack: () => boolean } | null>(null)
+const swipe = new SwipeBack()
+const swipeDistance = ref(0)
+const swipeArmed = ref(false)
+
+/** Elements whose own horizontal gestures must win over the swipe. */
+function swipeAllowedFrom(target: EventTarget | null): boolean {
+  if (view.value !== 'app') return false
+  const selection = window.getSelection()
+  if (selection && !selection.isCollapsed) return false
+  let element = target instanceof Element ? target : null
+  if (
+    element?.closest('input, textarea, select, [contenteditable], dialog[open], .compose-backdrop')
+  ) {
+    return false
+  }
+  for (; element && element !== document.body; element = element.parentElement) {
+    if (element.scrollWidth > element.clientWidth) {
+      const overflow = getComputedStyle(element).overflowX
+      if (overflow === 'auto' || overflow === 'scroll') return false
+    }
+  }
+  return true
+}
+
+function onSwipeStart(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch || event.touches.length > 1 || !swipeAllowedFrom(event.target)) {
+    swipe.cancel()
+    swipeDistance.value = 0
+    return
+  }
+  swipe.start(touch.clientX, touch.clientY, event.timeStamp)
+}
+
+function onSwipeMove(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch) return
+  swipeDistance.value = swipe.move(touch.clientX, touch.clientY)
+  swipeArmed.value = swipe.armed
+}
+
+function onSwipeEnd(event: TouchEvent): void {
+  const trigger = swipe.end(event.timeStamp)
+  swipeDistance.value = 0
+  swipeArmed.value = false
+  if (trigger) goBack()
+}
+
+/** One navigation step back; does nothing on the top-level mail list. */
+function goBack(): void {
+  if (section.value === 'settings') {
+    if (editAccountId.value) editAccountId.value = ''
+    else section.value = 'mail'
+    return
+  }
+  mailView.value?.goBack()
+}
 
 // beforeinstallprompt fires once, early: listen before anything else mounts.
 if (import.meta.client) listenForInstallPrompt()
@@ -385,6 +448,10 @@ onMounted(() => {
   window.addEventListener('online', onForeground)
   window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onForeground)
+  window.addEventListener('touchstart', onSwipeStart, { passive: true })
+  window.addEventListener('touchmove', onSwipeMove, { passive: true })
+  window.addEventListener('touchend', onSwipeEnd, { passive: true })
+  window.addEventListener('touchcancel', onSwipeEnd, { passive: true })
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onWorkerMessage)
   }
@@ -397,6 +464,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', onForeground)
   window.removeEventListener('offline', onOffline)
   document.removeEventListener('visibilitychange', onForeground)
+  window.removeEventListener('touchstart', onSwipeStart)
+  window.removeEventListener('touchmove', onSwipeMove)
+  window.removeEventListener('touchend', onSwipeEnd)
+  window.removeEventListener('touchcancel', onSwipeEnd)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onWorkerMessage)
   }
@@ -483,9 +554,21 @@ onBeforeUnmount(() => {
 
       <InstallBanner @guide="showInstallGuide" />
 
+      <!-- Swipe back (4.9): arrow at the left edge follows the finger -->
+      <div
+        v-if="swipeDistance > 0"
+        class="swipe-indicator"
+        :class="{ armed: swipeArmed }"
+        :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
+        aria-hidden="true"
+      >
+        &larr;
+      </div>
+
       <template v-if="section === 'mail'">
         <MailView
           v-if="accounts.length > 0"
+          ref="mailView"
           :accounts="accounts"
           @edit-account="editAccount"
           @sync-requested="onManualSync"
@@ -549,6 +632,41 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.swipe-indicator {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-top: -1.25rem;
+  border-radius: 50%;
+  background: #e4e9ee;
+  color: #52606d;
+  font-size: 1.2rem;
+  opacity: 0.7;
+  pointer-events: none;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.swipe-indicator.armed {
+  background: #1273de;
+  color: #fff;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-indicator {
+    transform: none !important;
+    transition: none;
+  }
+}
+
 .shell {
   max-width: 28rem;
   margin: 3rem auto;
