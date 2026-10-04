@@ -145,6 +145,8 @@ Ziel: Ein IMAP-/SMTP-Konto vollständig nutzbar.
 
 ## MVP-Akzeptanzkriterien
 
+Aktueller Stand mit Belegen und offenen Punkten: [`docs/process/mvp-status.md`](docs/process/mvp-status.md) (#70).
+
 - [ ] Neue Self-hosted-Installation ist mit Docker Compose nachvollziehbar in Betrieb zu nehmen.
 - [ ] Ein IMAP-/SMTP-Konto kann sicher verbunden und getestet werden.
 - [ ] Neue Nachrichten erscheinen ohne manuelle Seitenaktualisierung nach erfolgreicher Synchronisierung.

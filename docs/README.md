@@ -14,6 +14,7 @@
 | [process/release.md](process/release.md)                               | Release-Prozess: SemVer, signierte Multi-Arch-Images, Signatur prüfen             |
 | [process/external-dependencies.md](process/external-dependencies.md)   | Externe Abhängigkeiten und Risiken                                                |
 | [process/key-rotation.md](process/key-rotation.md)                     | Master-Key-Rotation und Crypto-Shredding                                          |
+| [process/mvp-status.md](process/mvp-status.md)                         | MVP-Status (M1): Akzeptanzkriterien mit Belegen, offene Punkte bis zum Release    |
 | [operations/](operations/README.md)                                    | **Betreiber-Doku:** Installation, Konfiguration, Backup, Upgrade, Troubleshooting |
 | [operations/installation.md](operations/installation.md)               | Installation Schritt für Schritt (Docker Compose, Domain, Ersteinrichtung)        |
 | [operations/configuration.md](operations/configuration.md)             | Referenz aller Umgebungsvariablen (`.env`)                                        |
