@@ -71,6 +71,13 @@ export interface Draft extends DraftContent {
   messageIds: string[]
   /** Uploads kept with the draft (roadmap 5.3), in upload order. */
   attachments: UploadedAttachment[]
+  /**
+   * Only in the answer of `POST /api/messages/:id/draft` that created the
+   * draft: attachments of the other client's draft that could not be
+   * copied (limits, raw mail not stored, too many copies running). The
+   * original then stays in the Drafts folder.
+   */
+  attachmentsSkipped?: number
 }
 
 /** `GET /api/accounts/:id/drafts` - newest first. */

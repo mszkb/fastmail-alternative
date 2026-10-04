@@ -80,6 +80,26 @@ describe('provider throttling', () => {
     ).toEqual({ code: 'RATE_LIMITED', kind: 'unreachable' })
     expect(classifyAccountError({ authenticationFailed: true })?.code).toBe('AUTH_FAILED')
   })
+
+  it('treats vague throttling phrases as throttling only without an auth failure', () => {
+    // A rejected login with "try again later" stays an auth error (no retries
+    // with a wrong password).
+    expect(
+      classifyAccountError({
+        authenticationFailed: true,
+        responseText: 'Invalid credentials, try again later',
+      }),
+    ).toEqual({ code: 'AUTH_FAILED', kind: 'auth' })
+    expect(
+      classifyAccountError({ code: 'EAUTH', response: '454 4.7.0 Rate limit exceeded' })?.code,
+    ).toBe('AUTH_FAILED')
+    expect(classifyAccountError({ responseText: 'Server busy, try again later' })?.code).toBe(
+      'RATE_LIMITED',
+    )
+    expect(classifyAccountError({ code: 'EENVELOPE', response: '421 4.7.0 Throttled' })?.code).toBe(
+      'RATE_LIMITED',
+    )
+  })
 })
 
 describe.skipIf(!databaseUrl || !greenmailHost)('quotas in the job runner', () => {

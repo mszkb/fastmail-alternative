@@ -314,6 +314,39 @@ describe.skipIf(!databaseUrl || !greenmailHost)('draft_sync job', () => {
     expect(await draftRow(id)).toMatchObject({ source_uid: null, imap_version: 2 })
   })
 
+  it('keeps the source copy when not all of its attachments were copied (keep_source)', async () => {
+    const setup = imapClient()
+    await setup.connect()
+    const appended = await setup.append(
+      DRAFTS,
+      Buffer.from(
+        'From: me@example.com\r\nTo: anna@example.com\r\nSubject: Mit Anhang\r\n' +
+          'Message-ID: <tb-attach@example.com>\r\n\r\nSiehe Anhang\r\n',
+      ),
+      ['\\Draft'],
+    )
+    await setup.logout().catch(() => setup.close())
+    const foreignUid = appended && appended.uid ? appended.uid : 1
+
+    const id = randomUUID()
+    await saveDraft(
+      id,
+      2,
+      { subject: 'Mit Anhang, weitergeschrieben' },
+      { sourceFolderId: draftsFolderId, sourceUidvalidity: uidValidity, sourceUid: foreignUid },
+    )
+    await pool.query('UPDATE draft SET imap_version = 1, keep_source = true WHERE id = $1', [id])
+    expect(await runDraftSync(pool, accountId, { draftId: id })).toBe('uploaded')
+    expect((await folderContents()).map((c) => c.messageId).sort()).toEqual(
+      ['<tb-attach@example.com>', draftMessageId(id, 2, greenmailUser)].sort(),
+    )
+
+    // Discarding removes only the app's own copy, never the original.
+    await pool.query('UPDATE draft SET deleted_at = now(), content_enc = NULL WHERE id = $1', [id])
+    expect(await runDraftSync(pool, accountId, { draftId: id })).toBe('removed')
+    expect((await folderContents()).map((c) => c.messageId)).toEqual(['<tb-attach@example.com>'])
+  })
+
   it('removes the copy once the draft is discarded or sent, then deletes the row', async () => {
     const id = randomUUID()
     await saveDraft(id, 1)

@@ -21,21 +21,27 @@ Im Projektverzeichnis (auf dem Raspberry Pi `~/fastmail-alternative`):
 Das Skript
 
 - bricht ab, wenn der Checkout lokale Änderungen hat,
+- holt die neuen Stände (`git fetch`) und löst das Ziel auf – bei einem Branch-Namen den Stand von `origin/<branch>`, nicht einen evtl. veralteten lokalen Branch – und bricht ab, wenn das Ziel **kein Nachfolger** des aktuellen Commits ist (ein Downgrade ist ein [Rollback](#rollback) und braucht das Backup der alten Version),
 - erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter),
-- merkt sich den bisherigen Commit in `backups/upgrade-previous-ref` (für einen Rollback),
-- holt die neue Version (`git fetch`, dann `git checkout <ziel>` bzw. `git pull --ff-only`),
+- hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch,
+- wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
 - startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird,
 - räumt danach alte, unbenutzte Images weg (`docker image prune -f`).
+
+Schlägt ab dem Checkout ein Schritt fehl, gibt das Skript den Rollback-Hinweis mit altem Commit und Backup-Pfad aus.
 
 Nach einem Wechsel auf einen Tag steht der Checkout auf einem „detached HEAD“; das nächste Upgrade dann ebenfalls mit Ziel aufrufen (`./scripts/upgrade.sh v1.3.0`).
 
 Händisch entspricht das:
 
 ```sh
+git fetch --tags origin
+git merge-base --is-ancestor HEAD v1.2.0   # Ziel muss Nachfolger sein
 ./scripts/backup.sh
-git rev-parse HEAD > backups/upgrade-previous-ref
-git fetch --tags origin && git checkout v1.2.0
+printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\n' "$(git rev-parse HEAD)" \
+  "$(ls -1t backups/fma-backup-*.fmabk | head -n 1)" > backups/upgrade-previous
+git checkout v1.2.0
 docker compose build
 docker compose up -d --wait
 ```
@@ -56,15 +62,17 @@ Weil Migrationen nur vorwärts laufen, heißt Rollback: **alte Version + Backup 
 
 ```sh
 cd ~/fastmail-alternative
-git checkout "$(cat backups/upgrade-previous-ref)"
+cat backups/upgrade-previous            # alter Commit + Backup von vor dem Upgrade
+. backups/upgrade-previous              # setzt PREVIOUS_REF und PREVIOUS_BACKUP
+git checkout "$PREVIOUS_REF"
 docker compose build
 docker compose stop api worker
 docker compose run --rm --user root -v "$PWD/backups:/backups:ro" worker \
-  node dist/backup.js restore /backups/fma-backup-<zeit>.fmabk --force
+  node dist/backup.js restore "/backups/$(basename "$PREVIOUS_BACKUP")" --force
 docker compose up -d --wait
 ```
 
-`<zeit>` ist das Backup, das `upgrade.sh` direkt vor dem Upgrade geschrieben hat (das neueste in `backups/`). `restore --force` prüft das Backup vollständig, bevor es Datenbank und `mail-data` ersetzt. Details: [Backup & Restore](backup-restore.md).
+Maßgeblich ist das in `backups/upgrade-previous` festgehaltene Backup – nicht einfach das neueste in `backups/`: ein späterer Cron-Lauf oder ein erneuter Aufruf von `upgrade.sh` kann inzwischen ein Backup mit bereits migrierter Datenbank geschrieben haben. `restore --force` prüft das Backup vollständig, bevor es Datenbank und `mail-data` ersetzt. Details: [Backup & Restore](backup-restore.md).
 
 Ist nur der Build oder Start fehlgeschlagen, **bevor** eine Migration lief (z. B. Build-Fehler), genügt `git checkout <alter commit>`, `docker compose build` und `docker compose up -d --wait` – ohne Restore.
 

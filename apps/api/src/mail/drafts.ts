@@ -58,7 +58,16 @@ import {
   type UploadedAttachment,
 } from '@fma/shared'
 import { requireAuth } from '../auth/routes'
-import { attachmentLimits, copyAttachmentsToUploads, loadOwnedRaw } from './attachments'
+import {
+  COPY_ADMISSION_WEIGHT,
+  MAX_DRAFT_UPLOADS,
+  attachmentLimits,
+  copyAttachmentsToUploads,
+  countDraftUploads,
+  loadOwnedRaw,
+  lockAccountUploads,
+  tryAdmitUpload,
+} from './attachments'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Message-ID of an uploaded draft version: `<draft id>.<version>@domain`. */
@@ -378,6 +387,8 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
           )
         }
         if (parsed.attachmentIds) {
+          // Count + attach serialized per account (MAX_DRAFT_UPLOADS).
+          await lockAccountUploads(client, parsed.accountId)
           // Released uploads fall back to the normal retention of the cleanup.
           await client.query(
             `UPDATE attachment_upload SET draft_id = NULL
@@ -397,6 +408,13 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
             await client.query('ROLLBACK')
             await reply.code(413).send({
               message: `Die Anhänge sind zusammen zu groß (höchstens ${formatByteSize(maxTotalBytes)}).`,
+            })
+            return
+          }
+          if ((await countDraftUploads(client, parsed.accountId)) > MAX_DRAFT_UPLOADS) {
+            await client.query('ROLLBACK')
+            await reply.code(429).send({
+              message: `Zu viele Anhänge in Entwürfen (höchstens ${MAX_DRAFT_UPLOADS} je Konto).`,
             })
             return
           }
@@ -510,6 +528,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
       const client = await pool.connect()
       let draftId: string
       let created = false
+      let hasAttachments = false
       try {
         await client.query('BEGIN')
         // Locks the message: a double click resumes the same draft.
@@ -522,9 +541,10 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
           subject_enc: Buffer
           recipients_enc: Buffer
           text_plain_enc: Buffer | null
+          has_attachments: boolean
         }>(
           `SELECT m.account_id, a.wrapped_dek, m.message_id_header, m.in_reply_to, m."references",
-                  m.subject_enc, m.recipients_enc, mb.text_plain_enc
+                  m.subject_enc, m.recipients_enc, mb.text_plain_enc, m.has_attachments
            FROM message m
            JOIN mail_account a ON a.id = m.account_id
            LEFT JOIN message_body mb ON mb.message_id = m.id
@@ -538,6 +558,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
           await reply.code(404).send({ message: 'Nachricht nicht gefunden.' })
           return
         }
+        hasAttachments = message.has_attachments
 
         // A copy uploaded by this app, or a draft already opened from this message.
         const ownId = DRAFT_MESSAGE_ID_RE.exec(message.message_id_header)?.[1]?.toLowerCase()
@@ -584,12 +605,13 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
           )
           const location = locations[0]
           // Not uploaded until edited (imap_version = version): the original
-          // copy stays in the Drafts folder until then.
+          // copy stays in the Drafts folder until then. With attachments it
+          // is kept (keep_source) until they are all copied, see below.
           await client.query(
             `INSERT INTO draft
                (id, account_id, content_enc, in_reply_to, "references", version, imap_version,
-                message_id_header, source_folder_id, source_uidvalidity, source_uid)
-             VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $7, $8, $9)`,
+                message_id_header, source_folder_id, source_uidvalidity, source_uid, keep_source)
+             VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $7, $8, $9, $10)`,
             [
               draftId,
               message.account_id,
@@ -606,6 +628,7 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
               location?.folder_id ?? null,
               location?.uidvalidity ?? null,
               location?.uid ?? null,
+              message.has_attachments,
             ],
           )
         }
@@ -616,27 +639,50 @@ export async function draftRoutes(app: FastifyInstance): Promise<void> {
       } finally {
         client.release()
       }
+      let attachmentsSkipped = 0
       if (created) {
         // Keep the attachments of the other client's draft (they would be
-        // lost with the first upload otherwise). Best effort: the draft
-        // opens without them when the raw mail is not stored.
-        try {
-          const raw = await loadOwnedRaw(pool, request.log, userId, messageId)
-          if (raw && raw !== 'missing') {
-            const { rows: accounts } = await pool.query<{ id: string; wrapped_dek: Buffer }>(
-              `SELECT a.id, a.wrapped_dek FROM draft d JOIN mail_account a ON a.id = d.account_id
-               WHERE d.id = $1`,
-              [draftId],
-            )
-            const { skipped } = await copyAttachmentsToUploads(pool, raw, accounts[0]!, draftId)
-            if (skipped > 0) request.log.warn({ draftId, skipped }, 'draft attachments skipped')
+        // lost with the first upload otherwise). When not all of them could
+        // be copied (raw mail not stored, limits, parse error, too many
+        // copies running), the draft keeps the original copy in the Drafts
+        // folder (`keep_source`): the worker never deletes it.
+        let complete = false
+        const release = tryAdmitUpload(COPY_ADMISSION_WEIGHT)
+        if (release) {
+          try {
+            const raw = await loadOwnedRaw(pool, request.log, userId, messageId)
+            if (raw && raw !== 'missing') {
+              const { rows: accounts } = await pool.query<{ id: string; wrapped_dek: Buffer }>(
+                `SELECT a.id, a.wrapped_dek FROM draft d JOIN mail_account a ON a.id = d.account_id
+                 WHERE d.id = $1`,
+                [draftId],
+              )
+              const { skipped } = await copyAttachmentsToUploads(pool, raw, accounts[0]!, draftId)
+              attachmentsSkipped = skipped
+              complete = skipped === 0
+            } else {
+              complete = !hasAttachments
+            }
+          } catch {
+            request.log.warn({ draftId }, 'draft attachments could not be copied')
+          } finally {
+            release()
           }
-        } catch {
-          request.log.warn({ draftId }, 'draft attachments could not be copied')
+        } else {
+          complete = !hasAttachments
+        }
+        if (!complete) {
+          attachmentsSkipped = Math.max(attachmentsSkipped, 1)
+          request.log.warn({ draftId, skipped: attachmentsSkipped }, 'draft attachments skipped')
+        }
+        if (complete === hasAttachments) {
+          await pool.query('UPDATE draft SET keep_source = $2 WHERE id = $1', [draftId, !complete])
         }
       }
       const row = await loadOwned(draftId, userId)
-      await reply.code(created ? 201 : 200).send(toDraft(request.log, row!))
+      const body: Draft = toDraft(request.log, row!)
+      if (attachmentsSkipped > 0) body.attachmentsSkipped = attachmentsSkipped
+      await reply.code(created ? 201 : 200).send(body)
     },
   )
 }

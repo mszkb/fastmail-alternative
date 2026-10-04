@@ -21,7 +21,11 @@
  *   Session, account ownership and a global limit of uploads in progress
  *   (MAX_CONCURRENT_UPLOADS, default 2, else 429) are checked in onRequest,
  *   i.e. before the body is read: unauthenticated clients cannot make the
- *   api buffer large bodies (memory limit of the container).
+ *   api buffer large bodies (memory limit of the container). Copies out of
+ *   a raw mail (forward, opening a draft of another client) share this
+ *   admission with weight 2 (tryAdmitUpload). Per account at most
+ *   MAX_PENDING_UPLOADS uploads without draft/message and MAX_DRAFT_UPLOADS
+ *   uploads kept with drafts; count + insert run under an advisory lock.
  * - `DELETE /api/uploads/:id` removes an upload not yet attached to a
  *   message. `POST /api/outbox` attaches uploads via `attachmentIds`
  *   (see ./outbox), the worker deletes them after sending.
@@ -39,7 +43,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { PassThrough, Readable } from 'node:stream'
-import type { Pool } from '@fma/db'
+import type { Pool, PoolClient } from '@fma/db'
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { MailParser, type AttachmentStream, type MessageText } from 'mailparser'
 import { encryptBytes, encryptField, unwrapAccountKey, uploadFieldAad } from '@fma/crypto'
@@ -60,12 +64,26 @@ import { readRaw, slices } from './message-html'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /**
- * Uploads not yet attached to a message (including those kept with
- * drafts), per account (bounded until cleanup, #55).
+ * Uploads neither kept with a draft nor attached to a message, per account
+ * (bounded until the cleanup removes them, #55).
  */
 export const MAX_PENDING_UPLOADS = 100
-/** Upload bodies buffered at the same time (MAX_CONCURRENT_UPLOADS), see admitUpload. */
+/**
+ * Uploads kept with drafts, per account. The cleanup leaves them alone
+ * while their draft exists, so they have their own, more generous limit
+ * (otherwise a few drafts with attachments would block new uploads).
+ */
+export const MAX_DRAFT_UPLOADS = 200
+/** Weight units in progress at the same time (MAX_CONCURRENT_UPLOADS), see tryAdmitUpload. */
 const DEFAULT_MAX_CONCURRENT_UPLOADS = 2
+/**
+ * Weight of copying a message's attachments (raw mail + parser + one
+ * decoded attachment + its encrypted copy in memory): about twice an upload.
+ */
+export const COPY_ADMISSION_WEIGHT = 2
+/** Advisory lock class for "count + insert" of an account's uploads. */
+const UPLOAD_LOCK_CLASS = 0x2f7570 // "/up"
+const TOO_MANY_UPLOADS = 'Gerade laufen zu viele Uploads - bitte gleich erneut versuchen.'
 const ATTACHMENT_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox"
 
 function envBytes(name: string, fallback: number): number {
@@ -75,6 +93,111 @@ function envBytes(name: string, fallback: number): number {
 
 function maxConcurrentUploads(): number {
   return envBytes('MAX_CONCURRENT_UPLOADS', DEFAULT_MAX_CONCURRENT_UPLOADS)
+}
+
+/** Weight in progress in this process (upload bodies, attachment copies). */
+let activeUploadWeight = 0
+
+/**
+ * Admission for memory-heavy attachment work (upload bodies, copies out of
+ * a raw mail), shared by all routes of this process: returns a release
+ * function, or null when MAX_CONCURRENT_UPLOADS weight units are in use
+ * (the caller answers 429). A weight above the limit counts as the limit,
+ * so a copy still runs alone with MAX_CONCURRENT_UPLOADS=1.
+ */
+export function tryAdmitUpload(weight = 1): (() => void) | null {
+  const capacity = maxConcurrentUploads()
+  const units = Math.min(weight, capacity)
+  if (activeUploadWeight + units > capacity) return null
+  activeUploadWeight += units
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    activeUploadWeight -= units
+  }
+}
+
+/**
+ * Serializes "count + insert/attach" of an account's uploads until the end
+ * of the transaction of `client`, so concurrent requests cannot exceed the
+ * per-account limits.
+ */
+export async function lockAccountUploads(client: PoolClient, accountId: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [
+    UPLOAD_LOCK_CLASS,
+    accountId,
+  ])
+}
+
+/** Uploads kept with drafts of an account (to check MAX_DRAFT_UPLOADS). */
+export async function countDraftUploads(client: PoolClient, accountId: string): Promise<number> {
+  const { rows } = await client.query<{ count: string }>(
+    `SELECT count(*) FROM attachment_upload
+     WHERE account_id = $1 AND draft_id IS NOT NULL AND outbox_id IS NULL`,
+    [accountId],
+  )
+  return Number(rows[0]?.count ?? 0)
+}
+
+/**
+ * Inserts an encrypted upload unless the account's limit for its kind
+ * (pending: MAX_PENDING_UPLOADS, kept with a draft: MAX_DRAFT_UPLOADS) is
+ * reached; false = limit reached, nothing inserted.
+ */
+async function insertUpload(
+  pool: Pool,
+  upload: {
+    id: string
+    accountId: string
+    filenameEnc: Buffer
+    contentType: string
+    size: number
+    contentEnc: Buffer
+    draftId: string | null
+  },
+): Promise<boolean> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await lockAccountUploads(client, upload.accountId)
+    let count: number
+    if (upload.draftId) {
+      count = await countDraftUploads(client, upload.accountId)
+    } else {
+      const { rows } = await client.query<{ count: string }>(
+        `SELECT count(*) FROM attachment_upload
+         WHERE account_id = $1 AND draft_id IS NULL AND outbox_id IS NULL`,
+        [upload.accountId],
+      )
+      count = Number(rows[0]?.count ?? 0)
+    }
+    if (count >= (upload.draftId ? MAX_DRAFT_UPLOADS : MAX_PENDING_UPLOADS)) {
+      await client.query('ROLLBACK')
+      return false
+    }
+    await client.query(
+      `INSERT INTO attachment_upload
+         (id, account_id, filename_enc, content_type, size_bytes, content_enc, draft_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        upload.id,
+        upload.accountId,
+        upload.filenameEnc,
+        upload.contentType,
+        upload.size,
+        upload.contentEnc,
+        upload.draftId,
+      ],
+    )
+    await client.query('COMMIT')
+    return true
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 /** Configured attachment limits (bytes), read per call so tests can override them. */
@@ -226,21 +349,15 @@ export async function copyAttachmentsToUploads(
 ): Promise<CopyAttachmentsResponse> {
   const list = (await listAttachments(raw)).filter((attachment) => !attachment.inline)
   const { maxFileBytes, maxTotalBytes } = attachmentLimits()
-  const { rows: pending } = await pool.query<{ count: string }>(
-    `SELECT count(*) FROM attachment_upload WHERE account_id = $1 AND outbox_id IS NULL`,
-    [account.id],
-  )
-  const slots = Math.min(
-    ATTACHMENT_LIMIT_DEFAULTS.maxCount,
-    MAX_PENDING_UPLOADS - Number(pending[0]?.count ?? 0),
-  )
   const dek = unwrapAccountKey(process.env.MASTER_KEY ?? '', account.wrapped_dek)
   const attachments: UploadedAttachment[] = []
   let total = 0
   let skipped = 0
+  let full = false
   for (const meta of list) {
     if (
-      attachments.length >= slots ||
+      full ||
+      attachments.length >= ATTACHMENT_LIMIT_DEFAULTS.maxCount ||
       meta.size > maxFileBytes ||
       total + meta.size > maxTotalBytes
     ) {
@@ -256,20 +373,20 @@ export async function copyAttachmentsToUploads(
     const id = randomUUID()
     const filename = opened.meta.filename
     const contentType = opened.meta.contentType
-    await pool.query(
-      `INSERT INTO attachment_upload
-         (id, account_id, filename_enc, content_type, size_bytes, content_enc, draft_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        id,
-        account.id,
-        Buffer.from(encryptField(dek, filename, uploadFieldAad('filename', id)), 'utf8'),
-        contentType,
-        content.length,
-        encryptBytes(dek, content, uploadFieldAad('content', id)),
-        draftId,
-      ],
-    )
+    const inserted = await insertUpload(pool, {
+      id,
+      accountId: account.id,
+      filenameEnc: Buffer.from(encryptField(dek, filename, uploadFieldAad('filename', id)), 'utf8'),
+      contentType,
+      size: content.length,
+      contentEnc: encryptBytes(dek, content, uploadFieldAad('content', id)),
+      draftId,
+    })
+    if (!inserted) {
+      full = true
+      skipped++
+      continue
+    }
     total += content.length
     attachments.push({ id, filename, contentType, size: content.length })
   }
@@ -352,15 +469,14 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
     (_request, body, done) => done(null, body),
   )
 
-  /** Uploads whose body is being received or processed right now (this process). */
-  let activeUploads = 0
   /** Account resolved by admitUpload, per request. */
   const uploadAccounts = new WeakMap<FastifyRequest, { id: string; wrapped_dek: Buffer }>()
 
   /**
    * Runs before the body is read (onRequest, after requireAuth): only an
    * owner of the account may make the api buffer up to MAX_ATTACHMENT_BYTES,
-   * and at most MAX_CONCURRENT_UPLOADS bodies are in memory at once.
+   * and at most MAX_CONCURRENT_UPLOADS weight units (bodies, copies) are in
+   * memory at once.
    */
   async function admitUpload(
     request: FastifyRequest<{ Params: { id: string } }>,
@@ -378,16 +494,13 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
       await reply.code(404).send({ message: 'Konto nicht gefunden.' })
       return
     }
-    if (activeUploads >= maxConcurrentUploads()) {
-      await reply
-        .code(429)
-        .header('retry-after', '2')
-        .send({ message: 'Gerade laufen zu viele Uploads - bitte gleich erneut versuchen.' })
+    const release = tryAdmitUpload()
+    if (!release) {
+      await reply.code(429).header('retry-after', '2').send({ message: TOO_MANY_UPLOADS })
       return
     }
-    activeUploads++
     // 'close' fires after the response was sent and when the client aborts.
-    reply.raw.once('close', () => activeUploads--)
+    reply.raw.once('close', release)
     uploadAccounts.set(request, account)
   }
 
@@ -429,30 +542,24 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
       }
       const contentType = normalizeContentType(request.headers['x-content-type'])
 
-      const { rows: pending } = await pool.query<{ count: string }>(
-        `SELECT count(*) FROM attachment_upload WHERE account_id = $1 AND outbox_id IS NULL`,
-        [account.id],
-      )
-      if (Number(pending[0]?.count ?? 0) >= MAX_PENDING_UPLOADS) {
+      const id = randomUUID()
+      const dek = unwrapAccountKey(process.env.MASTER_KEY ?? '', account.wrapped_dek)
+      const inserted = await insertUpload(pool, {
+        id,
+        accountId: account.id,
+        filenameEnc: Buffer.from(
+          encryptField(dek, filename, uploadFieldAad('filename', id)),
+          'utf8',
+        ),
+        contentType,
+        size: body.length,
+        contentEnc: encryptBytes(dek, body, uploadFieldAad('content', id)),
+        draftId: null,
+      })
+      if (!inserted) {
         await reply.code(429).send({ message: 'Zu viele nicht gesendete Anhänge.' })
         return
       }
-
-      const id = randomUUID()
-      const dek = unwrapAccountKey(process.env.MASTER_KEY ?? '', account.wrapped_dek)
-      await pool.query(
-        `INSERT INTO attachment_upload
-           (id, account_id, filename_enc, content_type, size_bytes, content_enc)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          id,
-          account.id,
-          Buffer.from(encryptField(dek, filename, uploadFieldAad('filename', id)), 'utf8'),
-          contentType,
-          body.length,
-          encryptBytes(dek, body, uploadFieldAad('content', id)),
-        ],
-      )
       const result: UploadedAttachment = { id, filename, contentType, size: body.length }
       await reply.code(201).send(result)
     },
@@ -475,15 +582,12 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
         await reply.code(404).send({ message: 'Konto nicht gefunden.' })
         return
       }
-      // Shares the limit of upload bodies in memory (one attachment at a time).
-      if (activeUploads >= maxConcurrentUploads()) {
-        await reply
-          .code(429)
-          .header('retry-after', '2')
-          .send({ message: 'Gerade laufen zu viele Uploads - bitte gleich erneut versuchen.' })
+      // Shares the admission of upload bodies (heavier: weight 2).
+      const release = tryAdmitUpload(COPY_ADMISSION_WEIGHT)
+      if (!release) {
+        await reply.code(429).header('retry-after', '2').send({ message: TOO_MANY_UPLOADS })
         return
       }
-      activeUploads++
       try {
         const raw = await loadRaw(request, request.params.id)
         if (raw === 'missing') {
@@ -507,7 +611,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
         }
         await reply.code(201).send(result)
       } finally {
-        activeUploads--
+        release()
       }
     },
   )

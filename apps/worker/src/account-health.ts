@@ -15,8 +15,10 @@
  *   during an open window do not count twice.
  * - rate_limited (roadmap 3.5): provider throttling ([LIMIT], [THROTTLED],
  *   "too many connections") uses the same backoff as 'unreachable' instead
- *   of failing in a loop - and is checked before auth, because some
- *   providers reject the login itself when too many connections are open.
+ *   of failing in a loop. Response codes and "too many connections" are
+ *   checked before auth (some providers reject the login itself when too
+ *   many connections are open); vague phrases ("try again later") only
+ *   after it, so a failed login is never retried as throttling.
  * - A successful sync (folder_sync/message_sync, which always connect)
  *   closes the circuit: status 'ok', counters reset, last_sync_at.
  *
@@ -70,13 +72,19 @@ const NETWORK_CODES: Record<string, AccountErrorCode> = {
 const THROTTLE_RESPONSE_CODES = new Set(['LIMIT', 'THROTTLED'])
 /**
  * Throttling phrases in provider responses. The text is only matched here,
- * never logged or stored (it may quote content).
+ * never logged or stored (it may quote content). Unambiguous phrases are
+ * checked before the auth check (some providers reject the login itself
+ * when too many connections are open); the vague ones only after it, so a
+ * failed login with "try again later" is never retried with a wrong password.
  */
-const THROTTLE_TEXT =
-  /too many (simultaneous |concurrent |open )?(connections|sessions|logins)|rate.?limit|throttl|try again later/i
+const THROTTLE_TEXT_STRONG = /too many (simultaneous |concurrent |open )?(connections|sessions)/i
+const THROTTLE_TEXT_WEAK = /too many logins|rate.?limit|throttl|try again later/i
 
-/** True for errors that mean "the provider wants us to slow down". */
-export function isThrottleError(err: unknown): boolean {
+/**
+ * True for errors that mean "the provider wants us to slow down".
+ * `strongOnly`: only response codes and unambiguous phrases.
+ */
+export function isThrottleError(err: unknown, strongOnly = false): boolean {
   if (!err || typeof err !== 'object') return false
   const error = err as { serverResponseCode?: unknown; responseText?: unknown; response?: unknown }
   if (
@@ -86,7 +94,9 @@ export function isThrottleError(err: unknown): boolean {
     return true
   }
   for (const text of [error.responseText, error.response]) {
-    if (typeof text === 'string' && THROTTLE_TEXT.test(text)) return true
+    if (typeof text !== 'string') continue
+    if (THROTTLE_TEXT_STRONG.test(text)) return true
+    if (!strongOnly && THROTTLE_TEXT_WEAK.test(text)) return true
   }
   return false
 }
@@ -111,12 +121,13 @@ export function classifyAccountError(err: unknown): AccountError | null {
     responseCode?: unknown
     message?: unknown
   }
-  if (isThrottleError(err)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
+  if (isThrottleError(err, true)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
   if (error.authenticationFailed === true || error.serverResponseCode === 'AUTHENTICATIONFAILED') {
     return { code: 'AUTH_FAILED', kind: 'auth' }
   }
   const code = typeof error.code === 'string' ? error.code : ''
   if (code === 'EAUTH' || code === 'ENOAUTH') return { code: 'AUTH_FAILED', kind: 'auth' }
+  if (isThrottleError(err)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
   if (KNOWN_CODES.has(code))
     return { code: code as AccountErrorCode, kind: kindOf(code as AccountErrorCode) }
   const mapped = NETWORK_CODES[code]

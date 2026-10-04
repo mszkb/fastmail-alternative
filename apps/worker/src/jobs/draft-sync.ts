@@ -9,8 +9,10 @@
  *   draft id (`<draft id>.<version>@domain`, IMAP SEARCH HEADER matches
  *   substrings) - this also catches copies left over by a crash between
  *   APPEND and the database update - plus the original copy of a draft
- *   that was written in another client (`source_*`). A new Message-ID per
- *   version keeps the message sync from reusing stale metadata.
+ *   that was written in another client (`source_*`) - unless `keep_source`
+ *   is set (not all of its attachments could be copied when it was opened):
+ *   then the original stays, so its attachments are never lost. A new
+ *   Message-ID per version keeps the message sync from reusing stale metadata.
  * - Delete (`deleted_at` set): remove all copies, then delete the row.
  * - Attachments kept with the draft (roadmap 5.3) are part of the copy,
  *   built like the sent message (../uploads).
@@ -52,6 +54,7 @@ interface DraftRow {
   source_folder_id: string | null
   source_uidvalidity: string | null
   source_uid: string | null
+  keep_source: boolean
 }
 
 interface FolderRef {
@@ -140,7 +143,12 @@ async function removeSourceElsewhere(
   row: DraftRow,
   draftsFolderId: string | null,
 ): Promise<string | null> {
-  if (!row.source_folder_id || !row.source_uid || row.source_folder_id === draftsFolderId) {
+  if (
+    row.keep_source ||
+    !row.source_folder_id ||
+    !row.source_uid ||
+    row.source_folder_id === draftsFolderId
+  ) {
     return null
   }
   const { rows } = await pool.query<{ path: string; uidvalidity: string | null }>(
@@ -173,7 +181,8 @@ export async function runDraftSync(
 
   const { rows } = await pool.query<DraftRow>(
     `SELECT id, identity_id, content_enc, in_reply_to, "references", version, imap_version,
-            updated_at, deleted_at, source_folder_id, source_uidvalidity, source_uid
+            updated_at, deleted_at, source_folder_id, source_uidvalidity, source_uid,
+            keep_source
      FROM draft WHERE id = $1 AND account_id = $2`,
     [draftId, accountId],
   )
@@ -188,7 +197,9 @@ export async function runDraftSync(
     [accountId],
   )
   const drafts = folders[0] ?? null
-  const hasSource = Boolean(row.source_folder_id && row.source_uid)
+  // keep_source: not all attachments of the source were copied - never
+  // delete it (the user removes it in the Drafts folder when done).
+  const hasSource = Boolean(row.source_folder_id && row.source_uid && !row.keep_source)
 
   // Without a Drafts folder nothing is uploaded; a source copy elsewhere is
   // only removed once the draft is discarded or sent.
@@ -232,6 +243,7 @@ export async function runDraftSync(
         const remove = copies.filter((uid) => uid !== keep)
         const mailbox = client.mailbox
         if (
+          !row.keep_source &&
           row.source_uid &&
           row.source_folder_id === drafts.id &&
           mailbox &&

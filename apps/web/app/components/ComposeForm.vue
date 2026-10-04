@@ -537,6 +537,10 @@ onMounted(() => {
   window.addEventListener('pagehide', onPageHide)
   document.addEventListener('visibilitychange', onPageHide)
   if (props.forwardOf && !saved) void takeOverAttachments(props.forwardOf)
+  if (saved?.attachmentsSkipped) {
+    error.value =
+      'Einige Anhänge konnten nicht übernommen werden; das Original bleibt im Entwürfe-Ordner erhalten.'
+  }
   // New mail and forwards start with the recipients, replies with the text.
   if (props.draft.mode === 'new' || props.draft.mode === 'forward') {
     toInput.value?.focus()
