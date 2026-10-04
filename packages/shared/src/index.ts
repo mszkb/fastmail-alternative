@@ -20,6 +20,7 @@ export * from './push'
 export * from './redact'
 export * from './request-scope'
 export * from './search'
+export * from './storage'
 export * from './threading'
 
 export type ServiceName = 'api' | 'worker' | 'web'

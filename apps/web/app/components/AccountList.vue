@@ -1,15 +1,22 @@
 <script setup lang="ts">
 // Account list in the settings (roadmap 2.1/3.1): edit, identities (3.6), folder
-// mapping (3.3), remove;
+// mapping (3.3), remove, storage usage (5.4);
 // connection problems (3.4) are explained in German with the edit action.
-import { accountStatusInfo, type AccountSummary } from '@fma/shared'
+import {
+  accountStatusInfo,
+  formatByteSize,
+  storageSummary,
+  type AccountStorage,
+  type AccountSummary,
+  type StorageResponse,
+} from '@fma/shared'
 
 type Account = Pick<
   AccountSummary,
   'id' | 'displayName' | 'emailAddress' | 'imap' | 'smtp' | 'status' | 'lastErrorCode'
 > & { sortOrder?: number }
 
-defineProps<{ accounts: Account[] }>()
+const props = defineProps<{ accounts: Account[] }>()
 const emit = defineEmits<{ deleted: [id: string]; changed: [id: string] }>()
 
 const busy = ref(false)
@@ -21,6 +28,29 @@ const mapping = ref('')
 // Account whose edit form is open (also opened from the mail view, e.g.
 // "Zugangsdaten aktualisieren").
 const editingAccount = defineModel<string>('edit', { default: '' })
+
+// Storage usage per account (5.4): numbers only, loaded with the list;
+// a failure just hides the line.
+const storage = ref<StorageResponse | null>(null)
+
+async function loadStorage(): Promise<void> {
+  try {
+    const res = await fetch('/api/storage')
+    storage.value = res.ok ? ((await res.json()) as StorageResponse) : null
+  } catch {
+    storage.value = null
+  }
+}
+
+function storageOf(id: string): AccountStorage | undefined {
+  return storage.value?.accounts.find((s) => s.accountId === id)
+}
+
+onMounted(loadStorage)
+watch(
+  () => props.accounts.map((a) => a.id).join(),
+  () => void loadStorage(),
+)
 
 function onSaved(id: string): void {
   editingAccount.value = ''
@@ -97,6 +127,9 @@ async function remove(account: Account): Promise<void> {
           </button>
           <button type="button" :disabled="busy" @click="remove(account)">Entfernen</button>
         </span>
+        <p v-if="storageOf(account.id)" class="storage">
+          Speicher: {{ storageSummary(storageOf(account.id)!) }}
+        </p>
         <p v-if="accountStatusInfo(account)" class="status-text">
           {{ accountStatusInfo(account)!.description }}
         </p>
@@ -110,6 +143,9 @@ async function remove(account: Account): Promise<void> {
         <FolderRoles v-if="mapping === account.id" :account-id="account.id" />
       </li>
     </ul>
+    <p v-if="storage && storage.accounts.length > 1" class="hint storage-total">
+      Speicher gesamt: ca. {{ formatByteSize(storage.totalBytes) }}
+    </p>
     <p v-if="error" class="error">{{ error }}</p>
   </div>
 </template>
@@ -163,6 +199,17 @@ h2 {
 .tag.problem {
   background: #fde8e8;
   color: #9b1c1c;
+}
+
+.storage {
+  width: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: #52606d;
+}
+
+.storage-total {
+  margin-top: 0.5rem;
 }
 
 .status-text {

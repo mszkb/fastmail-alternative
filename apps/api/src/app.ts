@@ -14,6 +14,7 @@ import { messageHtmlRoutes } from './mail/message-html'
 import { messageRoutes } from './mail/messages'
 import { outboxRoutes } from './mail/outbox'
 import { searchRoutes } from './mail/search'
+import { storageRoutes } from './mail/storage'
 import { syncRoutes } from './mail/sync'
 import { Metrics } from './metrics'
 import { pushRoutes } from './push/routes'
@@ -124,6 +125,7 @@ export function buildApp({
   app.register(searchRoutes)
   app.register(identityRoutes)
   app.register(syncRoutes)
+  app.register(storageRoutes)
   app.register(pushRoutes)
   app.register(configTransferRoutes)
 
