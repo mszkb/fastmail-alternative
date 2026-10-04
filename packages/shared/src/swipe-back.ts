@@ -110,8 +110,8 @@ export interface FormFieldState {
 /**
  * True when any field differs from its initial state. A swipe "back" in
  * the settings unmounts the open form, so the view refuses it while this
- * is true. Fields filled through v-model count as changed (their
- * `defaultValue` stays empty), which errs on the side of keeping input.
+ * is true. With v-model `defaultValue` stays empty, so callers pass the
+ * value recorded before the first user interaction as `defaultValue`.
  */
 export function hasUnsavedInput(fields: Iterable<FormFieldState>): boolean {
   for (const field of fields) {

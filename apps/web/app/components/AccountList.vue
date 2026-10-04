@@ -33,13 +33,20 @@ const editingAccount = defineModel<string>('edit', { default: '' })
 // a failure just hides the line.
 const storage = ref<StorageResponse | null>(null)
 
+// Only the latest request may set the result, so a slow older response
+// never overwrites a newer one.
+let storageRequest = 0
+
 async function loadStorage(): Promise<void> {
+  const seq = ++storageRequest
+  let result: StorageResponse | null = null
   try {
     const res = await fetch('/api/storage')
-    storage.value = res.ok ? ((await res.json()) as StorageResponse) : null
+    if (res.ok) result = (await res.json()) as StorageResponse
   } catch {
-    storage.value = null
+    result = null
   }
+  if (seq === storageRequest) storage.value = result
 }
 
 function storageOf(id: string): AccountStorage | undefined {

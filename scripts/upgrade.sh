@@ -74,6 +74,13 @@ fi
 RECORDED_TARGET="$(sed -n 's/^UPGRADE_TARGET=//p' "$RECORD" 2>/dev/null || true)"
 if [ "$PREVIOUS" = "$TARGET_COMMIT" ] && [ "$RECORDED_TARGET" = "$TARGET_COMMIT" ]; then
   echo "upgrade: already on the target - keeping $RECORD"
+  # A new backup here may already hold migrated data, so it never replaces
+  # the recorded one - even if that file is gone.
+  RECORDED_BACKUP="$(sed -n 's/^PREVIOUS_BACKUP=//p' "$RECORD")"
+  if [ ! -f "$RECORDED_BACKUP" ]; then
+    echo "upgrade: WARNING - the recorded pre-upgrade backup $RECORDED_BACKUP no longer exists;" >&2
+    echo "upgrade: WARNING - a rollback via restore is not possible for this upgrade" >&2
+  fi
 else
   mkdir -p "$BACKUP_DIR"
   printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\nUPGRADE_TARGET=%s\n' \

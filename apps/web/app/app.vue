@@ -131,6 +131,30 @@ function onSwipeEnd(event: TouchEvent): void {
   if (trigger) goBack()
 }
 
+/** A cancelled touch (e.g. system gesture) never navigates. */
+function onSwipeCancel(): void {
+  swipe.cancel()
+  swipeDistance.value = 0
+  swipeArmed.value = false
+}
+
+// Value of each settings field before the user first touched/focused it.
+// v-model leaves `defaultValue` empty, so this baseline is what "unsaved"
+// is measured against; fields never interacted with count as unchanged.
+const fieldBaseline = new WeakMap<Element, { value: string; checked: boolean }>()
+
+function recordFieldBaseline(event: Event): void {
+  const field = event.target
+  if (
+    (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+    field.closest('.settings') &&
+    !fieldBaseline.has(field)
+  ) {
+    const checked = field instanceof HTMLInputElement && field.checked
+    fieldBaseline.set(field, { value: field.value, checked })
+  }
+}
+
 /** One navigation step back; does nothing on the top-level mail list. */
 function goBack(): void {
   if (section.value === 'settings') {
@@ -138,7 +162,18 @@ function goBack(): void {
     const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
       '.settings input, .settings textarea',
     )
-    if (hasUnsavedInput(fields)) return
+    const states = [...fields].map((field) => {
+      const base = fieldBaseline.get(field)
+      const checked = field instanceof HTMLInputElement ? field.checked : undefined
+      return {
+        type: field.type,
+        value: field.value,
+        defaultValue: base ? base.value : field.value,
+        checked,
+        defaultChecked: base ? base.checked : checked,
+      }
+    })
+    if (hasUnsavedInput(states)) return
     if (editAccountId.value) editAccountId.value = ''
     else section.value = 'mail'
     return
@@ -456,7 +491,9 @@ onMounted(() => {
   window.addEventListener('touchstart', onSwipeStart, { passive: true })
   window.addEventListener('touchmove', onSwipeMove, { passive: true })
   window.addEventListener('touchend', onSwipeEnd, { passive: true })
-  window.addEventListener('touchcancel', onSwipeEnd, { passive: true })
+  window.addEventListener('touchcancel', onSwipeCancel, { passive: true })
+  document.addEventListener('focusin', recordFieldBaseline, true)
+  document.addEventListener('pointerdown', recordFieldBaseline, true)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onWorkerMessage)
   }
@@ -472,7 +509,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('touchstart', onSwipeStart)
   window.removeEventListener('touchmove', onSwipeMove)
   window.removeEventListener('touchend', onSwipeEnd)
-  window.removeEventListener('touchcancel', onSwipeEnd)
+  window.removeEventListener('touchcancel', onSwipeCancel)
+  document.removeEventListener('focusin', recordFieldBaseline, true)
+  document.removeEventListener('pointerdown', recordFieldBaseline, true)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onWorkerMessage)
   }

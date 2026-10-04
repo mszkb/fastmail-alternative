@@ -23,7 +23,7 @@ Das Skript
 - bricht ab, wenn der Checkout lokale Änderungen hat,
 - holt die neuen Stände (`git fetch`) und löst das Ziel auf – bei einem Branch-Namen den Stand von `origin/<branch>`, nicht einen evtl. veralteten lokalen Branch – und bricht ab, wenn das Ziel **kein Nachfolger** des aktuellen Commits ist (ein Downgrade ist ein [Rollback](#rollback) und braucht das Backup der alten Version),
 - erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter) und verwendet nur eine Datei, die **dieser Lauf** geschrieben hat (Marker-Datei vor dem Backup, `find -newer`) – nie ein älteres Backup,
-- hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch,
+- hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch. Existiert diese Backup-Datei nicht mehr, bricht `upgrade.sh` nicht ab, warnt aber deutlich, dass ein Rollback per Restore nicht möglich ist (ein neues Backup ersetzt sie bewusst nicht, weil es schon migrierte Daten enthalten kann). `scripts/backup.sh` löscht die dort genannte Datei bei der Aufbewahrung (`BACKUP_KEEP_DAYS`) nicht,
 - wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
 - startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Das gilt für Dienste mit Healthcheck (caddy, web, api, postgres); der **Worker hat keinen Healthcheck** und wird nur als „running“ geprüft – ihn danach separat kontrollieren (siehe unten),
@@ -65,12 +65,13 @@ Weil Migrationen nur vorwärts laufen, heißt Rollback: **alte Version + Backup 
 
 ```sh
 cd ~/fastmail-alternative
-cat backups/upgrade-previous            # alter Commit + Backup von vor dem Upgrade
-. backups/upgrade-previous              # setzt PREVIOUS_REF und PREVIOUS_BACKUP
+BACKUP_DIR="${BACKUP_DIR:-$PWD/backups}"   # wie in scripts/upgrade.sh
+cat "$BACKUP_DIR/upgrade-previous"      # alter Commit + Backup von vor dem Upgrade
+. "$BACKUP_DIR/upgrade-previous"        # setzt PREVIOUS_REF und PREVIOUS_BACKUP
 git checkout "$PREVIOUS_REF"
 docker compose build
 docker compose stop api worker
-docker compose run --rm --user root -v "$PWD/backups:/backups:ro" worker \
+docker compose run --rm --user root -v "$BACKUP_DIR:/backups:ro" worker \
   node dist/backup.js restore "/backups/$(basename "$PREVIOUS_BACKUP")" --force
 docker compose up -d --wait caddy web api postgres   # Worker bleibt gestoppt
 # Nicht gesendete Postausgangs-Einträge anzeigen (nur IDs/Zeiten, keine Inhalte):
