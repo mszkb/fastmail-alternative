@@ -50,9 +50,9 @@ Ursprünglich lieferte ein eigener `web`-Container (nginx) die PWA aus. Die PWA 
 
 Die Anwendung muss auch **ohne Docker** startbar sein: mit Node, einem vorhandenen PostgreSQL und `pnpm build && pnpm start` ([Installation ohne Docker](../operations/install-native.md)).
 
-- `scripts/native.mjs` liest dieselbe `.env`, setzt die Pfade, die sonst die Images setzen (`MAIL_DATA_DIR`, `WEB_DIR`), und startet API und Worker als zwei Node-Prozesse. Stirbt einer, beendet es beide mit Fehlercode, und der Supervisor (systemd) startet neu. Ohne Proxy lauscht die API nur auf `127.0.0.1`.
+- `scripts/native.mjs` liest dieselbe `.env`, setzt die Pfade, die sonst die Images setzen (`MAIL_DATA_DIR`, `WEB_DIR`), und startet API und Worker **in einem einzigen Node-Prozess** (`apps/api/src/server.ts` + `apps/worker/src/service.ts`, gemessen ~105 MB statt ~180 MB für zwei Prozesse). Stürzt der Worker ab, fährt es auch die API herunter und endet mit Fehlercode; der Supervisor (systemd) startet neu. Ohne Proxy lauscht die API nur auf `127.0.0.1`.
 - Dasselbe `Caddyfile` funktioniert mit einem lokal installierten Caddy (`API_UPSTREAM=127.0.0.1:3001`).
-- Docker bleibt der Standardweg. Ohne Docker entfallen die Isolation zwischen API und Worker (das Nur-Lesen-Volume) und die Speicherlimits je Service; dafür gibt es `MemoryMax` in systemd.
+- **Bewusst unterschiedlich:** Ohne Docker zählt der geringste Ressourcenbedarf, mit Docker die Trennung. Ohne Docker entfallen deshalb das Nur-Lesen-Volume für die API, die Speicherlimits je Service (dafür `MemoryMax` in systemd) und die Entkopplung der Event-Loops (ein großer Sync kann die Oberfläche bremsen). Docker bleibt der Standardweg.
 - Kein Feature darf Docker voraussetzen: Pfade und Hosts kommen aus Umgebungsvariablen, nicht aus Annahmen über Container.
 
 ## Konsequenzen

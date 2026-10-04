@@ -1,6 +1,6 @@
 # Installation ohne Docker
 
-Der Standardweg ist `docker compose up` (ADR-0007). Ohne Docker läuft dieselbe Anwendung direkt mit Node und einem PostgreSQL-Server. Statt der Container gibt es dann **einen Prozess** (`pnpm start`), der API (inkl. PWA) und Worker startet und überwacht.
+Der Standardweg ist `docker compose up` (ADR-0007). Ohne Docker läuft dieselbe Anwendung direkt mit Node und einem PostgreSQL-Server. Statt der Container gibt es dann **einen einzigen Node-Prozess** (`pnpm start`), in dem API (inkl. PWA) und Worker gemeinsam laufen. Das spart eine Node-Runtime: gemessen ~105 MB RAM statt ~180 MB für zwei getrennte Prozesse (Leerlauf, ohne Konten).
 
 ## Voraussetzungen
 
@@ -42,7 +42,8 @@ pnpm start
 - Migrationen laufen beim Start automatisch.
 - Die App lauscht auf `http://127.0.0.1:3001` (nur lokal). Für einen Test im Heimnetz ohne Proxy `HOST=0.0.0.0` setzen, z. B. in der `.env`.
 - Mails liegen verschlüsselt in `data/mail-data/` im Projektordner (änderbar per `MAIL_DATA_DIR`).
-- Beendet sich API oder Worker unerwartet, stoppt `pnpm start` auch den anderen Prozess und endet mit Fehlercode. Neu starten ist Aufgabe des Supervisors (systemd, siehe unten).
+- Stürzt der Worker-Teil ab, fährt `pnpm start` auch die API herunter und endet mit Fehlercode. Neu starten ist Aufgabe des Supervisors (systemd, siehe unten).
+- Bei SIGINT/SIGTERM (Strg+C, `systemctl stop`) werden laufende Jobs noch zu Ende geführt, wie beim Worker-Container.
 
 Alle Variablen aus [`.env.example`](../../.env.example) gelten unverändert. `DOMAIN` wird nur von Caddy gelesen.
 
@@ -113,10 +114,11 @@ sudo systemctl start fastmail-alternative
 
 |                         | Docker                             | Ohne Docker                             |
 | ----------------------- | ---------------------------------- | --------------------------------------- |
-| Prozesse                | getrennte Container                | ein Dienst, zwei Node-Prozesse          |
+| Prozesse                | getrennte Container                | ein Node-Prozess für API und Worker     |
 | `mail-data` für die API | nur lesend eingebunden             | gleicher Benutzer, technisch schreibbar |
 | Speicherlimits          | je Service (`mem_limit`)           | gemeinsam (`MemoryMax` in systemd)      |
+| Last beim Sync          | betrifft nur den Worker            | kann die Oberfläche kurz verlangsamen   |
 | TLS                     | Caddy im Compose                   | eigener Caddy/Proxy                     |
 | PostgreSQL              | Container, getunt für Einzelnutzer | eigene Installation und Pflege          |
 
-Die API schreibt `mail-data` auch ohne Docker nicht. Der Nur-Lesen-Schutz ist dort aber eine Eigenschaft des Codes und nicht mehr des Deployments.
+Die API schreibt `mail-data` auch ohne Docker nicht. Der Nur-Lesen-Schutz ist dort aber eine Eigenschaft des Codes und nicht mehr des Deployments. Weil API und Worker sich eine Event-Loop teilen, kann ein großer Initial-Sync (Verschlüsseln, Parsen) die Antwortzeiten der Oberfläche spürbar erhöhen; im Docker-Setup ist das durch die Trennung ausgeschlossen.

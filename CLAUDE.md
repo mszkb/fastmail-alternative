@@ -63,15 +63,15 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
 Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
 
-| Befehl                                    | Wirkung                                             |
-| ----------------------------------------- | --------------------------------------------------- |
-| `pnpm install`                            | Abhängigkeiten installieren                         |
-| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`) |
-| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc) |
-| `pnpm test`                               | Tests (Vitest) über alle Pakete                     |
-| `pnpm build`                              | Alle Apps bauen (web, api, worker)                  |
-| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                       |
-| `pnpm start` / `pnpm backup`              | Betrieb ohne Docker (nach `pnpm build`)             |
+| Befehl                                    | Wirkung                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------- |
+| `pnpm install`                            | Abhängigkeiten installieren                                            |
+| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`)                    |
+| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc)                    |
+| `pnpm test`                               | Tests (Vitest) über alle Pakete                                        |
+| `pnpm build`                              | Alle Apps bauen (web, api, worker)                                     |
+| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                                          |
+| `pnpm start` / `pnpm backup`              | Betrieb ohne Docker (nach `pnpm build`), API + Worker in einem Prozess |
 
 Struktur: `apps/web` (Nuxt-PWA, statisch gebaut und von der API ausgeliefert), `apps/api` (Fastify, Port 3001), `apps/worker` (Jobs), `packages/shared` (geteilte Typen/Domänenlogik), `packages/crypto` (Envelope-Encryption), `packages/db` (pg-Pool + Migration-Runner) – Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 

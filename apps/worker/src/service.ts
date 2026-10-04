@@ -1,0 +1,101 @@
+/**
+ * Worker service (roadmap 2.2): runs the scheduler and the job runner.
+ *
+ * Long-running IMAP IDLE connections are NOT queue jobs (ADR-0003); they are
+ * worker-managed connections (./idle, INBOX only, IMAP_IDLE=0 disables
+ * them) that enqueue message_sync on changes. The runner (./runner)
+ * only processes short-lived jobs (folder sync, message sync, message
+ * actions, SMTP send, account cleanup, push, periodic cleanup), several in parallel
+ * but at most one per account, each with a hard timeout (roadmap 3.4).
+ * As a fallback the scheduler (./scheduler) enqueues a periodic
+ * folder_sync per account.
+ *
+ * Logging: structured JSON via pino with the central redaction rules
+ * (roadmap 1.7).
+ */
+import { runMigrations } from '@fma/db/migrate'
+import { createPool } from '@fma/db'
+import { markSendGivenUp } from './jobs/send-message'
+import { IdleManager, imapIdleEnabled } from './idle'
+import { log } from './log'
+import { JOB_TYPES, JobRunner, workerConcurrency } from './runner'
+import { cleanupIntervalSeconds } from './jobs/cleanup'
+import {
+  enqueueDueCleanup,
+  enqueueDueSyncs,
+  requeueStaleJobs,
+  syncIntervalSeconds,
+} from './scheduler'
+
+const POLL_INTERVAL_MS = 2_000
+/** How often the scheduler checks for due accounts (cheap single query). */
+const SCHEDULER_TICK_MS = 15_000
+
+/**
+ * Runs scheduler, job runner and IDLE connections until `signal` aborts,
+ * then finishes the running jobs and resolves. Used by the worker process
+ * (main.ts) and by the single-process native mode (scripts/native.mjs).
+ */
+export async function runWorker(signal: AbortSignal): Promise<void> {
+  const pool = createPool()
+  const applied = await runMigrations(pool)
+  if (applied.length > 0) {
+    log.info({ applied }, 'migrations applied')
+  }
+
+  // A lost job that used up its attempts: make a failed send visible.
+  const giveUp = async (job: { type: string; payload: Record<string, unknown> }) => {
+    if (job.type === 'send_message') await markSendGivenUp(pool, job.payload)
+  }
+
+  // Crash recovery: jobs still 'running' belong to a previous worker process
+  // (single instance) - requeue them now instead of blocking their accounts
+  // until they count as stale.
+  const recovered = await requeueStaleJobs(pool, 0, giveUp)
+  if (recovered.requeued + recovered.failed > 0) log.warn(recovered, 'lost running jobs recovered')
+
+  // Periodic sync. The first tick runs immediately and also covers accounts
+  // created while the worker was down.
+  const intervalSeconds = syncIntervalSeconds()
+  const cleanupInterval = cleanupIntervalSeconds()
+  let nextSchedulerTick = 0
+  const schedulerTick = async (): Promise<void> => {
+    if (Date.now() < nextSchedulerTick) return
+    nextSchedulerTick = Date.now() + SCHEDULER_TICK_MS
+    try {
+      const stale = await requeueStaleJobs(pool, undefined, giveUp)
+      if (stale.requeued + stale.failed > 0) log.warn(stale, 'stale running jobs recovered')
+      const accountIds = await enqueueDueSyncs(pool, intervalSeconds)
+      if (accountIds.length > 0) log.info({ accountIds }, 'periodic sync enqueued')
+      if (await enqueueDueCleanup(pool, cleanupInterval)) log.info('cleanup enqueued')
+    } catch (err) {
+      log.error({ err: (err as Error).message }, 'scheduler tick failed')
+    }
+  }
+
+  const concurrency = workerConcurrency()
+  const runner = new JobRunner(pool, { concurrency })
+  log.info(
+    { jobTypes: JOB_TYPES, concurrency, syncIntervalSeconds: intervalSeconds },
+    'worker started',
+  )
+
+  // IMAP IDLE for the INBOX of every active account (failures never stop
+  // the worker: the scheduler keeps polling).
+  const idle = imapIdleEnabled() ? new IdleManager(pool) : null
+  await idle?.start().catch((err: unknown) => {
+    log.error({ code: (err as { code?: string }).code ?? 'UNKNOWN' }, 'idle start failed')
+  })
+
+  while (!signal.aborted) {
+    await schedulerTick()
+    await runner.fill()
+    // Wake up when a slot frees up, at the latest after the poll interval.
+    await runner.waitForSlot(POLL_INTERVAL_MS)
+  }
+
+  await idle?.stop()
+  await runner.stop()
+  log.info('worker stopped')
+  await pool.end().catch(() => {})
+}

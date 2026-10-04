@@ -2,7 +2,8 @@ import { defineConfig } from 'tsup'
 
 export default defineConfig({
   // backup.js: encrypted backup/restore CLI (docs/operations/backup-restore.md).
-  entry: { main: 'src/main.ts', backup: 'src/backup-cli.ts' },
+  // service.js: runWorker for the single-process native mode (scripts/native.mjs).
+  entry: { main: 'src/main.ts', backup: 'src/backup-cli.ts', service: 'src/service.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node24',

@@ -1,7 +1,8 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/main.ts'],
+  // server.js: startApi/stopApi for the single-process native mode (scripts/native.mjs).
+  entry: { main: 'src/main.ts', server: 'src/server.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node24',
