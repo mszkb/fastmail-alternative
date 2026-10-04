@@ -59,6 +59,7 @@ const section = ref<'mail' | 'settings'>('mail')
 const email = ref('')
 const password = ref('')
 const deviceName = ref('')
+const setupCode = ref('')
 const busy = ref(false)
 const error = ref('')
 const info = ref('')
@@ -432,9 +433,11 @@ async function submit(): Promise<void> {
         password: password.value,
         deviceName: deviceName.value || undefined,
         platform: guessPlatform(),
+        ...(view.value === 'setup' ? { setupCode: setupCode.value } : {}),
       }),
     })
     password.value = ''
+    setupCode.value = ''
     info.value = ''
     await enterApp(res.email)
   } catch (err) {
@@ -528,6 +531,19 @@ onBeforeUnmount(() => {
     <form v-else-if="view === 'setup'" class="card form" @submit.prevent="submit">
       <h2>Einrichtung</h2>
       <p class="hint">Ersten Benutzer anlegen (Single-User-Instanz, ADR-0004).</p>
+      <label
+        >Setup-Code<input
+          v-model="setupCode"
+          type="text"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          required
+      /></label>
+      <p class="hint">
+        Steht im Log der API: <code>docker compose logs api</code> (oder
+        <code>SETUP_TOKEN</code> aus <code>.env</code>).
+      </p>
       <label>E-Mail<input v-model="email" type="email" autocomplete="username" required /></label>
       <label
         >Passwort (min. 10 Zeichen)<input

@@ -117,9 +117,17 @@ Auch der Worker wird `healthy` (Heartbeat nach erfolgreichem Datenbankzugriff, b
 
 ## 6. Benutzer anlegen (Ersteinrichtung)
 
-`https://mail.example.org` im Browser öffnen. Solange noch kein Benutzer existiert, erscheint **„Einrichtung“**: E-Mail-Adresse (dient nur als Login-Name) und Passwort (mindestens 10 Zeichen) eingeben, **„Konto erstellen“**.
+`https://mail.example.org` im Browser öffnen. Solange noch kein Benutzer existiert, erscheint **„Einrichtung“**: Setup-Code, E-Mail-Adresse (dient nur als Login-Name) und Passwort (mindestens 10 Zeichen) eingeben, **„Konto erstellen“**.
 
-> **Direkt nach dem ersten Start erledigen.** Die Instanz ist Single-User ([ADR-0004](../adr/0004-auth.md)): Wer die Seite als Erster aufruft, legt den Benutzer an. Danach ist die Einrichtung gesperrt; ein weiterer Benutzer ist nicht möglich.
+Den **Setup-Code** schreibt die api beim Start ins Log, solange noch kein Benutzer existiert:
+
+```bash
+docker compose logs api | grep "FIRST-RUN SETUP CODE"
+```
+
+Er sieht aus wie `ABCD-EFGH-IJKL-MNOP-QRST-UVWX` (Groß-/Kleinschreibung und Bindestriche egal). Wer lieber einen eigenen Code festlegt, setzt vor dem Start `SETUP_TOKEN` in der `.env` ([Konfiguration](configuration.md#sicherheit-und-verschlüsselung)); der wird nie geloggt. Nach einem Neustart der api ohne `SETUP_TOKEN` gilt ein neuer Code.
+
+> **Warum?** Sobald Caddy ein Zertifikat geholt hat, ist die Domain öffentlich bekannt (Certificate-Transparency-Logs). Ohne Setup-Code könnte ein Scanner die frische Instanz übernehmen. Die Instanz ist Single-User ([ADR-0004](../adr/0004-auth.md)): Nach der Einrichtung ist sie gesperrt, ein weiterer Benutzer ist nicht möglich, und der Code ist wertlos.
 
 Das Passwort lässt sich später unter **Einstellungen** ändern; dort stehen auch die angemeldeten **Geräte**, die einzeln abgemeldet werden können.
 

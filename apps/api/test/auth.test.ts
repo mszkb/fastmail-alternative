@@ -13,6 +13,9 @@ import { runMigrations } from '@fma/db/migrate'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 const databaseUrl = process.env.DATABASE_URL
 let app: FastifyInstance
 
@@ -67,6 +70,7 @@ describe.skipIf(!databaseUrl)('auth flow', () => {
   it('setup creates the single user and starts a session', async () => {
     const res = await inject('POST', '/api/auth/setup', {
       payload: {
+        setupCode: SETUP_CODE,
         email: 'Martin@Example.com',
         password: 'correct horse battery',
         deviceName: 'Test-Pi',
@@ -86,7 +90,11 @@ describe.skipIf(!databaseUrl)('auth flow', () => {
 
   it('setup is refused once a user exists', async () => {
     const res = await inject('POST', '/api/auth/setup', {
-      payload: { email: 'other@example.com', password: 'another password 123' },
+      payload: {
+        setupCode: SETUP_CODE,
+        email: 'other@example.com',
+        password: 'another password 123',
+      },
     })
     expect(res.statusCode).toBe(403)
   })

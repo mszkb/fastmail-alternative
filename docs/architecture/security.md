@@ -124,8 +124,17 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 - Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL in CI (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
 - Restore auf einer frischen Installation funktioniert mit dokumentierten Schritten: [Backup & Restore](../operations/backup-restore.md).
 
+## Ersteinrichtung
+
+Umgesetzt im ASVS-Review (#56, Befund M1). `POST /api/auth/setup` ist nur erlaubt, solange kein Benutzer existiert, und verlangt einen **Setup-Code** (`apps/api/src/auth/setup-code.ts`): `SETUP_TOKEN` aus der Umgebung oder – Standard – ein zufälliger Code (6×4 Base32, 120 Bit), den die api einmalig mit `FIRST-RUN SETUP CODE` ins Log schreibt. Vergleich in konstanter Zeit, nach erfolgreichem Setup wird der Code verworfen; das Rate-Limit für `setup` greift zusätzlich. Prüfung „kein Benutzer" und INSERT laufen in einer Transaktion unter `pg_advisory_xact_lock`, parallele Anfragen erzeugen so höchstens einen Benutzer.
+
+## Security Review (ASVS L2)
+
+Der vollständige Audit nach OWASP ASVS 4.0.3 Level 2 mit Status jedes Befunds und den **bewusst akzeptierten Abweichungen** (keine MFA, Session-Dauer, Lockout pro IP, kein `__Host-`-Cookie, Images per Tag) steht in [security/asvs-l2.md](../security/asvs-l2.md).
+
 ## Offene Punkte
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
 - DNS-Rebinding bei Push-Endpoints: `fetch` löst nach der SSRF-Prüfung erneut auf (eigener undici-`connect`-Lookup nötig).
 - `MAIL_ALLOW_PRIVATE_HOSTS` trennen in „private Hosts erlauben" und „Testmodus ohne TLS" (Audit N7).
+- Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy, Fastify-JSON-Schemas): siehe [asvs-l2.md](../security/asvs-l2.md).

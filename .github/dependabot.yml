@@ -1,0 +1,44 @@
+# Dependency updates (ASVS review N5). Weekly and grouped to keep the PR
+# count low. Docker base images stay on tags (not digests) on purpose, so
+# rebuilds on the Pi pick up patched images; Dependabot proposes tag bumps.
+version: 2
+updates:
+  - package-ecosystem: npm # also covers pnpm-lock.yaml
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+        update-types: [minor, patch]
+      development:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directories:
+      - /apps/api
+      - /apps/worker
+      - /apps/web
+    schedule:
+      interval: weekly
+    groups:
+      docker-images:
+        patterns: ['*']
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      compose-images:
+        patterns: ['*']

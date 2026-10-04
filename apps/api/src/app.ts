@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { STATUS_CODES } from 'node:http'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { HealthStatus } from '@fma/shared'
 import { registerAuth } from './auth/routes'
@@ -67,6 +68,8 @@ export function buildApp({
   registerSecurityHeaders(app)
   registerRateLimits(app, rateLimits)
   registerCsrfProtection(app)
+
+  registerErrorHandler(app)
 
   const metrics = new Metrics()
 
@@ -137,4 +140,42 @@ export function buildApp({
 function tokenMatches(given: string | undefined, expected: string): boolean {
   const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest()
   return timingSafeEqual(digest(given ?? ''), digest(expected))
+}
+
+/**
+ * Central error handler (ASVS review N3): Fastify's default would send
+ * `error.message` to the client, and the default error log would include
+ * driver fields such as pg's `detail` (row values). Clients get only a
+ * generic text for the status; the log gets name/code/stack, no message.
+ */
+function registerErrorHandler(app: FastifyInstance): void {
+  app.setErrorHandler(async (error: unknown, request, reply) => {
+    const err = (error ?? {}) as { statusCode?: unknown; code?: unknown; name?: unknown }
+    const statusCode =
+      typeof err.statusCode === 'number' && err.statusCode >= 400 && err.statusCode < 600
+        ? err.statusCode
+        : 500
+    const fields = {
+      errName: typeof err.name === 'string' ? err.name : 'Error',
+      errCode: typeof err.code === 'string' ? err.code : undefined,
+      statusCode,
+    }
+    if (statusCode >= 500) {
+      const stack = error instanceof Error && error.stack ? stackFrames(error.stack) : undefined
+      request.log.error({ ...fields, stack }, 'request failed')
+      await reply.code(statusCode).send({ message: 'Internal error' })
+      return
+    }
+    request.log.info(fields, 'request rejected')
+    await reply.code(statusCode).send({ message: STATUS_CODES[statusCode] ?? 'Bad request' })
+  })
+}
+
+/** Only the "at ..." frames: the first stack line repeats the message. */
+function stackFrames(stack: string): string {
+  return stack
+    .split('\n')
+    .filter((line) => line.trimStart().startsWith('at '))
+    .slice(0, 10)
+    .join('\n')
 }

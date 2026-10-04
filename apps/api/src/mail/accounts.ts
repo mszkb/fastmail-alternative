@@ -119,13 +119,26 @@ function isValidPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string'
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
 function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | null {
+  // The body is only typed, not validated by Fastify: check every field's
+  // runtime type so malformed input yields 400 instead of a TypeError (500).
+  if (!isOptionalString(body?.displayName) || !isOptionalString(body?.emailAddress)) return null
   const emailAddress = body?.emailAddress?.trim().toLowerCase() ?? ''
   if (!EMAIL_RE.test(emailAddress)) return null
   const imap = body?.imap
   const smtp = body?.smtp
-  if (!imap?.host || !imap.user || !imap.password) return null
-  if (!smtp?.host) return null
+  if (!isNonEmptyString(imap?.host) || !isNonEmptyString(imap.user)) return null
+  if (!isNonEmptyString(imap.password)) return null
+  if (!isNonEmptyString(smtp?.host)) return null
+  if (!isOptionalString(smtp.user) || !isOptionalString(smtp.password)) return null
   if (!isValidPort(imap.port) || !isValidPort(smtp.port)) return null
   const syncSince = body?.syncSince === undefined ? null : parseSyncSince(body.syncSince)
   if (syncSince === undefined) return null

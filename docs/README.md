@@ -7,6 +7,7 @@
 | [architecture/data-model.md](architecture/data-model.md)               | Datenmodell-Entwurf mit ER-Diagramm                                               |
 | [architecture/security.md](architecture/security.md)                   | Daten- und Sicherheitsmodell                                                      |
 | [architecture/push.md](architecture/push.md)                           | Push-Strategie (Web Push, Relay, später APNs)                                     |
+| [security/asvs-l2.md](security/asvs-l2.md)                             | Security Review nach OWASP ASVS L2: Befunde, Status, akzeptierte Abweichungen     |
 | [adr/](adr/README.md)                                                  | Architecture Decision Records                                                     |
 | [process/definition-of-done.md](process/definition-of-done.md)         | Definition of Done                                                                |
 | [process/changelog.md](process/changelog.md)                           | Changelog-Prozess (Keep a Changelog, SemVer)                                      |

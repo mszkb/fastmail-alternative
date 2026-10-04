@@ -5,7 +5,7 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 - Nach einer Änderung: `docker compose up -d` – Compose erstellt die betroffenen Container neu.
 - Nur Variablen aus den Tabellen unten wirken. Die `docker-compose.yml` reicht ausschließlich diese an die Container weiter; andere Einträge in der `.env` werden ignoriert.
 - **Pflicht** heißt: ohne Wert startet `docker compose` nicht (Fehlermeldung `set … in .env`) bzw. die Funktion ist aus.
-- Die `.env` enthält Secrets (`MASTER_KEY`, `VAPID_PRIVATE_KEY`, `POSTGRES_PASSWORD`, `METRICS_TOKEN`): Rechte `0600`, nie committen, nie in Support-Anfragen kopieren.
+- Die `.env` enthält Secrets (`MASTER_KEY`, `VAPID_PRIVATE_KEY`, `POSTGRES_PASSWORD`, `METRICS_TOKEN`, ggf. `SETUP_TOKEN`): Rechte `0600`, nie committen, nie in Support-Anfragen kopieren.
 
 ## Kern
 
@@ -16,11 +16,12 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 
 ## Sicherheit und Verschlüsselung
 
-| Variable        | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                         |
-| --------------- | -------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MASTER_KEY`    | –        | **ja**  | api, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern. |
-| `MASTER_KEY_ID` | `v1`     | nein    | api         | Version des Master-Keys. Nur zusammen mit einer [Key-Rotation](../process/key-rotation.md) ändern.                                                                                            |
-| `METRICS_TOKEN` | leer     | nein    | api         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                    |
+| Variable        | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                                                                                                                          |
+| --------------- | -------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MASTER_KEY`    | –        | **ja**  | api, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern.                                                                                                                                  |
+| `MASTER_KEY_ID` | `v1`     | nein    | api         | Version des Master-Keys. Nur zusammen mit einer [Key-Rotation](../process/key-rotation.md) ändern.                                                                                                                                                                                                                             |
+| `METRICS_TOKEN` | leer     | nein    | api         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                                                                                                                                                     |
+| `SETUP_TOKEN`   | leer     | nein    | api         | Setup-Code für die [Ersteinrichtung](installation.md#6-benutzer-anlegen-ersteinrichtung). Leer = die api erzeugt beim Start einen zufälligen Code und schreibt ihn einmalig ins Log (`docker compose logs api`), solange kein Benutzer existiert. Gesetzt = dieser Wert (wird nie geloggt). Nach der Einrichtung ohne Wirkung. |
 
 ## Datenbank
 

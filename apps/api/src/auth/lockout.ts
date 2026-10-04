@@ -26,19 +26,22 @@ export function isLockedOut(ip: string): number {
   return remaining > 0 ? Math.ceil(remaining / 1000) : 0
 }
 
-export function recordFail(ip: string): void {
+/** Records a failed attempt; returns true when it started a lockout. */
+export function recordFail(ip: string): boolean {
   const now = Date.now()
   prune(now)
 
   const entry = entries.get(ip)
   if (!entry || now - entry.windowStart > WINDOW_MS) {
     entries.set(ip, { fails: 1, windowStart: now, lockedUntil: 0 })
-    return
+    return false
   }
   entry.fails += 1
-  if (entry.fails >= MAX_FAILS) {
+  if (entry.fails >= MAX_FAILS && entry.lockedUntil <= now) {
     entry.lockedUntil = now + LOCK_MS
+    return true
   }
+  return false
 }
 
 export function recordSuccess(ip: string): void {

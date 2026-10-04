@@ -74,6 +74,7 @@ services:
       MAX_CONCURRENT_UPLOADS: ${MAX_CONCURRENT_UPLOADS:-2}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
       # Public key only: the api hands it to browsers; sending is the worker's job.
