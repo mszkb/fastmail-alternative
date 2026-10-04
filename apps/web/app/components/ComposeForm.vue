@@ -500,7 +500,8 @@ async function takeOverAttachments(messageId: string): Promise<void> {
     const res = await fetch(`/api/messages/${messageId}/attachments/copy`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ accountId: props.accountId }),
+      // Inline images too: the forward is sent as text (#53).
+      body: JSON.stringify({ accountId: props.accountId, includeInline: true }),
     })
     const payload = (await res.json().catch(() => null)) as
       (CopyAttachmentsResponse & { message?: string }) | null

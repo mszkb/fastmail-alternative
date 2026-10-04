@@ -38,11 +38,26 @@ export interface UploadedAttachment {
  * `POST /api/messages/:id/attachments/copy` (forwarding, roadmap 5.3):
  * copies the attachments of a received message into new uploads of
  * `accountId` (encrypted like a file the user picked), optionally kept with
- * the draft `draftId`. Inline parts (cid: images of an HTML body) are not
- * copied; attachments beyond the limits are skipped and counted.
+ * the draft `draftId`. Inline parts (cid: images of an HTML body) are only
+ * copied with `includeInline: true` and only as raster images
+ * (FORWARD_INLINE_IMAGE_TYPES - never SVG/HTML), as normal attachments:
+ * the forward is sent as text, so this is the only way to keep them.
+ * Attachments beyond the limits are skipped and counted.
  */
 export interface CopyAttachmentsRequest {
   accountId: string
+  includeInline?: boolean
+}
+
+/**
+ * Inline image types taken over as attachments when forwarding, with the
+ * file extension used when the part has no name (`bild-1.png`).
+ */
+export const FORWARD_INLINE_IMAGE_TYPES: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
 }
 
 export interface CopyAttachmentsResponse {

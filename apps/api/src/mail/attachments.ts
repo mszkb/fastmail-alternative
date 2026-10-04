@@ -37,7 +37,11 @@
  *   parser -> encrypted upload. Done once when the forward is opened, so
  *   the composer, drafts, limits and the worker treat them like any picked
  *   file (the user can remove single ones), and sending needs no access to
- *   the mail-data volume in the worker's MIME builder.
+ *   the mail-data volume in the worker's MIME builder. With
+ *   `includeInline: true` (the composer's forward) inline raster images
+ *   (png/jpeg/gif/webp, never SVG/HTML) are copied too, as normal
+ *   attachments: the forward is sent as text, so the cid: references of
+ *   the original HTML are gone and the images would be lost otherwise.
  *
  * File names are mail content: never logged, encrypted at rest.
  */
@@ -50,6 +54,7 @@ import { encryptBytes, encryptField, unwrapAccountKey, uploadFieldAad } from '@f
 import {
   ATTACHMENT_LIMIT_DEFAULTS,
   contentDisposition,
+  FORWARD_INLINE_IMAGE_TYPES,
   formatByteSize,
   isInlineSafeType,
   normalizeContentType,
@@ -337,17 +342,25 @@ async function collect(stream: Readable, limit: number): Promise<Buffer | null> 
 /**
  * Copies the (non-inline) attachments of a raw mail into encrypted uploads
  * of `account`, optionally kept with `draftId` (forwarding, opening a
- * draft of another client). Only one attachment is in memory at a time;
- * attachments beyond the per-file, total, count or pending limits are
- * skipped. File names are never logged.
+ * draft of another client). With `includeInline` inline parts of a safe
+ * raster image type (FORWARD_INLINE_IMAGE_TYPES) are copied as well;
+ * unnamed ones are called `bild-N.<ext>`. Only one attachment is in memory
+ * at a time; attachments beyond the per-file, total, count or pending
+ * limits are skipped. File names are never logged.
  */
 export async function copyAttachmentsToUploads(
   pool: Pool,
   raw: Buffer,
   account: { id: string; wrapped_dek: Buffer },
   draftId: string | null = null,
+  options: { includeInline?: boolean } = {},
 ): Promise<CopyAttachmentsResponse> {
-  const list = (await listAttachments(raw)).filter((attachment) => !attachment.inline)
+  const list = (await listAttachments(raw)).filter(
+    (attachment) =>
+      !attachment.inline ||
+      (options.includeInline === true && attachment.contentType in FORWARD_INLINE_IMAGE_TYPES),
+  )
+  let inlineCount = 0
   const { maxFileBytes, maxTotalBytes } = attachmentLimits()
   const dek = unwrapAccountKey(process.env.MASTER_KEY ?? '', account.wrapped_dek)
   const attachments: UploadedAttachment[] = []
@@ -371,8 +384,15 @@ export async function copyAttachmentsToUploads(
       continue
     }
     const id = randomUUID()
-    const filename = opened.meta.filename
     const contentType = opened.meta.contentType
+    let filename = opened.meta.filename
+    if (meta.inline) {
+      inlineCount++
+      // metaOf's fallback name: replace it by one telling the image type.
+      if (filename === `anhang-${meta.index + 1}`) {
+        filename = `bild-${inlineCount}.${FORWARD_INLINE_IMAGE_TYPES[contentType]}`
+      }
+    }
     const inserted = await insertUpload(pool, {
       id,
       accountId: account.id,
@@ -569,7 +589,9 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
     '/api/messages/:id/attachments/copy',
     { onRequest: requireAuth },
     async (request, reply) => {
-      const accountId = (request.body as { accountId?: unknown } | null)?.accountId
+      const requestBody = request.body as { accountId?: unknown; includeInline?: unknown } | null
+      const accountId = requestBody?.accountId
+      const includeInline = requestBody?.includeInline === true
       const { rows } =
         typeof accountId === 'string' && UUID_RE.test(accountId)
           ? await pool.query<{ id: string; wrapped_dek: Buffer }>(
@@ -602,7 +624,7 @@ export async function attachmentRoutes(app: FastifyInstance): Promise<void> {
         }
         let result: CopyAttachmentsResponse
         try {
-          result = await copyAttachmentsToUploads(pool, raw, account)
+          result = await copyAttachmentsToUploads(pool, raw, account, null, { includeInline })
         } catch (err) {
           if ((err as { code?: string }).code) throw err
           request.log.warn({ messageId: request.params.id }, 'raw message could not be parsed')

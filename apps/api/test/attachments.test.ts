@@ -614,6 +614,78 @@ describe.skipIf(!databaseUrl)('attachments api', () => {
     }
   })
 
+  it('copies inline raster images as attachments only on request, never SVG', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    const related = await createMessage(
+      account,
+      await compose({
+        text: 'Mit Bildern',
+        html: '<p><img src="cid:a@test"><img src="cid:b@test"><img src="cid:c@test"></p>',
+        attachments: [
+          { filename: false, content: PNG, contentType: 'image/png', cid: 'a@test' },
+          { filename: 'Geheim Foto.png', content: PNG, contentType: 'image/png', cid: 'b@test' },
+          { filename: 'x.svg', content: svg, contentType: 'image/svg+xml', cid: 'c@test' },
+          { filename: 'a.txt', content: 'anhang', contentType: 'text/plain' },
+        ],
+      }),
+    )
+    // Without the option: only the real attachment (drafts keep this).
+    let res = await json('POST', `/api/messages/${related}/attachments/copy`, {
+      accountId: account.id,
+    })
+    let body = res.json<CopyAttachmentsResponse>()
+    expect(body.attachments.map((a) => a.filename)).toEqual(['a.txt'])
+    await pool.query('DELETE FROM attachment_upload WHERE id = ANY($1::uuid[])', [
+      body.attachments.map((a) => a.id),
+    ])
+
+    res = await json('POST', `/api/messages/${related}/attachments/copy`, {
+      accountId: account.id,
+      includeInline: true,
+    })
+    expect(res.statusCode).toBe(201)
+    body = res.json<CopyAttachmentsResponse>()
+    // The SVG is not taken over (and not counted as skipped).
+    expect(body.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['bild-1.png', 'image/png'],
+      ['Geheim Foto.png', 'image/png'],
+      ['a.txt', 'text/plain'],
+    ])
+    expect(body.skipped).toBe(0)
+    const { rows } = await pool.query<{ filename_enc: Buffer; content_enc: Buffer }>(
+      'SELECT filename_enc, content_enc FROM attachment_upload WHERE id = $1',
+      [body.attachments[1]!.id],
+    )
+    expect(rows[0]!.filename_enc.toString('utf8')).not.toContain('Geheim')
+    expect(
+      decryptBytes(
+        account.dek,
+        rows[0]!.content_enc,
+        uploadFieldAad('content', body.attachments[1]!.id),
+      ).equals(PNG),
+    ).toBe(true)
+    await pool.query('DELETE FROM attachment_upload WHERE id = ANY($1::uuid[])', [
+      body.attachments.map((a) => a.id),
+    ])
+
+    // The limits apply to inline images as well.
+    process.env.MAX_ATTACHMENT_BYTES = String(PNG.length - 1)
+    try {
+      res = await json('POST', `/api/messages/${related}/attachments/copy`, {
+        accountId: account.id,
+        includeInline: true,
+      })
+    } finally {
+      process.env.MAX_ATTACHMENT_BYTES = String(1024 * 1024)
+    }
+    body = res.json<CopyAttachmentsResponse>()
+    expect(body.attachments.map((a) => a.filename)).toEqual(['a.txt'])
+    expect(body.skipped).toBe(2)
+    await pool.query('DELETE FROM attachment_upload WHERE id = ANY($1::uuid[])', [
+      body.attachments.map((a) => a.id),
+    ])
+  })
+
   it('keeps the attachments of a draft written in another client when it is opened', async () => {
     const res = await json('POST', `/api/messages/${messageId}/draft`)
     expect(res.statusCode).toBe(201)

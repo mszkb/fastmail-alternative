@@ -328,8 +328,9 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
     expect(rows).toHaveLength(0)
   })
 
-  it('forwards the attachments of the original message', async () => {
+  it('forwards the attachments and inline images of the original message', async () => {
     const pdf = randomBytes(120_000)
+    const logo = randomBytes(10)
     const original = await new MailComposer({
       from: 'kunde@example.org',
       to: greenmailUser,
@@ -338,7 +339,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
       html: '<p>Anbei <img src="cid:logo"></p>',
       attachments: [
         { filename: 'Rechnung 42.pdf', contentType: 'application/pdf', content: pdf },
-        { filename: 'logo.png', contentType: 'image/png', content: randomBytes(10), cid: 'logo' },
+        { filename: 'logo.png', contentType: 'image/png', content: logo, cid: 'logo' },
       ],
     })
       .compile()
@@ -347,15 +348,18 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
       'SELECT id, wrapped_dek FROM mail_account WHERE id = $1',
       [accountId],
     )
-    const copied = await copyAttachmentsToUploads(pool, original, accounts[0]!)
-    // Inline parts of the HTML body are not taken over.
+    const copied = await copyAttachmentsToUploads(pool, original, accounts[0]!, null, {
+      includeInline: true,
+    })
+    // The inline logo of the HTML body is taken over as an attachment.
     expect(copied.skipped).toBe(0)
     expect(copied.attachments.map((a) => [a.filename, a.size])).toEqual([
+      ['logo.png', logo.length],
       ['Rechnung 42.pdf', pdf.length],
     ])
     const { rows: stored } = await pool.query<{ filename_enc: Buffer }>(
       'SELECT filename_enc FROM attachment_upload WHERE id = $1',
-      [copied.attachments[0]!.id],
+      [copied.attachments[1]!.id],
     )
     expect(stored[0]!.filename_enc.toString('utf8')).not.toContain('Rechnung')
 
@@ -365,15 +369,17 @@ describe.skipIf(!databaseUrl || !greenmailHost)('send_message job', () => {
       id,
       copied.attachments.map((a) => a.id),
     ])
-    await pool.query('UPDATE outbox_message SET attachment_count = 1 WHERE id = $1', [id])
+    await pool.query('UPDATE outbox_message SET attachment_count = 2 WHERE id = $1', [id])
     expect(await runSendMessage(pool, accountId, { outboxId: id })).toBe('sent')
     const delivered = await waitForDelivery(messageId)
     expect(delivered).toHaveLength(1)
     const parsed = await simpleParser(delivered[0]!.slice(delivered[0]!.indexOf('\n') + 1))
     expect(parsed.attachments.map((a) => [a.filename, a.contentType])).toEqual([
+      ['logo.png', 'image/png'],
       ['Rechnung 42.pdf', 'application/pdf'],
     ])
-    expect(parsed.attachments[0]!.content.equals(pdf)).toBe(true)
+    expect(parsed.attachments[0]!.content.equals(logo)).toBe(true)
+    expect(parsed.attachments[1]!.content.equals(pdf)).toBe(true)
   })
 
   it('fails for good instead of sending without a vanished attachment', async () => {
