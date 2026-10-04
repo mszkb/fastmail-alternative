@@ -31,6 +31,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
 - **Betreiber:** Der Worker hat jetzt einen Docker-Healthcheck (Heartbeat-Datei, aktualisiert alle 30 s nach erfolgreichem Datenbankzugriff; `unhealthy` ab 120 s ohne Heartbeat). `docker compose up --wait` und `scripts/upgrade.sh` warten damit auch auf den Worker; keine `.env`-Änderung nötig
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
+- Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 
 ### Security
 

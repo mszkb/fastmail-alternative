@@ -21,6 +21,14 @@
  * without any remaining location is deleted together with its encrypted
  * body file.
  *
+ * CONDSTORE (RFC 7162, #28): when the server has CONDSTORE enabled, the
+ * mailbox reports a HIGHESTMODSEQ and folder.highestmodseq holds the value
+ * of the last successful run of the same uidvalidity, only the UID list is
+ * fetched (UID SEARCH ALL, for expunges and new UIDs) and flags only for
+ * messages changed since (UID FETCH ... (CHANGEDSINCE n)) - or none at all
+ * when HIGHESTMODSEQ did not move. Otherwise (no CONDSTORE, NOMODSEQ
+ * mailbox, first run) the full UID+FLAGS listing above is used.
+ *
  * Optimistic message actions (roadmap 2.4, ./message-action): placeholder
  * locations of moved messages (uid < 0) are replaced once the moved
  * message is fetched here, and dropped when no write-back is pending.
@@ -294,10 +302,14 @@ export async function runMessageSync(
     id: string
     path: string
     uidvalidity: string | null
+    highestmodseq: string | null
+    last_synced_at: Date | null
     special_use: string | null
     selectable: boolean
   }>(
-    `SELECT id, path, uidvalidity, special_use, selectable FROM folder
+    `SELECT id, path, uidvalidity, highestmodseq::text AS highestmodseq, last_synced_at,
+       special_use, selectable
+     FROM folder
      WHERE id = $1 AND account_id = $2`,
     [folderId, accountId],
   )
@@ -332,7 +344,13 @@ export async function runMessageSync(
     lock = await client.getMailboxLock(folder.path)
     const selected = (
       client as unknown as {
-        mailbox?: { uidValidity?: bigint | string; uidNext?: number; exists?: number }
+        mailbox?: {
+          uidValidity?: bigint | string
+          uidNext?: number
+          exists?: number
+          highestModseq?: bigint
+          noModseq?: boolean
+        }
       }
     ).mailbox
     if (!selected) throw new Error('mailbox could not be selected')
@@ -366,16 +384,63 @@ export async function runMessageSync(
     // omits the highest message even though RFC 3501 mandates including it,
     // and Dovecot rejects FETCH 1:* on an EMPTY mailbox with BAD
     // "Invalid messageset").
+    //
+    // CONDSTORE (RFC 7162): the HIGHESTMODSEQ as of SELECT is stored after a
+    // successful run (captured now: imapflow raises its copy while fetching,
+    // changes after SELECT are picked up next run). With a stored value of
+    // the same uidvalidity only flags changed since are fetched.
+    const serverModseq = condstoreModseq(client, selected)
+    // A message_action write-back that failed for good leaves an optimistic
+    // local flag change the server never got; only the full listing reverts
+    // it to server truth, so such a failure since the last sync forces it.
+    const { rowCount: failedActions } = await pool.query(
+      `SELECT 1 FROM job
+       WHERE type = 'message_action' AND account_id = $1 AND state = 'failed'
+         AND run_at >= coalesce($2::timestamptz, '-infinity')
+       LIMIT 1`,
+      [accountId, folder.last_synced_at],
+    )
+    const storedModseq =
+      dbUidvalidity === serverUidvalidity && folder.highestmodseq && !failedActions
+        ? BigInt(folder.highestmodseq)
+        : null
     const allUids: number[] = []
+    const serverUids = new Set<number>()
+    // Server flags of all messages (full listing) or only of the changed
+    // ones (CONDSTORE); reconciliation compares only what is listed here.
     const serverFlags = new Map<number, string[]>()
     if ((selected.exists ?? 0) > 0) {
-      for await (const msg of client.fetch('1:*', { uid: true, flags: true })) {
-        allUids.push(msg.uid)
-        serverFlags.set(msg.uid, [...(msg.flags ?? [])])
+      if (serverModseq !== null && storedModseq !== null && storedModseq <= serverModseq) {
+        const found = await client.search({ all: true }, { uid: true })
+        // imapflow returns false on a failed SEARCH (no provider text).
+        if (!Array.isArray(found)) throw new Error('SEARCH ALL failed')
+        allUids.push(...found.sort((a, b) => a - b))
+        if (serverModseq > storedModseq) {
+          for await (const msg of client.fetch(
+            '1:*',
+            { uid: true, flags: true },
+            { changedSince: storedModseq },
+          )) {
+            serverFlags.set(msg.uid, [...(msg.flags ?? [])])
+          }
+        }
+      } else {
+        for await (const msg of client.fetch('1:*', { uid: true, flags: true })) {
+          allUids.push(msg.uid)
+          serverFlags.set(msg.uid, [...(msg.flags ?? [])])
+        }
       }
     }
+    for (const uid of allUids) serverUids.add(uid)
 
-    await reconcileKnownMessages(pool, accountId, folderId, serverUidvalidity, serverFlags)
+    await reconcileKnownMessages(
+      pool,
+      accountId,
+      folderId,
+      serverUidvalidity,
+      serverUids,
+      serverFlags,
+    )
 
     // Incremental: UIDs above the highest synced one of THIS uidvalidity;
     // initial sync: the newest MESSAGE_SYNC_LIMIT messages. Unknown UIDs
@@ -590,7 +655,7 @@ export async function runMessageSync(
       )
       for (const row of missingBodies.rows) {
         const uid = Number(row.uid)
-        if (serverFlags.has(uid)) {
+        if (serverUids.has(uid)) {
           await downloadBody(pool, ctx, client, accountId, row.id, uid)
         }
       }
@@ -611,7 +676,7 @@ export async function runMessageSync(
     }
 
     try {
-      await backfillMetadata(pool, ctx, client, accountId, folderId, serverUidvalidity, serverFlags)
+      await backfillMetadata(pool, ctx, client, accountId, folderId, serverUidvalidity, serverUids)
     } catch (err) {
       // Best effort: the regular sync result stays; the next run retries.
       log.warn(
@@ -624,13 +689,18 @@ export async function runMessageSync(
 
     // Update folder sync state.
     await pool.query(
-      `UPDATE folder SET uidvalidity = $2, uidnext = $3, last_synced_at = now(),
+      `UPDATE folder SET uidvalidity = $2, uidnext = $3, highestmodseq = $4, last_synced_at = now(),
          unread_count = (
            SELECT count(*)::int FROM message_location ml
            WHERE ml.folder_id = $1 AND NOT ('\\Seen' = ANY(ml.flags))
          )
        WHERE id = $1`,
-      [folderId, serverUidvalidity.toString(), String(selected.uidNext ?? 0)],
+      [
+        folderId,
+        serverUidvalidity.toString(),
+        String(selected.uidNext ?? 0),
+        serverModseq?.toString() ?? null,
+      ],
     )
   } finally {
     unregister()
@@ -703,16 +773,32 @@ function sameFlags(a: string[], b: string[]): boolean {
 }
 
 /**
+ * HIGHESTMODSEQ of the selected mailbox when CONDSTORE is usable: enabled
+ * on the connection (imapflow ENABLEs it after login when announced) and
+ * the mailbox is not NOMODSEQ. Null otherwise (full flag listing).
+ */
+export function condstoreModseq(
+  client: ImapFlow,
+  mailbox: { highestModseq?: bigint; noModseq?: boolean },
+): bigint | null {
+  if (!client.enabled.has('CONDSTORE') || mailbox.noModseq) return null
+  const value = mailbox.highestModseq
+  return typeof value === 'bigint' && value > 0n ? value : null
+}
+
+/**
  * Applies server state to already known locations of one folder: updates
- * changed flags, deletes locations whose UID is gone (expunged or moved
- * away) and removes messages that no longer have any location, including
- * their encrypted raw file in the mail-data volume.
+ * changed flags (of the UIDs listed in serverFlags), deletes locations whose
+ * UID is gone (expunged or moved away) and removes messages that no longer
+ * have any location, including their encrypted raw file in the mail-data
+ * volume.
  */
 async function reconcileKnownMessages(
   pool: Pool,
   accountId: string,
   folderId: string,
   uidvalidity: bigint,
+  serverUids: Set<number>,
   serverFlags: Map<number, string[]>,
 ): Promise<void> {
   const { rows: known } = await pool.query<{
@@ -727,10 +813,11 @@ async function reconcileKnownMessages(
 
   const vanished: string[] = []
   for (const row of known) {
-    const flags = serverFlags.get(Number(row.uid))
-    if (!flags) {
+    const uid = Number(row.uid)
+    const flags = serverFlags.get(uid)
+    if (!serverUids.has(uid)) {
       vanished.push(row.id)
-    } else if (!sameFlags(row.flags, flags)) {
+    } else if (flags && !sameFlags(row.flags, flags)) {
       await pool.query('UPDATE message_location SET flags = $2 WHERE id = $1', [row.id, flags])
     }
   }
@@ -872,7 +959,7 @@ async function backfillMetadata(
   accountId: string,
   folderId: string,
   uidvalidity: bigint,
-  serverFlags: Map<number, string[]>,
+  serverUids: Set<number>,
 ): Promise<void> {
   const { rows } = await pool.query<{ id: string; uid: string; storage_ref: string | null }>(
     `SELECT DISTINCT ON (m.id) m.id::text AS id, ml.uid::text AS uid, mb.storage_ref
@@ -905,7 +992,7 @@ async function backfillMetadata(
       continue
     }
     const uid = Number(row.uid)
-    if (serverFlags.has(uid)) viaImap.set(uid, row.id)
+    if (serverUids.has(uid)) viaImap.set(uid, row.id)
   }
 
   // IMAP fallback, fetched by UID (see runMessageSync). The fetch is
