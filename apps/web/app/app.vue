@@ -154,6 +154,16 @@ async function syncNow(force = false): Promise<void> {
 }
 
 /**
+ * Refresh button / pull-to-refresh in MailView (4.8) already asked the
+ * server: open the poll window and refresh, so the view reloads once the
+ * sync finished.
+ */
+function onManualSync(): void {
+  syncPolicy.trigger(true)
+  void loadAccounts()
+}
+
+/**
  * visibilitychange/focus/online: replay queued actions and sync when shown,
  * stop polling when hidden. Started offline: check the session first.
  */
@@ -474,7 +484,12 @@ onBeforeUnmount(() => {
       <InstallBanner @guide="showInstallGuide" />
 
       <template v-if="section === 'mail'">
-        <MailView v-if="accounts.length > 0" :accounts="accounts" @edit-account="editAccount" />
+        <MailView
+          v-if="accounts.length > 0"
+          :accounts="accounts"
+          @edit-account="editAccount"
+          @sync-requested="onManualSync"
+        />
         <div v-else class="card">
           <p>Noch kein E-Mail-Konto verbunden.</p>
           <button type="button" @click="section = 'settings'">Konto hinzufügen</button>
