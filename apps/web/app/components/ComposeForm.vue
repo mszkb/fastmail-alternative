@@ -832,6 +832,8 @@ textarea:focus {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
+  /* Same horizontal inset as the fields and the message text. */
+  padding: 0.4rem 1rem;
   font-size: 0.85rem;
 }
 
