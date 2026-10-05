@@ -29,12 +29,21 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Release-Prozess nach SemVer: Tags `vX.Y.Z` erzeugen signierte Multi-Arch-Images (amd64, arm64) für api, worker und web in der GitHub Container Registry; Signaturprüfung mit `cosign verify`; `/api/health` meldet die Release-Version ([Release-Prozess](docs/process/release.md), #62)
 - **Betreiber:** Optional `docker-compose.release.yml` (mit `FMA_VERSION`, optional `FMA_IMAGE_PREFIX`) für fertige Images statt lokalem Build; der lokale Build bleibt Standard, keine `.env`-Änderung nötig
 
+- Browser-Tests mit Playwright (`e2e/`, #74): Ersteinrichtung, Login, Konto anlegen, Lesen mit Inline-Bild und Anhang, Entwurf mit Anhang, Weiterleiten, `sync_since`, Speicheranzeige, gemeinsamer Posteingang, Aktualisieren, Pull-to-Refresh, Swipe-Back und Passwortwechsel im Handy-Viewport mit Touch; `e2e/stack.mjs` startet api, worker und web lokal aus dem Build. `Makefile` mit Kurzbefehlen für Betrieb und Tests
+- **Betreiber:** `POSTGRES_HOST_PORT` (optional, Standard `5432`) verschiebt den Wartungsport von PostgreSQL auf `127.0.0.1`, falls auf dem Host schon eine PostgreSQL-Instanz läuft
+
 ### Changed
 
 - **Betreiber:** Der Worker hat jetzt einen Docker-Healthcheck (Heartbeat-Datei, aktualisiert alle 30 s nach erfolgreichem Datenbankzugriff; `unhealthy` ab 120 s ohne Heartbeat). `docker compose up --wait` und `scripts/upgrade.sh` warten damit auch auf den Worker; keine `.env`-Änderung nötig
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
 - Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 - Weiterleiten übernimmt eingebettete Bilder (cid:, PNG/JPEG/GIF/WebP) der Originalmail als normale Anhänge, da die Weiterleitung als Text versendet wird; SVG/HTML-Inline-Teile werden nicht übernommen, Größen- und Anzahlgrenzen gelten wie bisher (#53)
+
+### Fixed
+
+- Ein neu verbundenes Konto zeigte keine Ordner („Noch keine Ordner synchronisiert“), bis die Seite neu geladen wurde, wenn es während des ersten Abgleichs geöffnet wurde
+- Beim Verfassen erschien „Entwurf gespeichert“ nie, und Schließen speicherte einen unveränderten Entwurf erneut
+- **Betreiber:** Restore-Anleitung startete den Worker sofort und verschickte dabei ungesendete Postausgangs-Einträge aus dem Backup ohne Prüfung; jetzt erst ohne Worker starten und den Postausgang prüfen ([Backup & Restore](docs/operations/backup-restore.md#restore-auf-einer-frischen-instanz)). Installations-, Konfigurations- und Upgrade-Doku nach einem Testlauf korrigiert ([Testbericht](docs/operations/test-report-2026-10-05.md))
 
 ### Security
 
