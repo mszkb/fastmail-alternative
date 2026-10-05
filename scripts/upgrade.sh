@@ -24,6 +24,17 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 
+# Release images (COMPOSE_FILE with docker-compose.release.yml in .env)
+# have no build: the script would switch the checkout but keep the old
+# images running. Those upgrades are manual (FMA_VERSION in .env).
+CONFIG="$(docker compose config)"
+if ! printf '%s\n' "$CONFIG" | grep -Eq '^[[:space:]]+build:'; then
+  echo "upgrade: this instance uses release images - upgrade by hand, see" >&2
+  echo "upgrade: 'Fertige Images statt lokal bauen' in docs/operations/upgrade.md" >&2
+  exit 1
+fi
+PROJECT="$(printf '%s\n' "$CONFIG" | sed -n 's/^name: *//p' | tr -d "\"'")"
+
 PREVIOUS="$(git rev-parse HEAD)"
 echo "upgrade: current version $(git describe --tags --always)"
 
@@ -49,6 +60,19 @@ if ! git merge-base --is-ancestor "$PREVIOUS" "$TARGET_COMMIT"; then
   echo "upgrade: target $TARGET_COMMIT is not a successor of the current commit $PREVIOUS" >&2
   echo "upgrade: a downgrade needs the backup of the old version - see 'Rollback' in docs/operations/upgrade.md" >&2
   exit 1
+fi
+
+# Untracked files at paths the target adds make `git checkout` fail - only
+# after the backup. Check first (ignored files are overwritten by git).
+UNTRACKED="$(git ls-files --others --exclude-standard)"
+if [ -n "$UNTRACKED" ]; then
+  COLLISIONS="$(git diff --name-only --no-renames --diff-filter=A "$PREVIOUS" "$TARGET_COMMIT" |
+    grep -Fx -e "$UNTRACKED" || true)"
+  if [ -n "$COLLISIONS" ]; then
+    echo "upgrade: untracked files would be overwritten by the target - move them away first:" >&2
+    printf '%s\n' "$COLLISIONS" | sed 's/^/upgrade:   /' >&2
+    exit 1
+  fi
 fi
 
 echo "upgrade: 2/5 backup"
@@ -124,5 +148,9 @@ if ! docker compose up -d --wait; then
   exit 1
 fi
 
-docker image prune -f >/dev/null
+# Only dangling images of this compose project (the replaced old version),
+# never those of other projects on the same Docker host.
+if [ -n "$PROJECT" ]; then
+  docker image prune -f --filter "label=com.docker.compose.project=$PROJECT" >/dev/null
+fi
 echo "upgrade: done"
