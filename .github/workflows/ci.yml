@@ -95,6 +95,81 @@ jobs:
       - name: Build
         run: pnpm build
 
+  e2e:
+    name: Browser tests (Playwright)
+    runs-on: ubuntu-latest
+    # The whole suite takes ~1.5 min (gestures.spec waits up to ~45 s for the
+    # per-account sync limit, compose.spec ~30 s for the forward); the cap
+    # keeps a hanging browser from blocking the run.
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: mail
+          POSTGRES_PASSWORD: mail
+          # Own database: e2e/stack.mjs wipes it on every start.
+          POSTGRES_DB: mail_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mail -d mail_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      greenmail:
+        image: greenmail/standalone:2.1.14
+        env:
+          GREENMAIL_OPTS: '-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=testuser@example.com:secret123'
+        ports:
+          - 3143:3143
+          - 3025:3025
+        options: >-
+          --health-cmd "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3143'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 30s
+
+    env:
+      DATABASE_URL: postgres://mail:mail@localhost:5432/mail_e2e
+      GREENMAIL_HOST: '127.0.0.1'
+      GREENMAIL_IMAP_PORT: '3143'
+      GREENMAIL_SMTP_PORT: '3025'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install Chromium
+        run: pnpm --filter @fma/e2e exec playwright install --with-deps chromium
+
+      - name: Browser tests
+        working-directory: e2e
+        run: pnpm e2e
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
+
   container-build:
     name: Container build
     runs-on: ubuntu-latest

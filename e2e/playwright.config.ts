@@ -20,6 +20,9 @@ export default defineConfig({
     baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // A horizontal touch drag must reach the app's swipe-back, not the
+    // browser's own history navigation (full Chromium, not headless shell).
+    launchOptions: { args: ['--disable-features=OverscrollHistoryNavigation'] },
   },
   projects: [
     { name: 'setup', testMatch: /setup\.ts$/, use: { ...devices['Pixel 7'] } },
