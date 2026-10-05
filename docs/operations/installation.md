@@ -92,7 +92,9 @@ VAPID_SUBJECT=mailto:du@example.org
 docker compose up -d --build --wait
 ```
 
-Das baut die Images (web, api, worker), startet alle Dienste und wartet, bis caddy, web, api und postgres `healthy` sind. Beim ersten Start legt die API das Datenbankschema an (Migrationen).
+Das baut die Images (web, api, worker), startet alle Dienste und wartet, bis alle (caddy, web, api, worker, postgres) `healthy` sind. Beim ersten Start legen api bzw. worker das Datenbankschema an (Migrationen; wer zuerst startet, migriert).
+
+**Port belegt?** postgres ist auf dem Host unter `127.0.0.1:5432` erreichbar (SSH-Tunnel/Wartung). Läuft auf dem Host schon eine andere PostgreSQL-Instanz, bricht der Start mit `Bind for 127.0.0.1:5432 failed: port is already allocated` ab – dann in der `.env` einen freien Port setzen, z. B. `POSTGRES_HOST_PORT=55432`. Sind 80/443 belegt, die caddy-Ports in einer eigenen `docker-compose.override.yml` mit `ports: !override` ändern (siehe [Konfiguration](configuration.md#fest-eingestellt)).
 
 **Optional: fertige Images statt lokal bauen.** Wenn ein Release veröffentlicht und signiert ist, gibt es dafür Multi-Arch-Images (amd64, arm64) in der GitHub Container Registry. Das spart auf schwacher Hardware den Build; lokal bauen bleibt der Standard und braucht keine Registry. Die Versionsnummer unten ist nur ein Beispiel – vorhandene Releases stehen auf der Release-Seite des Repositorys:
 
@@ -108,9 +110,9 @@ Kontrolle:
 
 ```sh
 docker compose ps                    # alle Dienste "healthy"
-docker compose logs --tail=50 api    # "migrations applied"
+docker compose logs api worker | grep "migrations applied"   # beim ersten Start (api oder worker)
 docker compose logs --tail=50 worker # keine Fehler, kein Neustart-Loop
-docker compose logs --tail=50 caddy  # Zertifikat erhalten ("certificate obtained")
+docker compose logs --tail=50 caddy  # nur mit Domain: Zertifikat erhalten ("certificate obtained")
 ```
 
 Auch der Worker wird `healthy` (Heartbeat nach erfolgreichem Datenbankzugriff, bis zu 30 s nach dem Start). Bei Problemen: [Troubleshooting](troubleshooting.md).
