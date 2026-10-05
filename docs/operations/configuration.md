@@ -28,11 +28,12 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 
 ## Datenbank
 
-| Variable            | Standard | Pflicht | Dienst                | Zweck                                                    |
-| ------------------- | -------- | ------- | --------------------- | -------------------------------------------------------- |
-| `POSTGRES_USER`     | `mail`   | nein    | postgres, api, worker | Datenbankbenutzer                                        |
-| `POSTGRES_PASSWORD` | –        | **ja**  | postgres, api, worker | Datenbankpasswort (von `setup-env.mjs` zufällig erzeugt) |
-| `POSTGRES_DB`       | `mail`   | nein    | postgres, api, worker | Datenbankname                                            |
+| Variable             | Standard | Pflicht | Dienst                | Zweck                                                                                                                   |
+| -------------------- | -------- | ------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_USER`      | `mail`   | nein    | postgres, api, worker | Datenbankbenutzer                                                                                                       |
+| `POSTGRES_PASSWORD`  | –        | **ja**  | postgres, api, worker | Datenbankpasswort (von `setup-env.mjs` zufällig erzeugt)                                                                |
+| `POSTGRES_DB`        | `mail`   | nein    | postgres, api, worker | Datenbankname                                                                                                           |
+| `POSTGRES_HOST_PORT` | `5432`   | nein    | compose (postgres)    | Host-Port für den Wartungszugang auf `127.0.0.1` (z. B. `55432`, wenn auf dem Host schon eine PostgreSQL-Instanz läuft) |
 
 Benutzer, Passwort und Datenbankname werden von PostgreSQL nur beim **allerersten** Start (leeres Volume `postgres-data`) übernommen. Spätere Änderungen in der `.env` ändern die Datenbank nicht – dann starten api und worker nicht mehr (Anmeldung an der Datenbank schlägt fehl).
 
@@ -98,11 +99,11 @@ Folgende Werte sind in `docker-compose.yml`, `Caddyfile` oder im Code fest und b
 
 | Was               | Wert                                                                                                                                                                                                        |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Öffentliche Ports | 80, 443 (caddy); PostgreSQL nur auf `127.0.0.1:5432` (für SSH-Tunnel/Wartung, nicht aus dem Netz erreichbar)                                                                                                |
+| Öffentliche Ports | 80, 443 (caddy); PostgreSQL nur auf `127.0.0.1:5432` (für SSH-Tunnel/Wartung, nicht aus dem Netz erreichbar; Host-Port per `POSTGRES_HOST_PORT`)                                                            |
 | Interne Ports     | web 3000, api 3001 (nur im Compose-Netz)                                                                                                                                                                    |
 | Volumes           | `postgres-data`, `mail-data` (verschlüsselte Rohmails; Uploads liegen verschlüsselt in PostgreSQL, Tabelle `attachment_upload`, also im Volume `postgres-data`), `caddy-data` (Zertifikate), `caddy-config` |
 | Speicherlimits    | caddy 64 MB, web 64 MB, api 192 MB, worker 384 MB, postgres 256 MB                                                                                                                                          |
 | Request-Timeouts  | Caddy: Header 30 s, Body 2 min; API: 120 s                                                                                                                                                                  |
 | Logs              | json-file, 10 MB × 3 Dateien je Dienst                                                                                                                                                                      |
 
-Wer einen eigenen Reverse Proxy betreibt, kann den Dienst `caddy` entfernen und `/api/*` an `api:3001`, alles andere an `web:3000` weiterleiten (siehe `Caddyfile`). web und api haben nur interne Ports; der eigene Proxy muss sie also im Compose-Netz erreichen, oder die Ports werden in der `docker-compose.yml` auf `127.0.0.1` freigegeben.
+Wer einen eigenen Reverse Proxy betreibt, kann den Dienst `caddy` entfernen und `/api/*` an `api:3001`, alles andere an `web:3000` weiterleiten (siehe `Caddyfile`). web und api haben nur interne Ports; der eigene Proxy muss sie also im Compose-Netz erreichen, oder die Ports werden auf `127.0.0.1` freigegeben – in einer eigenen `docker-compose.override.yml` (wird automatisch geladen, ist nicht versioniert und blockiert `scripts/upgrade.sh` nicht; bestehende Port-Listen mit `ports: !override` ersetzen), nicht in der `docker-compose.yml` selbst.

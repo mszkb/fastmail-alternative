@@ -27,7 +27,7 @@ Das Skript
 - wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
 - startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Alle Dienste haben einen Healthcheck; beim Worker heißt `healthy`, dass seine Hauptschleife läuft und die Datenbank erreicht (Heartbeat, siehe [Troubleshooting](troubleshooting.md)),
-- räumt danach alte, unbenutzte Images weg (`docker image prune -f`).
+- räumt danach alte, unbenutzte Images weg (`docker image prune -f` – wirkt auf alle ungenutzten, unbenannten Images des Docker-Hosts). Die Images der Vorversion sind danach gelöscht; ein Rollback baut sie neu (auf dem Pi einige Minuten).
 
 Schlägt ab dem Checkout ein Schritt fehl, gibt das Skript den Rollback-Hinweis mit altem Commit und Backup-Pfad aus.
 
@@ -101,7 +101,7 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 docker compose up -d --wait worker
 ```
 
-**Doppelversand vermeiden:** Das Backup kann Postausgangs-Einträge enthalten, die damals noch nicht gesendet waren, inzwischen (nach dem Backup) aber per SMTP verschickt wurden. Nach dem Restore stehen sie wieder als ungesendet in der Datenbank – ein Start des Workers würde sie **erneut senden**. Deshalb den Worker erst starten, nachdem die ausstehenden Einträge geprüft wurden: Was laut Gesendet-Ordner beim Anbieter schon verschickt ist, entfernen. `restore` weist auf solche Einträge hin (`warning: N unsent outbox message(s) …`, nur die Anzahl).
+**Doppelversand vermeiden:** Das Backup kann Postausgangs-Einträge enthalten, die damals noch nicht gesendet waren, inzwischen (nach dem Backup) aber per SMTP verschickt wurden. Nach dem Restore stehen sie wieder als ungesendet in der Datenbank – ein Start des Workers würde sie **erneut senden**. Deshalb den Worker erst starten, nachdem die ausstehenden Einträge geprüft wurden: Was laut Gesendet-Ordner beim Anbieter schon verschickt ist, entfernen. `restore` weist auf solche Einträge hin (`warning: N unsent outbox message(s) …`, nur die Anzahl). Beim Rollback läuft `restore` mit dem Image der **alten** Version; ältere Versionen warnen noch nicht – die Outbox-Abfrage oben deshalb immer ausführen.
 
 Maßgeblich ist das in `backups/upgrade-previous` festgehaltene Backup – nicht einfach das neueste in `backups/`: ein späterer Cron-Lauf oder ein erneuter Aufruf von `upgrade.sh` kann inzwischen ein Backup mit bereits migrierter Datenbank geschrieben haben. `restore --force` prüft das Backup vollständig, bevor es Datenbank und `mail-data` ersetzt. Details: [Backup & Restore](backup-restore.md).
 

@@ -76,9 +76,10 @@ Die Dateien sind verschlüsselt und dürfen auf fremdem Speicher liegen – **di
 ## Restore auf einer frischen Instanz
 
 1. Installation vorbereiten (`git clone`, gleiche oder neuere App-Version) und die **gesicherte `.env`** übernehmen – nicht neu erzeugen, ein anderer `MASTER_KEY` macht das Backup unlesbar.
-2. Nur die Datenbank starten (die API würde sonst schon Tabellen anlegen):
+2. Images bauen (bzw. bei Release-Images `pull`, sonst baut der erste `docker compose run` sie implizit) und nur die Datenbank starten (die API würde sonst schon Tabellen anlegen):
 
    ```sh
+   docker compose build
    docker compose up -d postgres
    ```
 
@@ -94,7 +95,8 @@ Die Dateien sind verschlüsselt und dürfen auf fremdem Speicher liegen – **di
 
    Dateien im Volume bekommen dabei den Besitzer `1000:1000` (Benutzer `node` im Worker-Image).
 
-4. Alles starten: `docker compose up -d`. Anmeldung mit dem bisherigen Benutzer; Konten und Mails sind sofort da, der Worker holt Neues vom Anbieter nach.
+4. Erst ohne Worker starten: `docker compose up -d --wait caddy web api postgres`. Hat `restore` `warning: N unsent outbox message(s)` gemeldet, die ungesendeten Postausgangs-Einträge wie unter [Upgrade – Rollback](upgrade.md#rollback) prüfen und bereits Gesendetes entfernen – **der Worker würde sie sonst sofort (erneut) senden**. Läuft die alte Instanz noch, sie vorher stoppen, sonst senden beide.
+5. Dann den Worker starten: `docker compose up -d --wait worker`. Anmeldung mit dem bisherigen Benutzer; Konten und Mails sind sofort da, der Worker holt Neues vom Anbieter nach.
 
 Lief die Instanz schon (z. B. API einmal gestartet), ist die Datenbank nicht mehr leer: dann `restore … --force` verwenden – das löscht die vorhandene Datenbank und den Inhalt von `mail-data` vollständig. Falscher Key, beschädigte Datei oder zu neue Version fallen bereits in der Prüfung vor dem Löschen auf. Bricht ein Restore danach ab (z. B. Platte voll), ist die Instanz eventuell halb befüllt; nach Behebung der Ursache mit `--force` wiederholen.
 

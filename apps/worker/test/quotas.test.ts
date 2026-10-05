@@ -22,6 +22,15 @@ process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 const databaseUrl = process.env.DATABASE_URL
 const greenmailHost = process.env.GREENMAIL_HOST
 
+// The slow provider needs a second loopback address. Linux routes all of
+// 127.0.0.0/8 to lo; macOS only 127.0.0.1 unless an alias is added
+// (`sudo ifconfig lo0 alias 127.0.0.2 up`).
+const secondLoopback = await new Promise<boolean>((resolve) => {
+  const probe = net.createServer()
+  probe.once('error', () => resolve(false))
+  probe.listen(0, '127.0.0.2', () => probe.close(() => resolve(true)))
+})
+
 describe('limit configuration', () => {
   const saved = { ...process.env }
   afterEach(() => {
@@ -172,57 +181,60 @@ describe.skipIf(!databaseUrl || !greenmailHost)('quotas in the job runner', () =
     await rm(dataDir, { recursive: true, force: true })
   })
 
-  it('never runs more jobs per IMAP host than the limit; other hosts keep syncing', async () => {
-    // A slow provider on its own loopback address: accepts, never answers.
-    const slowPort = await listen(net.createServer(), '127.0.0.2')
-    const slow: string[] = []
-    for (let i = 0; i < 4; i++) slow.push(await createAccount('127.0.0.2', slowPort, 'x'))
-    const healthy = await createAccount(
-      greenmailHost!,
-      Number(process.env.GREENMAIL_IMAP_PORT),
-      process.env.GREENMAIL_PASSWORD!,
-    )
-    for (const id of [...slow, healthy]) {
-      await enqueueJob(pool, { type: 'folder_sync', accountId: id })
-    }
+  it.skipIf(!secondLoopback)(
+    'never runs more jobs per IMAP host than the limit; other hosts keep syncing',
+    async () => {
+      // A slow provider on its own loopback address: accepts, never answers.
+      const slowPort = await listen(net.createServer(), '127.0.0.2')
+      const slow: string[] = []
+      for (let i = 0; i < 4; i++) slow.push(await createAccount('127.0.0.2', slowPort, 'x'))
+      const healthy = await createAccount(
+        greenmailHost!,
+        Number(process.env.GREENMAIL_IMAP_PORT),
+        process.env.GREENMAIL_PASSWORD!,
+      )
+      for (const id of [...slow, healthy]) {
+        await enqueueJob(pool, { type: 'folder_sync', accountId: id })
+      }
 
-    const runner = new JobRunner(pool, {
-      concurrency: 5,
-      maxConnectionsPerHost: 2,
-      timeoutMs: () => 1_500,
-    })
-    let maxSlow = 0
-    const sample = setInterval(() => {
-      maxSlow = Math.max(maxSlow, runner.hostJobCounts().get('127.0.0.2') ?? 0)
-    }, 10)
-    try {
-      await runner.fill()
-      // Two of the four slow accounts hold the host's slots, the others wait
-      // queued (no slot is blocked by waiting); the healthy host is unaffected.
-      expect(runner.hostJobCounts().get('127.0.0.2')).toBe(2)
-      expect(await runningJobs(slow)).toBe(2)
-      expect(await runningJobs([healthy])).toBe(1)
-      expect(runner.active).toBe(3)
-      await runner.drain()
-    } finally {
-      clearInterval(sample)
-    }
-    expect(maxSlow).toBe(2)
-    expect(runner.hostJobCounts().size).toBe(0)
+      const runner = new JobRunner(pool, {
+        concurrency: 5,
+        maxConnectionsPerHost: 2,
+        timeoutMs: () => 1_500,
+      })
+      let maxSlow = 0
+      const sample = setInterval(() => {
+        maxSlow = Math.max(maxSlow, runner.hostJobCounts().get('127.0.0.2') ?? 0)
+      }, 10)
+      try {
+        await runner.fill()
+        // Two of the four slow accounts hold the host's slots, the others wait
+        // queued (no slot is blocked by waiting); the healthy host is unaffected.
+        expect(runner.hostJobCounts().get('127.0.0.2')).toBe(2)
+        expect(await runningJobs(slow)).toBe(2)
+        expect(await runningJobs([healthy])).toBe(1)
+        expect(runner.active).toBe(3)
+        await runner.drain()
+      } finally {
+        clearInterval(sample)
+      }
+      expect(maxSlow).toBe(2)
+      expect(runner.hostJobCounts().size).toBe(0)
 
-    // Every slow account got its turn (timed out, backoff), none was skipped.
-    const { rows } = await pool.query<{ account_id: string; last_error_code: string | null }>(
-      'SELECT id AS account_id, last_error_code FROM mail_account WHERE id = ANY($1)',
-      [slow],
-    )
-    expect(rows.map((row) => row.last_error_code)).toEqual(Array(4).fill('JOB_TIMEOUT'))
-    const healthyState = await pool.query<{ status: string; last_sync_at: Date | null }>(
-      'SELECT status, last_sync_at FROM mail_account WHERE id = $1',
-      [healthy],
-    )
-    expect(healthyState.rows[0]).toMatchObject({ status: 'ok' })
-    expect(healthyState.rows[0]!.last_sync_at).not.toBeNull()
-  })
+      // Every slow account got its turn (timed out, backoff), none was skipped.
+      const { rows } = await pool.query<{ account_id: string; last_error_code: string | null }>(
+        'SELECT id AS account_id, last_error_code FROM mail_account WHERE id = ANY($1)',
+        [slow],
+      )
+      expect(rows.map((row) => row.last_error_code)).toEqual(Array(4).fill('JOB_TIMEOUT'))
+      const healthyState = await pool.query<{ status: string; last_sync_at: Date | null }>(
+        'SELECT status, last_sync_at FROM mail_account WHERE id = $1',
+        [healthy],
+      )
+      expect(healthyState.rows[0]).toMatchObject({ status: 'ok' })
+      expect(healthyState.rows[0]!.last_sync_at).not.toBeNull()
+    },
+  )
 
   it('backs off a throttled account instead of marking it as auth error', async () => {
     // Fake IMAP server that rejects the login like Gmail at its connection limit.
