@@ -35,12 +35,16 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 ### Changed
 
 - **Betreiber:** Der Worker hat jetzt einen Docker-Healthcheck (Heartbeat-Datei, aktualisiert alle 30 s nach erfolgreichem Datenbankzugriff; `unhealthy` ab 120 s ohne Heartbeat). `docker compose up --wait` und `scripts/upgrade.sh` warten damit auch auf den Worker; keine `.env`-Änderung nötig
+- **Betreiber:** `scripts/upgrade.sh` bricht vor dem Backup ab, wenn untracked Dateien mit Dateien des Ziels kollidieren (vorher scheiterte erst `git checkout`), und bei Release-Images (`COMPOSE_FILE` mit `docker-compose.release.yml`) mit Hinweis auf den händischen Ablauf. Nach dem Upgrade entfernt es nur noch unbenannte Images des eigenen Compose-Projekts statt aller ungenutzten Images des Docker-Hosts
+- **Betreiber:** Release-Images lassen sich dauerhaft per `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml` und `FMA_VERSION` in der `.env` einschalten (auskommentiert in `.env.example`); eine eigene `docker-compose.override.yml` muss dann in `COMPOSE_FILE` angehängt werden. Upgrade-Doku ergänzt: erstes Upgrade von Versionen ohne `scripts/upgrade.sh` (Skript nach `.upgrade-bootstrap/`), ältere Versionen ohne Worker-Healthcheck, detached HEAD nach Rollback, `UPGRADE_TARGET` im händischen Ablauf
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
 - Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 - Weiterleiten übernimmt eingebettete Bilder (cid:, PNG/JPEG/GIF/WebP) der Originalmail als normale Anhänge, da die Weiterleitung als Text versendet wird; SVG/HTML-Inline-Teile werden nicht übernommen, Größen- und Anzahlgrenzen gelten wie bisher (#53)
 
 ### Fixed
 
+- `backup.js` (`create`, `verify`, `restore`) meldet einen fehlenden oder ungültigen `MASTER_KEY` jetzt vorab und verständlich (`MASTER_KEY is invalid: expected 32 bytes, base64-encoded …`, ohne Key-Inhalt) statt nur `backup failed: Error`
+- Die Anhangsliste im Verfassen-Dialog hatte keinen Innenabstand und klebte am linken Rand
 - Ein neu verbundenes Konto zeigte keine Ordner („Noch keine Ordner synchronisiert“), bis die Seite neu geladen wurde, wenn es während des ersten Abgleichs geöffnet wurde; außerdem bemerkt die App das Ende des ersten Abgleichs eines neu hinzugefügten oder importierten Kontos jetzt binnen Sekunden statt erst beim nächsten 60-s-Kontenabgleich
 - Beim Verfassen erschien „Entwurf gespeichert“ nie, und Schließen speicherte einen unveränderten Entwurf erneut
 - **Betreiber:** Restore-Anleitung startete den Worker sofort und verschickte dabei ungesendete Postausgangs-Einträge aus dem Backup ohne Prüfung; jetzt erst ohne Worker starten und den Postausgang prüfen ([Backup & Restore](docs/operations/backup-restore.md#restore-auf-einer-frischen-instanz)). Installations-, Konfigurations- und Upgrade-Doku nach einem Testlauf korrigiert ([Testbericht](docs/operations/test-report-2026-10-05.md))
