@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Build the worker. Build context: repository root.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /repo
 
 RUN corepack enable
@@ -10,7 +10,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile --filter @fma/worker...
 RUN pnpm --filter @fma/worker build
 
-FROM node:24-alpine
+FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 # Release version (set by .github/workflows/release.yml from the tag);
