@@ -32,9 +32,15 @@ import {
 const COOKIE_NAME = 'fma_session'
 const ROTATION_INTERVAL_MS = 24 * 60 * 60_000
 
-/** Secure cookies only when the instance is not plain-HTTP (`DOMAIN=:80`). */
-function cookieSecure(): boolean {
-  return (process.env.DOMAIN ?? ':80') !== ':80'
+/**
+ * Secure cookies only when the instance is not plain-HTTP (`DOMAIN=:80`).
+ * COOKIE_SECURE=1/0 overrides it, e.g. `1` behind an own TLS proxy that
+ * forwards to caddy on :80 (ASVS N7).
+ */
+export function cookieSecure(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.COOKIE_SECURE === '1') return true
+  if (env.COOKIE_SECURE === '0') return false
+  return (env.DOMAIN ?? ':80') !== ':80'
 }
 
 declare module 'fastify' {
