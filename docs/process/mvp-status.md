@@ -21,7 +21,7 @@ Die Bewertung stützt sich auf Code und Tests im Repository, nicht nur auf die S
 
 ### Abgleich mit dem MVP-Funktionsumfang (Vision)
 
-Über die Akzeptanzkriterien hinaus nennt [`vision.md`](../product/vision.md#mvp-funktionsumfang) den MVP-Funktionsumfang. Alle Punkte sind laut Roadmap umgesetzt (Epics 2.x, 3.x, 4.x, 5.1, 5.3, 4.7), **bis auf OAuth2 für Outlook und Gmail** (2.10, #36). Weitere M1-Restpunkte aus den Phasen 0–4: Prüfung der [Anbieter-Matrix](../product/mail-providers.md) gegen echte Konten (0.5), CI-Status 1.2 (die letzten CI-Läufe sind grün, der Roadmap-Status ist noch 🟨), Gerätetests für Pull-to-Refresh (4.8) und Wisch-Navigation (4.9). Die UX-Flows (0.6) sind in [ux-flows.md](../product/ux-flows.md) dokumentiert.
+Über die Akzeptanzkriterien hinaus nennt [`vision.md`](../product/vision.md#mvp-funktionsumfang) den MVP-Funktionsumfang. Alle Punkte sind laut Roadmap umgesetzt (Epics 2.x, 3.x, 4.x, 5.1, 5.3, 4.7), **bis auf OAuth2 für Outlook und Gmail** (2.10, #36). Weitere M1-Restpunkte aus den Phasen 0–4: Prüfung der [Anbieter-Matrix](../product/mail-providers.md) gegen echte Konten (0.5), Gerätetests für Pull-to-Refresh (4.8) und Wisch-Navigation (4.9). Die UX-Flows (0.6) sind in [ux-flows.md](../product/ux-flows.md) dokumentiert.
 
 ## Was vor dem MVP-Release noch zu tun ist
 
@@ -31,5 +31,5 @@ Die Bewertung stützt sich auf Code und Tests im Repository, nicht nur auf die S
 4. **OAuth2 (2.10, #36) – Scope-Entscheidung:** laut Vision MVP-Umfang, laut Vorgabe bewusst nicht begonnen. Entweder vor M1 umsetzen oder per Roadmap-/Vision-Änderung explizit in die Beta verschieben (Gmail/Outlook bis dahin nur per App-Passwort).
 5. **Log-Stichprobe im Echtbetrieb** (Kriterium 8): Logs von api/worker auf dem Pi nach mehreren Tagen auf Betreffzeilen, Adressen und Provider-Fehlertexte durchsehen.
 6. ~~**Offene Security-Findings aus 6.1**~~ erledigt: Push-DNS-Rebinding, Port-Allowlist, `pnpm audit` in CI und `COOKIE_SECURE` ([ASVS-Bericht](../security/asvs-l2.md)).
-7. **Roadmap-Restpunkte bereinigen:** Status 1.2 (CI) prüfen und ggf. abschließen; 0.5 (Provider-Matrix) gegen echte Konten prüfen. 0.6 (UX-Flows) ist erledigt.
+7. **Roadmap-Restpunkte bereinigen:** 0.5 (Provider-Matrix) gegen echte Konten prüfen. 1.2 (CI, grün auf `main`) und 0.6 (UX-Flows) sind erledigt.
 8. ~~**Optional:** End-to-End-Test (Browser) für „neue Mail erscheint ohne Reload“~~ erledigt: Playwright-Suite läuft in CI (#74).
