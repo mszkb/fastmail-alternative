@@ -80,6 +80,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit production dependencies
+        # High/critical advisories fail the build; reviewed exceptions are
+        # listed with their reason in pnpm-workspace.yaml (auditConfig).
+        run: pnpm audit --prod --audit-level=high
+
       - name: Lint
         run: pnpm lint
 
