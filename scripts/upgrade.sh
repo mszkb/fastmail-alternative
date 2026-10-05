@@ -26,11 +26,12 @@ fi
 
 # Release images (COMPOSE_FILE with docker-compose.release.yml in .env)
 # have no build: the script would switch the checkout but keep the old
-# images running. Those upgrades are manual (FMA_VERSION in .env).
-CONFIG="$(docker compose config)"
-if ! printf '%s\n' "$CONFIG" | grep -Eq '^[[:space:]]+build:'; then
-  echo "upgrade: this instance uses release images - upgrade by hand, see" >&2
-  echo "upgrade: 'Fertige Images statt lokal bauen' in docs/operations/upgrade.md" >&2
+# images running. Those upgrades are manual (FMA_VERSION in .env). Checked
+# per app service, so a build in an own override file does not count.
+CONFIG="$(docker compose config web api worker)"
+if [ "$(printf '%s\n' "$CONFIG" | grep -c '^    build:')" -ne 3 ]; then
+  echo "upgrade: web, api and worker are not all built locally (release images?) - upgrade by hand," >&2
+  echo "upgrade: see 'Fertige Images statt lokal bauen' in docs/operations/upgrade.md" >&2
   exit 1
 fi
 PROJECT="$(printf '%s\n' "$CONFIG" | sed -n 's/^name: *//p' | tr -d "\"'")"
@@ -62,14 +63,30 @@ if ! git merge-base --is-ancestor "$PREVIOUS" "$TARGET_COMMIT"; then
   exit 1
 fi
 
-# Untracked files at paths the target adds make `git checkout` fail - only
-# after the backup. Check first (ignored files are overwritten by git).
+# Untracked files in the way of the target make `git checkout` fail - only
+# after the backup. Check first: an untracked file at a path the target
+# adds, at one of its parent directories, or below it (the target adds a
+# file where an untracked directory is). Ignored files are overwritten by git.
 UNTRACKED="$(git ls-files --others --exclude-standard)"
 if [ -n "$UNTRACKED" ]; then
   COLLISIONS="$(git diff --name-only --no-renames --diff-filter=A "$PREVIOUS" "$TARGET_COMMIT" |
-    grep -Fx -e "$UNTRACKED" || true)"
+    UNTRACKED="$UNTRACKED" awk '
+      BEGIN {
+        n = split(ENVIRON["UNTRACKED"], files, "\n")
+        for (i = 1; i <= n; i++) {
+          file[files[i]] = 1
+          dir = files[i]
+          while (sub(/\/[^\/]*$/, "", dir)) parent[dir] = 1
+        }
+      }
+      {
+        hit = ($0 in file) || ($0 in parent)
+        dir = $0
+        while (!hit && sub(/\/[^\/]*$/, "", dir)) hit = (dir in file)
+        if (hit) print
+      }')"
   if [ -n "$COLLISIONS" ]; then
-    echo "upgrade: untracked files would be overwritten by the target - move them away first:" >&2
+    echo "upgrade: untracked files are in the way of the target - move them away first:" >&2
     printf '%s\n' "$COLLISIONS" | sed 's/^/upgrade:   /' >&2
     exit 1
   fi

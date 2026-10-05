@@ -6,7 +6,7 @@ Herkunft: UI-Abnahme im [Testbericht 2026-10-05](../operations/test-report-2026-
 
 ## 1. Manueller Sync direkt nach dem App-Start
 
-**Aktuell:** Beim Start fordert die App für alle Konten einen Sync an (`POST /api/sync`, [Push-Strategie](../architecture/push.md)). Der Server lässt pro Konto höchstens einen neuen `folder_sync` je 30 s zu. Tippt man in diesen 30 s auf „Aktualisieren“ oder zieht die Liste, antwortet der Server mit 429 und die App zeigt „Gerade aktualisiert.“.
+**Aktuell:** Beim Start fordert die App für alle Konten einen Sync an (`POST /api/sync`, [Push-Strategie](../architecture/push.md)). Der Server lässt pro Konto höchstens einen neuen `folder_sync` je 30 s zu. Solange der Start-Sync läuft, sind „Aktualisieren“ und Pull-to-Refresh gesperrt (Frage 2). Ist er fertig, die 30 s seit dem Start aber noch nicht um, antwortet der Server auf „Aktualisieren“ oder Ziehen mit 429 und die App zeigt „Gerade aktualisiert.“.
 
 **Frage:** So lassen oder ändern?
 
