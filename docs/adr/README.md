@@ -15,3 +15,4 @@ Neue ADR: `0000-template.md` kopieren, fortlaufend nummerieren, Status zunächst
 | [0009](0009-license.md)            | Lizenz: ISC                                                   | Accepted |
 | [0010](0010-client-strategy.md)    | Client-Strategie: native Clients, gemeinsame Logik und Design | Accepted |
 | [0011](0011-mail-provider-auth.md) | Anmeldung an Mailanbietern: OAuth2 + Passwort im MVP          | Accepted |
+| [0012](0012-usage-telemetry.md)    | Anonyme Nutzungsstatistik (Opt-in)                            | Proposed |
