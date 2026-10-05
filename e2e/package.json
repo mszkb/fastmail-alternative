@@ -1,0 +1,16 @@
+{
+  "name": "@fma/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.19.1",
+    "pg": "^8.23.1",
+    "typescript": "~5.9.3"
+  }
+}

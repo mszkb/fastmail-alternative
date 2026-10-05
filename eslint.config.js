@@ -4,7 +4,15 @@ import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 
 export default defineConfigWithVueTs(
   {
-    ignores: ['**/dist/**', '**/.nuxt/**', '**/.output/**', '**/coverage/**', '**/node_modules/**'],
+    ignores: [
+      '**/dist/**',
+      '**/.nuxt/**',
+      '**/.output/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      'e2e/test-results/**',
+      'e2e/playwright-report/**',
+    ],
   },
   pluginVue.configs['flat/recommended'],
   vueTsConfigs.recommended,
