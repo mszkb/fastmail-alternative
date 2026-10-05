@@ -76,7 +76,8 @@ interface ProviderResult {
 /** Error with a stable code (no provider text: it may echo the query). */
 class SearchError extends Error {
   constructor(
-    readonly code: 'AUTH_FAILED' | 'BLOCKED_HOST' | 'TIMEOUT' | 'TLS_REQUIRED' | 'UNREACHABLE',
+    readonly code:
+      'AUTH_FAILED' | 'BLOCKED_HOST' | 'BLOCKED_PORT' | 'TIMEOUT' | 'TLS_REQUIRED' | 'UNREACHABLE',
     readonly status: number,
     message: string,
   ) {
@@ -194,6 +195,9 @@ async function searchProvider(
     // Only the SSRF check means "blocked"; DNS failures are just unreachable.
     if ((err as { code?: unknown }).code === 'PRIVATE_HOST_BLOCKED') {
       throw new SearchError('BLOCKED_HOST', 502, 'Interner IMAP-Host ist blockiert (SSRF-Schutz).')
+    }
+    if ((err as { code?: unknown }).code === 'PORT_NOT_ALLOWED') {
+      throw new SearchError('BLOCKED_PORT', 502, 'Dieser IMAP-Port ist nicht erlaubt.')
     }
     throw new SearchError('UNREACHABLE', 502, 'Der Mailanbieter ist nicht erreichbar.')
   }

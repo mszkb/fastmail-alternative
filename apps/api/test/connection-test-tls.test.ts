@@ -45,7 +45,7 @@ async function fake(
   return (server.address() as net.AddressInfo).port
 }
 
-const policy = { allowPrivateHosts: true, insecureTransport: false }
+const policy = { allowPrivateHosts: true, insecureTransport: false, anyPort: true }
 const PASSWORD = 'never-on-the-wire'
 
 describe('connection test: mandatory STARTTLS', () => {
@@ -111,11 +111,13 @@ describe('connection test: environment policy (audit N7)', () => {
   const saved = {
     allow: process.env.MAIL_ALLOW_PRIVATE_HOSTS,
     insecure: process.env.MAIL_INSECURE_TRANSPORT,
+    ports: process.env.MAIL_EXTRA_PORTS,
   }
   afterEach(() => {
     for (const [name, value] of [
       ['MAIL_ALLOW_PRIVATE_HOSTS', saved.allow],
       ['MAIL_INSECURE_TRANSPORT', saved.insecure],
+      ['MAIL_EXTRA_PORTS', saved.ports],
     ] as const) {
       if (value === undefined) delete process.env[name]
       else process.env[name] = value
@@ -136,6 +138,8 @@ describe('connection test: environment policy (audit N7)', () => {
       },
       imapReceived,
     )
+    // Fake servers listen on random ports: allowed via MAIL_EXTRA_PORTS.
+    process.env.MAIL_EXTRA_PORTS = String(imapPort)
     const imap = await testImap({
       host: '127.0.0.1',
       port: imapPort,
@@ -157,6 +161,7 @@ describe('connection test: environment policy (audit N7)', () => {
       },
       smtpReceived,
     )
+    process.env.MAIL_EXTRA_PORTS = ` ${imapPort}, ${smtpPort} `
     const smtp = await testSmtp({
       host: '127.0.0.1',
       port: smtpPort,
@@ -181,6 +186,32 @@ describe('connection test: environment policy (audit N7)', () => {
       password: PASSWORD,
     })
     expect(result).toMatchObject({ ok: false, code: 'BLOCKED_HOST' })
+    expect(received).toHaveLength(0)
+  })
+})
+
+describe('connection test: port allowlist (audit N2)', () => {
+  const saved = process.env.MAIL_EXTRA_PORTS
+  afterEach(() => {
+    if (saved === undefined) delete process.env.MAIL_EXTRA_PORTS
+    else process.env.MAIL_EXTRA_PORTS = saved
+  })
+
+  it('refuses non-standard ports before connecting -> BLOCKED_PORT', async () => {
+    delete process.env.MAIL_EXTRA_PORTS
+    const received: string[] = []
+    const port = await fake('* OK ready\r\n', () => '', received)
+    const strict = { allowPrivateHosts: true, insecureTransport: false }
+    const config = { host: '127.0.0.1', port, secure: false, user: 'u', password: PASSWORD }
+    expect(await testImap(config, { policy: strict })).toMatchObject({
+      ok: false,
+      code: 'BLOCKED_PORT',
+    })
+    expect(await testSmtp(config, { policy: strict })).toMatchObject({
+      ok: false,
+      code: 'BLOCKED_PORT',
+    })
+    // Nothing reached the server, not even a greeting exchange.
     expect(received).toHaveLength(0)
   })
 })

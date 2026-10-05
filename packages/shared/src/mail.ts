@@ -250,6 +250,7 @@ export type OutboxErrorCode =
   | 'SMTP_TEMPORARY'
   | 'HOST_NOT_FOUND'
   | 'BLOCKED_HOST'
+  | 'BLOCKED_PORT'
   | 'CONNECTION_REFUSED'
   | 'TIMEOUT'
   | 'TLS_ERROR'
@@ -263,6 +264,7 @@ export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
   SMTP_TEMPORARY: 'Der SMTP-Server ist vorübergehend nicht bereit. Neuer Versuch folgt.',
   HOST_NOT_FOUND: 'SMTP-Server nicht gefunden - bitte Hostnamen prüfen.',
   BLOCKED_HOST: 'Interner SMTP-Host ist blockiert (SSRF-Schutz).',
+  BLOCKED_PORT: 'Dieser SMTP-Port ist nicht erlaubt (25, 465, 587, 2525) – Port im Konto ändern.',
   CONNECTION_REFUSED: 'Verbindung zum SMTP-Server abgelehnt - Host/Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden mit dem SMTP-Server.',
   TLS_ERROR: 'TLS-Fehler - Zertifikat des SMTP-Servers konnte nicht verifiziert werden.',
@@ -426,6 +428,8 @@ export type AccountErrorCode =
   /** Plain port without STARTTLS (or STARTTLS stripped): login refused. */
   | 'TLS_REQUIRED'
   | 'BLOCKED_HOST'
+  /** Port outside the allowlist (MAIL_EXTRA_PORTS), ASVS N2. */
+  | 'BLOCKED_PORT'
   | 'JOB_TIMEOUT'
   /** Imported account (roadmap 4.7): the export never contains passwords. */
   | 'CREDENTIALS_REQUIRED'
@@ -442,6 +446,8 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   TLS_REQUIRED:
     'Der Mailserver bietet keine verschlüsselte Verbindung (STARTTLS) an – das Passwort wurde nicht gesendet. Einen TLS-Port (IMAP 993, SMTP 465) verwenden oder den Anbieter prüfen.',
   BLOCKED_HOST: 'Interner Host ist blockiert (SSRF-Schutz).',
+  BLOCKED_PORT:
+    'Dieser Port ist nicht erlaubt (IMAP 143/993, SMTP 25/465/587/2525) – Port im Konto ändern oder MAIL_EXTRA_PORTS setzen.',
   JOB_TIMEOUT: 'Der Mailserver hat zu lange gebraucht; der Abgleich wurde abgebrochen.',
   CREDENTIALS_REQUIRED: 'Das Konto wurde importiert – das Passwort muss neu eingegeben werden.',
   RATE_LIMITED:
