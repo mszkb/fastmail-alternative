@@ -161,7 +161,8 @@ const conflict = ref<Draft | null>(null)
 function snapshotOf(): string {
   return JSON.stringify({ ...form, attachmentIds: attachments.value.map((a) => a.id) })
 }
-let lastSaved = snapshotOf()
+// A ref, so `dirty` (and the "saved" label) updates after a save.
+const lastSaved = ref(snapshotOf())
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saving: Promise<void> | null = null
 // After send/discard (or once the draft is gone on the server): no more saves.
@@ -171,7 +172,7 @@ let finished = false
 let forceSaves = false
 
 const title = computed(() => (saved ? 'Entwurf' : TITLES[props.draft.mode]))
-const dirty = computed(() => snapshotOf() !== lastSaved)
+const dirty = computed(() => snapshotOf() !== lastSaved.value)
 const saveLabel = computed(() => {
   switch (saveState.value) {
     case 'saving':
@@ -224,7 +225,7 @@ async function saveDraft(options: { force?: boolean; keepalive?: boolean } = {})
   while (saving) await saving
   if (finished || (conflict.value && !options.force)) return
   const snapshot = snapshotOf()
-  if (snapshot === lastSaved && !options.force) return
+  if (snapshot === lastSaved.value && !options.force) return
   const body = draftBody()
   if (options.force) body.force = true
   saving = (async () => {
@@ -233,7 +234,7 @@ async function saveDraft(options: { force?: boolean; keepalive?: boolean } = {})
       // Offline, or older operations still queued (order matters).
       if (navigator.onLine === false || offlineState.queue.length > 0) {
         await queueDraft(body)
-        lastSaved = snapshot
+        lastSaved.value = snapshot
         everSaved.value = true
         saveState.value = 'queued'
         return
@@ -249,7 +250,7 @@ async function saveDraft(options: { force?: boolean; keepalive?: boolean } = {})
       } catch (err) {
         if (!isNetworkError(err)) throw err
         await queueDraft(body)
-        lastSaved = snapshot
+        lastSaved.value = snapshot
         everSaved.value = true
         saveState.value = 'queued'
         return
@@ -257,7 +258,7 @@ async function saveDraft(options: { force?: boolean; keepalive?: boolean } = {})
       if (res.ok) {
         const draft = (await res.json()) as Draft
         version.value = draft.version
-        lastSaved = snapshot
+        lastSaved.value = snapshot
         everSaved.value = true
         saveState.value = 'saved'
         emit('draftsChanged')
@@ -307,7 +308,7 @@ function loadOtherVersion(): void {
   if (other.cc || other.bcc) showCcBcc.value = true
   attachments.value = [...other.attachments]
   version.value = other.version
-  lastSaved = snapshotOf()
+  lastSaved.value = snapshotOf()
   conflict.value = null
   saveState.value = 'saved'
 }
@@ -516,9 +517,9 @@ async function takeOverAttachments(messageId: string): Promise<void> {
       return
     }
     // Untouched form: the taken over attachments are part of the prefill.
-    const untouched = snapshotOf() === lastSaved
+    const untouched = snapshotOf() === lastSaved.value
     attachments.value.push(...payload.attachments)
-    if (untouched) lastSaved = snapshotOf()
+    if (untouched) lastSaved.value = snapshotOf()
     if (payload.skipped > 0) {
       error.value =
         `${payload.skipped} ${payload.skipped === 1 ? 'Anhang wurde' : 'Anhänge wurden'} ` +
