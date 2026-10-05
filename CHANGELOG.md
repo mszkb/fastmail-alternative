@@ -51,6 +51,9 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
 ### Security
 
+- ASVS-Review (#56), letzte Punkte: Mail-Verbindungen nur noch auf Standard-Ports (IMAP 143/993, SMTP 25/465/587/2525), damit ein Konto nicht als Port-Scanner dient; neuer Fehlercode `BLOCKED_PORT`. **Betreiber:** Konten auf anderen Ports schlagen nun fehl – Port umstellen oder in `.env` per `MAIL_EXTRA_PORTS=1143,10465` freigeben (neu, optional, an api und worker durchgereicht)
+- **Betreiber:** Neue optionale Variable `COOKIE_SECURE` (`1`/`0`) für das `Secure`-Flag des Session-Cookies, z. B. `1` hinter einem eigenen TLS-Proxy vor caddy mit `DOMAIN=:80`
+- `pnpm audit --prod --audit-level=high` läuft in CI und blockiert bei neuen Lücken; zwei ungepatchte Advisories der Nuxt-Build-Werkzeuge sind begründet ausgenommen (`pnpm-workspace.yaml`)
 - Envelope-Encryption (AES-256-GCM, Schlüssel pro Konto) für Zugangsdaten und alle lesbaren Mailinhalte at rest; Master-Key nur aus der Umgebung
 - Logs, Fehlermeldungen und Push-Payloads ohne Mailinhalte, Adressen, Zugangsdaten oder Fehlertexte der Anbieter
 - Rate Limits, CSRF-Origin-Prüfung, Session-Härtung, Security-Header/CSP, Login-Lockout

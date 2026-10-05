@@ -9,10 +9,11 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 
 ## Kern
 
-| Variable    | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                 |
-| ----------- | -------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOMAIN`    | `:80`    | nein    | caddy, api  | Site-Adresse für Caddy. Domainname (z. B. `mail.example.org`) = automatisches Let's-Encrypt-TLS und `Secure`-Session-Cookie; `:80` = HTTP ohne TLS (nur Test im LAN). |
-| `LOG_LEVEL` | `info`   | nein    | api, worker | `debug`, `info`, `warn` oder `error`. Logs enthalten auch auf `debug` keine Mailinhalte oder Zugangsdaten.                                                            |
+| Variable        | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                       |
+| --------------- | -------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN`        | `:80`    | nein    | caddy, api  | Site-Adresse für Caddy. Domainname (z. B. `mail.example.org`) = automatisches Let's-Encrypt-TLS und `Secure`-Session-Cookie; `:80` = HTTP ohne TLS (nur Test im LAN).                                                       |
+| `COOKIE_SECURE` | leer     | nein    | api         | Überschreibt das `Secure`-Flag des Session-Cookies: `1` = immer setzen, z. B. hinter einem eigenen TLS-Proxy, der auf caddy mit `DOMAIN=:80` weiterleitet; `0` = nie. Leer = automatisch (`Secure` außer bei `DOMAIN=:80`). |
+| `LOG_LEVEL`     | `info`   | nein    | api, worker | `debug`, `info`, `warn` oder `error`. Logs enthalten auch auf `debug` keine Mailinhalte oder Zugangsdaten.                                                                                                                  |
 
 ## Sicherheit und Verschlüsselung
 
@@ -23,6 +24,7 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 | `METRICS_TOKEN`            | leer     | nein    | api         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                                                                                                                                                     |
 | `SETUP_TOKEN`              | leer     | nein    | api         | Setup-Code für die [Ersteinrichtung](installation.md#6-benutzer-anlegen-ersteinrichtung). Leer = die api erzeugt beim Start einen zufälligen Code und schreibt ihn einmalig ins Log (`docker compose logs api`), solange kein Benutzer existiert. Gesetzt = dieser Wert (wird nie geloggt). Nach der Einrichtung ohne Wirkung. |
 | `MAIL_ALLOW_PRIVATE_HOSTS` | leer     | nein    | api, worker | `1` = private/interne Mail-Hosts erlauben (eigener Mailserver im LAN/Heimnetz). Schaltet den SSRF-Schutz für Mail-Hosts ab – nur setzen, wenn nötig. STARTTLS-Pflicht und Zertifikatsprüfung bleiben aktiv (gültiges Zertifikat für den Hostnamen nötig).                                                                      |
+| `MAIL_EXTRA_PORTS`         | leer     | nein    | api, worker | Zusätzlich erlaubte Mail-Ports, kommagetrennt (z. B. `1143,10465`). Standard sind nur IMAP 143/993 und SMTP 25/465/587/2525; andere Ports lehnen Verbindungstest, Import und Worker ab (Fehler „Port nicht erlaubt“).                                                                                                          |
 
 > **Nur Entwicklung, niemals produktiv:** `MAIL_INSECURE_TRANSPORT=1` erlaubt IMAP/SMTP im Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Endpoints zu. Gedacht für Tests gegen GreenMail (die Vitest-Configs und die CI setzen ihn); er wird von `docker-compose.yml` bewusst nicht durchgereicht.
 
