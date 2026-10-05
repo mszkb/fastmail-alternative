@@ -976,7 +976,13 @@ function onPullEnd(): void {
 async function refreshView(): Promise<void> {
   const requestedAccount = accountId.value
   // A shown search result stays as it is (no folder list to merge).
-  if (!requestedAccount || !folderId.value || search.value || searchLoading.value) return
+  if (!requestedAccount || search.value || searchLoading.value) return
+  // No folder open yet (first sync of a new account was still running when
+  // the folders were loaded): load them now instead of waiting for a reload.
+  if (!folderId.value) {
+    if (!listLoading.value) void loadFolders()
+    return
+  }
   if (pendingActions > 0 || listLoading.value) {
     refreshDeferred = true
     return
