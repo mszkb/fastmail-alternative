@@ -7,6 +7,7 @@
  * Requires DATABASE_URL (Postgres) and a GreenMail instance:
  *   GREENMAIL_HOST, GREENMAIL_IMAP_PORT, GREENMAIL_SMTP_PORT,
  *   GREENMAIL_USER, GREENMAIL_PASSWORD, MAIL_ALLOW_PRIVATE_HOSTS=1
+ *   (MAIL_INSECURE_TRANSPORT=1 comes from vitest.config.ts)
  * CI provides both as service containers; skipped when unset.
  */
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -14,8 +15,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { decryptField, unwrapAccountKey } from '@fma/crypto'
 import { runMigrations } from '@fma/db/migrate'
+import { isoDay, utcMidnight } from '@fma/shared'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
+
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
 
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
@@ -49,7 +54,11 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
 
     // Register the single user and grab a session.
     const setup = await inject('POST', '/api/auth/setup', {
-      payload: { email: 'accounts@example.com', password: 'correct horse battery' },
+      payload: {
+        setupCode: SETUP_CODE,
+        email: 'accounts@example.com',
+        password: 'correct horse battery',
+      },
     })
     authToken = setup.cookies.find((c) => c.name === 'fma_session')!.value
   })
@@ -118,6 +127,7 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     const body = res.json()
     expect(body.account.status).toBe('ok')
     expect(body.account.emailAddress).toBe('testuser@example.com')
+    expect(body.account.syncSince).toBeNull()
     expect(body.test.imap.ok).toBe(true)
     expect(body.test.smtp.ok).toBe(true)
     // Credentials and DEK must never appear anywhere.
@@ -284,6 +294,79 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
       payload: { displayName: 'x' },
     })
     expect(invalid.statusCode).toBe(404)
+  })
+
+  it('sets, validates and clears the sync limit (syncSince)', async () => {
+    const id = await accountId()
+    const today = new Date().toISOString().slice(0, 10)
+    const tomorrowPlus = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    for (const syncSince of [tomorrowPlus, '2026-02-30', '30', 30, '2026-01-01T00:00:00Z', '']) {
+      const bad = await inject('PATCH', `/api/accounts/${id}`, {
+        token: authToken,
+        payload: { syncSince },
+      })
+      expect(bad.statusCode).toBe(400)
+    }
+    const badCreate = await inject('POST', '/api/accounts', {
+      token: authToken,
+      payload: {
+        emailAddress: 'x@example.com',
+        imap: { host: 'imap.example.com', port: 993, user: 'x', password: 'y' },
+        smtp: { host: 'smtp.example.com', port: 465 },
+        syncSince: tomorrowPlus,
+      },
+    })
+    expect(badCreate.statusCode).toBe(400)
+
+    const jobsBefore = await folderSyncJobCount(id)
+    const set = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: '2026-01-15' },
+    })
+    expect(set.statusCode).toBe(200)
+    expect(set.json().account.syncSince).toBe('2026-01-15')
+    // A changed limit triggers a sync (a wider period fills the window).
+    expect(await folderSyncJobCount(id)).toBe(jobsBefore + 1)
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json()
+    expect(listed.accounts.find((a: { id: string }) => a.id === id).syncSince).toBe('2026-01-15')
+
+    const todayRes = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: today },
+    })
+    expect(todayRes.json().account.syncSince).toBe(today)
+    const cleared = await inject('PATCH', `/api/accounts/${id}`, {
+      token: authToken,
+      payload: { syncSince: null },
+    })
+    expect(cleared.statusCode).toBe(200)
+    expect(cleared.json().account.syncSince).toBeNull()
+    const unauth = await inject('PATCH', `/api/accounts/${id}`, { payload: { syncSince: null } })
+    expect(unauth.statusCode).toBe(401)
+  })
+
+  it('keeps the syncSince day in a session TimeZone east of UTC', async () => {
+    const id = await accountId()
+    const client = await pool.connect()
+    try {
+      await client.query("SET TimeZone = 'Europe/Berlin'")
+      const store = async (value: unknown) =>
+        (
+          await client.query<{ sync_since: Date }>(
+            'UPDATE mail_account SET sync_since = $1 WHERE id = $2 RETURNING sync_since',
+            [value, id],
+          )
+        ).rows[0]!.sync_since
+      // The bare day string is read in the session TimeZone (previous UTC day) ...
+      expect(isoDay(await store('2026-01-15'))).toBe('2026-01-14')
+      // ... UTC midnight (as bound by create/update) keeps the day.
+      expect(isoDay(await store(utcMidnight('2026-01-15')))).toBe('2026-01-15')
+    } finally {
+      await client.query('RESET TimeZone')
+      client.release()
+    }
+    const listed = (await inject('GET', '/api/accounts', { token: authToken })).json()
+    expect(listed.accounts.find((a: { id: string }) => a.id === id).syncSince).toBe('2026-01-15')
   })
 
   it('re-tests changed connection data and saves nothing on failure', async () => {

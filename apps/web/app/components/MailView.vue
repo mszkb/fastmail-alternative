@@ -40,7 +40,15 @@
 // only). Hits replace the list (same rendering, with their folder); actions
 // on a hit run in the folder it was found in. Clearing the search reloads
 // the folder. Matches without a local copy are only counted.
+// Manual sync (4.8): a refresh button in the list header and pull-to-refresh
+// on touch devices (PullToRefresh from @fma/shared) ask the server to sync
+// the active account (POST /api/accounts/:id/sync, rate-limited there) and
+// reload the list; app.vue then polls the account list while the sync runs,
+// and the view reloads again once it finished (same path as 4.5). Disabled
+// while offline.
 import {
+  PullToRefresh,
+  manualSyncNotice,
   RequestScope,
   accountDataChanged,
   accountStatusInfo,
@@ -78,6 +86,7 @@ import { cacheGet, cachePut } from '~/utils/offline-store'
 import {
   enqueueAction,
   isNetworkError,
+  isOffline,
   notifyUnauthorized,
   offlineState,
 } from '~/utils/offline-queue'
@@ -90,8 +99,14 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
     >
   >
 
-const props = defineProps<{ accounts: AccountOption[] }>()
-const emit = defineEmits<{ editAccount: [id: string] }>()
+// unifiedInbox: the opt-in unified inbox (3.7) is switched on; its entry
+// "Alle Posteingänge" then sits above the accounts (emit openUnified).
+const props = defineProps<{ accounts: AccountOption[]; unifiedInbox?: boolean }>()
+const emit = defineEmits<{
+  editAccount: [id: string]
+  syncRequested: []
+  openUnified: []
+}>()
 
 const SPECIAL_USE_LABELS: Record<string, string> = {
   inbox: 'Posteingang',
@@ -102,6 +117,8 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   trash: 'Papierkorb',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
+/** Value of the "Alle Posteingänge" entry in the mobile account picker. */
+const UNIFIED_OPTION = '__unified__'
 /** Messages of a folder list kept offline (three pages of 50). */
 const CACHED_LIST_MESSAGES = 150
 const LIST_CACHE_DELAY_MS = 500
@@ -111,6 +128,10 @@ interface CachedList {
 }
 
 const accountId = ref('')
+// Message opened from the unified inbox in another account: opened once
+// that account's folders (and its INBOX) are loaded.
+let pendingOpen = ''
+
 const folders = ref<FolderSummary[]>([])
 const folderId = ref('')
 const messages = ref<MessageListItem[]>([])
@@ -131,6 +152,8 @@ const compose = ref<{
   identities: ComposeIdentity[]
   draft: ComposeDraft
   saved?: Draft
+  /** Forward: the original, whose attachments the form takes over (5.3). */
+  forwardOf?: string
 } | null>(null)
 const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
 // Search (5.1): criteria of the form and the shown result (null = folder view).
@@ -176,6 +199,21 @@ const accountScope = new RequestScope()
 
 const activeAccount = computed(() => props.accounts.find((a) => a.id === accountId.value) ?? null)
 const activeStatus = computed(() => (activeAccount.value ? statusInfo(activeAccount.value) : null))
+
+/** Manual sync (4.8): request in flight, or the account's sync still running. */
+const manualSyncing = ref(false)
+const syncBusy = computed(() => manualSyncing.value || (activeAccount.value?.syncing ?? false))
+const pull = new PullToRefresh()
+const pullDistance = ref(0)
+const pullArmed = ref(false)
+const syncNotice = ref<string | null>(null)
+let syncNoticeTimer: ReturnType<typeof setTimeout> | undefined
+
+function showSyncNotice(text: string | null): void {
+  clearTimeout(syncNoticeTimer)
+  syncNotice.value = text
+  if (text) syncNoticeTimer = setTimeout(() => (syncNotice.value = null), 4000)
+}
 
 function syncState(account: AccountOption): AccountSyncState {
   return {
@@ -325,6 +363,7 @@ function accountUnread(account: AccountOption): number {
  */
 function switchAccount(id: string): boolean {
   if (!id || id === accountId.value) return true
+  pendingOpen = ''
   // The open draft belongs to the previous account: save it, then close.
   void composeForm.value?.flush()
   compose.value = null
@@ -334,6 +373,11 @@ function switchAccount(id: string): boolean {
 
 function onAccountSelect(event: Event): void {
   const select = event.target as HTMLSelectElement
+  if (select.value === UNIFIED_OPTION) {
+    select.value = accountId.value
+    emit('openUnified')
+    return
+  }
   if (!switchAccount(select.value)) select.value = accountId.value
 }
 
@@ -388,7 +432,12 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   // Switched accounts meanwhile: never open a draft for the previous one.
   if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
-  compose.value = { accountId: account, identities: list, draft: createDraft(mode, list, original) }
+  compose.value = {
+    accountId: account,
+    identities: list,
+    draft: createDraft(mode, list, original),
+    ...(mode === 'forward' && original ? { forwardOf: original.id } : {}),
+  }
 }
 
 /** Continues a saved draft in the compose form. */
@@ -476,7 +525,13 @@ async function loadFolders(): Promise<void> {
       const inbox = defaultFolder(res.folders)
       if (inbox) await selectFolder(inbox.id)
     }
+    if (pendingOpen && requestedAccount === accountId.value) {
+      const id = pendingOpen
+      pendingOpen = ''
+      void openMessage(id)
+    }
   } catch (err) {
+    pendingOpen = ''
     if (isStaleResponse(err) || cached) return
     error.value = err instanceof Error ? err.message : 'Ordner konnten nicht geladen werden.'
   }
@@ -857,6 +912,64 @@ async function runAction(
 }
 
 /**
+ * Refresh button / pull-to-refresh (4.8): asks the server to sync the
+ * active account and reloads the list right away. A rate-limited (429) or
+ * skipped request still reloads; app.vue polls while the sync runs.
+ */
+async function syncActiveAccount(): Promise<void> {
+  const id = accountId.value
+  if (!id || manualSyncing.value) return
+  if (isOffline.value) {
+    showSyncNotice(manualSyncNotice('offline'))
+    return
+  }
+  manualSyncing.value = true
+  try {
+    const res = await fetch(`/api/accounts/${id}/sync`, { method: 'POST' })
+    offlineState.reachable = true
+    if (res.status === 401) {
+      notifyUnauthorized()
+      return
+    }
+    showSyncNotice(manualSyncNotice(res.status))
+    emit('syncRequested')
+    await refreshView()
+  } catch (err) {
+    if (!isNetworkError(err)) throw err
+    offlineState.reachable = false
+    showSyncNotice(manualSyncNotice('offline'))
+  } finally {
+    manualSyncing.value = false
+  }
+}
+
+/** Top of the list on screen: the list scrolls itself, on mobile the page. */
+function listAtTop(event: TouchEvent): boolean {
+  const list = event.currentTarget as HTMLElement
+  return list.scrollTop <= 0 && window.scrollY <= 0
+}
+
+function onPullStart(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch || event.touches.length > 1 || syncBusy.value) return
+  pull.start(touch.clientY, listAtTop(event))
+}
+
+function onPullMove(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch) return
+  pullDistance.value = pull.move(touch.clientY)
+  pullArmed.value = pull.armed
+}
+
+function onPullEnd(): void {
+  const trigger = pull.end()
+  pullDistance.value = 0
+  pullArmed.value = false
+  if (trigger) void syncActiveAccount()
+}
+
+/**
  * Reloads folders (counts) and the first page of the open folder in place
  * after a sync (roadmap 4.5). Quiet: errors keep the current view.
  */
@@ -964,6 +1077,35 @@ function onKeydown(event: KeyboardEvent): void {
   event.preventDefault()
 }
 
+/**
+ * Swipe back (4.9): one step back inside the mail view. Returns false when
+ * there is nothing to go back to here. With an open composer the swipe is
+ * swallowed (true) so a draft is never closed by accident.
+ */
+function goBack(): boolean {
+  if (compose.value) return true
+  if (mobilePane.value !== 'detail' && !selectedId.value) return false
+  closeDetail()
+  return true
+}
+
+/**
+ * Opens a message from the unified inbox (3.7) in the view of its own
+ * account (INBOX), so actions and replies use that account.
+ */
+async function openFromUnified(account: string, messageId: string): Promise<void> {
+  if (account !== accountId.value) {
+    switchAccount(account)
+    pendingOpen = messageId
+    return
+  }
+  const inbox = defaultFolder(folders.value)
+  if (inbox && inbox.id !== folderId.value) await selectFolder(inbox.id)
+  await openMessage(messageId)
+}
+
+defineExpose({ goBack, openFromUnified })
+
 function closeDetail(): void {
   detailRequest++
   selectedId.value = ''
@@ -1060,6 +1202,9 @@ onBeforeUnmount(() => {
         Neue E-Mail
       </button>
       <nav class="accounts" aria-label="Konten">
+        <button v-if="unifiedInbox" type="button" class="account" @click="emit('openUnified')">
+          <span class="account-name">Alle Posteingänge</span>
+        </button>
         <button
           v-for="(account, index) in accounts"
           :key="account.id"
@@ -1092,6 +1237,7 @@ onBeforeUnmount(() => {
       <label class="account-picker">
         <span class="visually-hidden">Konto</span>
         <select :value="accountId" @change="onAccountSelect">
+          <option v-if="unifiedInbox" :value="UNIFIED_OPTION">Alle Posteingänge</option>
           <option v-for="account in accounts" :key="account.id" :value="account.id">
             {{ account.displayName
             }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : ''
@@ -1123,7 +1269,14 @@ onBeforeUnmount(() => {
       <OutboxPanel ref="outbox" :account-id="accountId" />
     </aside>
 
-    <section class="list" aria-label="Nachrichten">
+    <section
+      class="list"
+      aria-label="Nachrichten"
+      @touchstart.passive="onPullStart"
+      @touchmove.passive="onPullMove"
+      @touchend="onPullEnd"
+      @touchcancel="onPullEnd"
+    >
       <header class="list-header">
         <!-- Mobile replacement for the folder sidebar -->
         <select
@@ -1144,7 +1297,29 @@ onBeforeUnmount(() => {
         <h2 class="desktop-title">
           {{ search ? 'Suchergebnisse' : currentFolder ? folderLabel(currentFolder) : 'Ordner' }}
         </h2>
+        <button
+          v-if="accountId"
+          type="button"
+          class="refresh"
+          :class="{ spinning: syncBusy }"
+          :disabled="isOffline || syncBusy"
+          :aria-busy="syncBusy"
+          :aria-label="syncBusy ? 'Wird aktualisiert' : 'Aktualisieren'"
+          :title="isOffline ? 'Offline – Aktualisieren nicht möglich' : 'Aktualisieren'"
+          @click="syncActiveAccount"
+        >
+          <span aria-hidden="true">&#8635;</span>
+        </button>
       </header>
+      <div
+        v-if="pullDistance > 0"
+        class="pull-indicator"
+        :style="{ height: `${pullDistance}px` }"
+        aria-hidden="true"
+      >
+        {{ pullArmed ? 'Loslassen zum Aktualisieren' : 'Ziehen zum Aktualisieren' }}
+      </div>
+      <p v-if="syncNotice" class="hint sync-notice" role="status">{{ syncNotice }}</p>
 
       <form v-if="accountId" class="search" role="search" @submit.prevent="runSearch">
         <div class="search-row">
@@ -1427,6 +1602,7 @@ onBeforeUnmount(() => {
       :identities="compose.identities"
       :draft="compose.draft"
       :saved="compose.saved"
+      :forward-of="compose.forwardOf"
       @queued="onQueued"
       @drafts-changed="draftList?.reload()"
       @close="compose = null"
@@ -1610,6 +1786,9 @@ button.primary {
 .list-header {
   position: sticky;
   top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #e4e9ee;
   background: #fff;
@@ -1622,6 +1801,61 @@ h2 {
 
 .mobile-folders {
   display: none;
+}
+
+.list-header h2,
+.list-header .mobile-folders {
+  flex: 1;
+  min-width: 0;
+}
+
+.refresh {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid #b8c2cc;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #1f2d3d;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.refresh.spinning span {
+  display: inline-block;
+  animation: refresh-spin 1s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh.spinning span {
+    animation: none;
+  }
+}
+
+.sync-notice {
+  margin: 0.5rem 1rem;
+}
+
+.pull-indicator {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  color: #52606d;
+  font-size: 0.85rem;
 }
 
 .messages {

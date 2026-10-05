@@ -1,0 +1,25 @@
+name: Funktion vorschlagen
+description: Idee oder Verbesserungsvorschlag.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bitte vorher [ROADMAP.md](https://github.com/mszkb/fastmail-alternative/blob/main/ROADMAP.md) und den Abschnitt „Bewusst nicht im MVP" in der [Vision](https://github.com/mszkb/fastmail-alternative/blob/main/docs/product/vision.md) prüfen. Keine Mailinhalte, Adressen oder Zugangsdaten posten.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Anwendungsfall
+      description: Was möchtest du erreichen, und was hindert dich heute daran?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Vorschlag
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativen / Workarounds

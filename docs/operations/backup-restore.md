@@ -1,6 +1,6 @@
 # Backup & Restore
 
-Ein Backup ist **eine verschlüsselte Datei** (`fma-backup-JJJJMMTT-HHMMSS.fmabk`) mit allem, was eine Instanz ausmacht: Datenbank (`pg_dump`) und der komplette Inhalt des Volumes `mail-data` (verschlüsselte Rohmails und Uploads). Wiederhergestellt wird es in eine **leere** Instanz; danach laufen fehlende Migrationen automatisch.
+Ein Backup ist **eine verschlüsselte Datei** (`fma-backup-JJJJMMTT-HHMMSS.fmabk`) mit allem, was eine Instanz ausmacht: Datenbank (`pg_dump`) und der komplette Inhalt des Volumes `mail-data` (verschlüsselte Rohmails). Hochgeladene Anhänge liegen verschlüsselt in der Datenbank (`attachment_upload.content_enc`) und sind damit über den Dump enthalten. Wiederhergestellt wird es in eine **leere** Instanz; danach laufen fehlende Migrationen automatisch.
 
 > **Der `MASTER_KEY` ist nie im Backup.** Ohne genau diesen Key ist ein Backup wertlos – sowohl die Backup-Datei als auch die Data Keys darin sind damit verschlüsselt. Die `.env` (bzw. mindestens `MASTER_KEY` und `MASTER_KEY_ID`) **getrennt** von den Backups aufbewahren, z. B. im Passwortmanager oder ausgedruckt im Safe. Wer Backup und Key zusammen hat, kann alles lesen.
 
@@ -40,7 +40,7 @@ Im Projektverzeichnis (auf dem Pi `~/fastmail-alternative`):
 ./scripts/backup.sh
 ```
 
-Das Skript stoppt kurz den Worker (damit Datenbank und `mail-data` zusammenpassen; die API läuft weiter), schreibt das Backup nach `./backups/`, startet den Worker wieder und löscht Backups, die älter als `BACKUP_KEEP_DAYS` (Standard 14) Tage sind. Händisch entspricht das:
+Das Skript stoppt kurz den Worker (damit Datenbank und `mail-data` zusammenpassen; die API läuft weiter), schreibt das Backup nach `./backups/`, startet den Worker wieder und löscht Backups, die älter als `BACKUP_KEEP_DAYS` (Standard 14) Tage sind – außer dem in `upgrade-previous` als Rollback-Punkt festgehaltenen Backup ([Upgrade](upgrade.md#rollback)). Ein anderes Zielverzeichnis lässt sich mit `BACKUP_DIR` setzen (Standard `./backups`); beide Variablen kommen aus der Shell-Umgebung, nicht aus der `.env` (z. B. `BACKUP_KEEP_DAYS=30 ./scripts/backup.sh`). Händisch entspricht das:
 
 ```sh
 docker compose stop worker

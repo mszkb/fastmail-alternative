@@ -9,9 +9,11 @@
  * - Payload: ONLY { type, installationId, badge } (@fma/shared
  *   buildPushPayload; CLAUDE.md rule 4). The badge is computed when the job
  *   runs: unread INBOX messages over all accounts of the user.
- * - Sent with web-push (VAPID, aes128gcm); the request goes out via fetch
- *   with a timeout, without redirects, and only to public hosts (SSRF guard
- *   again at send time).
+ * - Sent with web-push (VAPID, aes128gcm); the request goes out via
+ *   node:https with a timeout, without redirects, and only to public hosts.
+ *   The host is resolved exactly once inside the socket's lookup: every
+ *   address is checked and the connection goes to a checked address (no
+ *   second resolution, so no DNS rebinding); TLS still verifies the hostname.
  * - 404/410 from the push service: the subscription is gone and deleted.
  *   Other failures: failure_count++; after PUSH_MAX_FAILURES failures in a
  *   row the subscription is disabled (re-subscribing in the app enables it
@@ -21,11 +23,15 @@
  *   a short hash.
  */
 import { createHash } from 'node:crypto'
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
+import { isIP, type LookupFunction } from 'node:net'
 import webpush from 'web-push'
 import type { Pool } from '@fma/db'
 import { decryptField, loadMasterKey, pushKeysAad, unwrapDataKey } from '@fma/crypto'
 import { buildPushPayload } from '@fma/shared'
-import { assertPublicHost } from '@fma/shared/ssrf'
+import { PrivateHostError, isPublicIp, type Lookup } from '@fma/shared/ssrf'
 import { log } from '../log'
 import { mailTestMode } from '../ports'
 
@@ -205,18 +211,89 @@ export async function runPushNotify(
   return outcome
 }
 
+/**
+ * Socket lookup that resolves the host once, rejects it unless every
+ * address is public and hands only the first checked address to the
+ * connection. Used instead of "check, then let the HTTP client resolve
+ * again" (DNS rebinding, ASVS N1).
+ */
+export function checkedLookup(resolve: Lookup = dnsLookup): LookupFunction {
+  return (hostname, options, callback) => {
+    const done = callback as (
+      err: Error | null,
+      address: string | { address: string; family: number }[],
+      family?: number,
+    ) => void
+    resolve(hostname, { all: true }).then(
+      (addresses) => {
+        const first = addresses[0]
+        if (!first || addresses.some(({ address }) => !isPublicIp(address))) {
+          done(new PrivateHostError(hostname), '', 0)
+        } else if (options.all) {
+          done(null, [{ address: first.address, family: first.family }])
+        } else {
+          done(null, first.address, first.family)
+        }
+      },
+      (err: unknown) => done(err instanceof Error ? err : new Error('lookup failed'), '', 0),
+    )
+  }
+}
+
+export interface PushRequest {
+  method: string
+  headers: Record<string, string>
+  body?: Buffer
+}
+
+/**
+ * POSTs to a push endpoint and returns the HTTP status (no redirects, the
+ * response body is discarded). Without `insecure`, only https to a public
+ * host is allowed and the connection is pinned via checkedLookup.
+ */
+export function sendPushRequest(
+  endpoint: string,
+  req: PushRequest,
+  options: { insecure?: boolean; resolve?: Lookup; timeoutMs?: number } = {},
+): Promise<number> {
+  const url = new URL(endpoint)
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  if (!options.insecure) {
+    if (url.protocol !== 'https:') return Promise.reject(new Error('push endpoint is not https'))
+    // Literal IPs bypass lookup entirely, so they are checked here.
+    if (isIP(host) && !isPublicIp(host)) return Promise.reject(new PrivateHostError(host))
+  } else if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    return Promise.reject(new Error('unsupported push endpoint protocol'))
+  }
+  const send = url.protocol === 'https:' ? httpsRequest : httpRequest
+  return new Promise<number>((resolvePromise, reject) => {
+    const outgoing = send(
+      url,
+      {
+        method: req.method,
+        headers: req.headers,
+        // insecure (dev/test): plain resolution, loopback fakes allowed.
+        lookup: options.insecure ? undefined : checkedLookup(options.resolve),
+        timeout: options.timeoutMs ?? PUSH_REQUEST_TIMEOUT_MS,
+      },
+      (response) => {
+        // The body may echo the endpoint; it is not needed.
+        response.resume()
+        resolvePromise(response.statusCode ?? 0)
+      },
+    )
+    outgoing.on('timeout', () => outgoing.destroy(new Error('push request timed out')))
+    outgoing.on('error', reject)
+    outgoing.end(req.body)
+  })
+}
+
 /** Sends one encrypted push message; returns the push service's HTTP status. */
 async function deliver(
   subscription: webpush.PushSubscription,
   body: string,
   vapid: VapidConfig,
 ): Promise<number> {
-  const url = new URL(subscription.endpoint)
-  // Test mode: local fake push service on http/loopback (like the mail hosts).
-  if (!mailTestMode()) {
-    if (url.protocol !== 'https:') throw new Error('push endpoint is not https')
-    await assertPublicHost(url.hostname.replace(/^\[|\]$/g, ''))
-  }
   const details = webpush.generateRequestDetails(subscription, body, {
     TTL: PUSH_TTL_SECONDS,
     urgency: 'normal',
@@ -224,17 +301,12 @@ async function deliver(
   })
   const headers: Record<string, string> = {}
   for (const [name, value] of Object.entries(details.headers)) {
-    // fetch computes the length itself.
-    if (name.toLowerCase() !== 'content-length') headers[name] = String(value)
+    headers[name] = String(value)
   }
-  const response = await fetch(details.endpoint, {
-    method: details.method,
-    headers,
-    body: details.body ? new Uint8Array(details.body) : undefined,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
-  })
-  // The body may echo the endpoint; it is not needed.
-  await response.body?.cancel().catch(() => {})
-  return response.status
+  // MAIL_INSECURE_TRANSPORT=1 (dev/test): local fake push service on http/loopback.
+  return sendPushRequest(
+    details.endpoint,
+    { method: details.method, headers, body: details.body ?? undefined },
+    { insecure: mailTestMode() },
+  )
 }

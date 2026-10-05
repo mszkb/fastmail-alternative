@@ -872,5 +872,133 @@ describe.skipIf(!databaseUrl || !greenmailHost)('message_sync job', () => {
       [accountId, `<older-%-${folderPath}@example.com>`],
     )
     expect(dupes[0].n).toBe(7)
+
+    // Keep the shared GreenMail mailbox small for other test files.
+    await withInbox((client) => client.mailboxDelete(folderPath).catch(() => undefined))
+  })
+
+  it('honours the account sync limit (SEARCH SINCE); load older ignores it', async () => {
+    const day = 24 * 60 * 60 * 1000
+    const ago = (days: number): Date => new Date(Date.now() - days * day)
+    const newProbe = (): ImapFlow =>
+      new ImapFlow({
+        host: greenmailHost!,
+        port: Number(process.env.GREENMAIL_IMAP_PORT),
+        secure: false,
+        auth: { user: greenmailUser, pass: greenmailPassword },
+        logger: false,
+        tls: { rejectUnauthorized: false },
+        doSTARTTLS: false,
+      })
+    let probe = newProbe()
+    const append = async (folderPath: string, name: string, received: Date): Promise<void> => {
+      await probe.append(
+        folderPath,
+        `From: a@example.com\r\nTo: b@example.com\r\nSubject: ${name}\r\n` +
+          `Message-ID: <${name}-${folderPath}@example.com>\r\n\r\nBody ${name}\r\n`,
+        [],
+        received,
+      )
+    }
+    // Old and recent messages interleaved by UID (internal date set on APPEND).
+    const initial: Array<[string, number]> = [
+      ['old-400', 400],
+      ['new-10', 10],
+      ['old-100', 100],
+      ['new-1', 1],
+    ]
+    const limited = `Since-${Date.now()}`
+    const unlimited = `NoSince-${Date.now()}`
+    await probe.connect()
+    try {
+      for (const folderPath of [limited, unlimited]) {
+        await probe.mailboxCreate(folderPath)
+        for (const [name, days] of initial) await append(folderPath, name, ago(days))
+      }
+    } finally {
+      await probe.logout().catch(() => probe.close())
+    }
+    await runFolderSync(pool, accountId)
+    const folderIdOf = async (folderPath: string): Promise<string> => {
+      const { rows } = await pool.query<{ id: string }>(
+        'SELECT id FROM folder WHERE account_id = $1 AND path = $2',
+        [accountId, folderPath],
+      )
+      return rows[0]!.id
+    }
+    const ctx = await loadAccountContext(pool, accountId, process.env.MASTER_KEY!)
+    const subjects = async (folderId: string): Promise<string[]> => {
+      const { rows } = await pool.query<{ id: string; subject_enc: Buffer }>(
+        `SELECT m.id, m.subject_enc FROM message m
+         JOIN message_location ml ON ml.message_id = m.id WHERE ml.folder_id = $1`,
+        [folderId],
+      )
+      return rows
+        .map((row) =>
+          decryptField(ctx.dek, row.subject_enc.toString('utf8'), `message.subject:${row.id}`),
+        )
+        .sort()
+    }
+    const limitedId = await folderIdOf(limited)
+    const unlimitedId = await folderIdOf(unlimited)
+
+    try {
+      // Without a limit: previous behaviour (newest window, regardless of date).
+      await runMessageSync(pool, accountId, unlimitedId, undefined, { limit: 10 })
+      expect(await subjects(unlimitedId)).toEqual(['new-1', 'new-10', 'old-100', 'old-400'])
+
+      // Limit 30 days back: only the recent ones, initial sync.
+      await pool.query(
+        `UPDATE mail_account SET sync_since = (now() - interval '30 days')::date WHERE id = $1`,
+        [accountId],
+      )
+      await runMessageSync(pool, accountId, limitedId, undefined, { limit: 10 })
+      expect(await subjects(limitedId)).toEqual(['new-1', 'new-10'])
+
+      // Incremental: a new old-dated message is skipped, a recent one fetched.
+      probe = newProbe()
+      await probe.connect()
+      try {
+        await append(limited, 'old-200', ago(200))
+        await append(limited, 'new-0', ago(0))
+      } finally {
+        await probe.logout().catch(() => probe.close())
+      }
+      await runMessageSync(pool, accountId, limitedId, undefined, { limit: 10 })
+      expect(await subjects(limitedId)).toEqual(['new-0', 'new-1', 'new-10'])
+
+      // Load older ignores the limit, including skipped UIDs between synced ones.
+      await runMessageSync(pool, accountId, limitedId, undefined, { limit: 10, loadOlder: true })
+      expect(await subjects(limitedId)).toEqual([
+        'new-0',
+        'new-1',
+        'new-10',
+        'old-100',
+        'old-200',
+        'old-400',
+      ])
+
+      // Shortening the limit later keeps already stored older messages.
+      await pool.query(
+        `UPDATE mail_account SET sync_since = (now() - interval '5 days')::date WHERE id = $1`,
+        [accountId],
+      )
+      await runMessageSync(pool, accountId, limitedId, undefined, { limit: 10 })
+      expect(await subjects(limitedId)).toHaveLength(6)
+      await runMessageSync(pool, accountId, unlimitedId, undefined, { limit: 10 })
+      expect(await subjects(unlimitedId)).toHaveLength(4)
+    } finally {
+      await pool.query('UPDATE mail_account SET sync_since = NULL WHERE id = $1', [accountId])
+      // Keep the shared GreenMail mailbox small for other test files.
+      probe = newProbe()
+      await probe.connect()
+      try {
+        for (const folderPath of [limited, unlimited]) {
+          await probe.mailboxDelete(folderPath).catch(() => undefined)
+        }
+      } finally {
+        await probe.logout().catch(() => probe.close())
+      }
+    }
   })
 })

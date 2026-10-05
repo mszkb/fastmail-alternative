@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createCipheriv, randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   decryptBytes,
@@ -86,6 +86,20 @@ describe('field encryption', () => {
   it('fails on tampered ciphertext', () => {
     const envelope = encryptField(dek, 'secret', aad)
     expect(() => decryptField(dek, envelope.slice(0, -3) + 'AAA', aad)).toThrow()
+  })
+  // Audit N6: GCM accepts 4..16-byte tags unless the length is pinned. A
+  // forged envelope with a 4-byte tag (2^32 guesses) must never decrypt.
+  it('rejects envelopes with a shortened authentication tag', () => {
+    const nonce = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', dek, nonce, { authTagLength: 4 })
+    cipher.setAAD(Buffer.from(aad, 'utf8'))
+    const ct = Buffer.concat([cipher.update(Buffer.alloc(0)), cipher.final(), cipher.getAuthTag()])
+    const forged = 'fma.f1.' + Buffer.concat([nonce, ct]).toString('base64')
+    expect(() => decryptField(dek, forged, aad)).toThrow()
+  })
+
+  it('still decrypts empty values with the full 16-byte tag', () => {
+    expect(decryptField(dek, encryptField(dek, '', aad), aad)).toBe('')
   })
 })
 

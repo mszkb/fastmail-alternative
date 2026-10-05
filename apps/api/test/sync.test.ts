@@ -13,6 +13,9 @@ import type { AccountSummary, SyncAllResponse } from '@fma/shared'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
 const databaseUrl = process.env.DATABASE_URL
@@ -76,7 +79,11 @@ describe.skipIf(!databaseUrl)('sync requests', () => {
       method: 'POST',
       url: '/api/auth/setup',
       headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ email: 'sync@example.com', password: 'correct horse battery' }),
+      payload: JSON.stringify({
+        setupCode: SETUP_CODE,
+        email: 'sync@example.com',
+        password: 'correct horse battery',
+      }),
     })
     authToken = setup.cookies.find((c) => c.name === 'fma_session')!.value
     const { rows } = await pool.query<{ id: string }>('SELECT id FROM "user"')

@@ -8,9 +8,8 @@
  * the api (connection test) and the worker (SMTP send, roadmap 2.7); import
  * via `@fma/shared/ssrf` (node-only, not part of the browser-safe index).
  *
- * Test/CI note: integration tests run against a local GreenMail container,
- * which is only reachable via loopback/private addresses. Set
- * MAIL_ALLOW_PRIVATE_HOSTS=1 there (never in production).
+ * Exception: MAIL_ALLOW_PRIVATE_HOSTS=1 allows private mail hosts (own
+ * server in the LAN, local GreenMail in tests); see mail-transport.ts.
  */
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
@@ -22,12 +21,12 @@ export class PrivateHostError extends Error {
   }
 }
 
-interface ResolvedAddress {
+export interface ResolvedAddress {
   address: string
   family: number
 }
 
-type Lookup = (
+export type Lookup = (
   hostname: string,
   options: { all: true },
 ) => Promise<{ address: string; family: number }[]>
@@ -84,42 +83,52 @@ function isPublicIpv4(address: string): boolean {
   return true
 }
 
+/** IPv4 address embedded in the last 32 bits of an expanded IPv6 address. */
+function embeddedIpv4(high: number, low: number): string {
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`
+}
+
+/**
+ * Works on the fully expanded eight groups, so every spelling of the same
+ * address (`::ffff:127.0.0.1`, `0:0:0:0:0:ffff:7f00:1`, `0::ffff:...`,
+ * upper case) is classified identically. Ranges that embed an IPv4 address
+ * are checked against the IPv4 rules.
+ */
 function isPublicIpv6(address: string): boolean {
-  const normalized = address.toLowerCase()
-  if (normalized === '::' || normalized === '::1') return false // unspecified/loopback
-  if (
-    normalized.startsWith('fe8') ||
-    normalized.startsWith('fe9') ||
-    normalized.startsWith('fea') ||
-    normalized.startsWith('feb')
-  ) {
-    return false // link-local fe80::/10
+  // Zone IDs (fe80::1%eth0) only make sense for link-local targets.
+  if (address.includes('%')) return false
+  const groups = expandIpv6(address.toLowerCase())
+  if (!groups) return false
+  const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = groups
+  const ipv4 = embeddedIpv4(g6, g7)
+
+  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0) {
+    // ::/96 IPv4-compatible (incl. :: and ::1, which embed 0.0.0.0/0.0.0.1).
+    if (g4 === 0 && g5 === 0) return isPublicIpv4(ipv4)
+    // ::ffff:0:0/96 IPv4-mapped.
+    if (g4 === 0 && g5 === 0xffff) return isPublicIpv4(ipv4)
+    // ::ffff:0:0:0/96 IPv4-translated (SIIT).
+    if (g4 === 0xffff && g5 === 0) return isPublicIpv4(ipv4)
+    return false // rest of ::/64 is reserved
   }
-  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return false // unique local fc00::/7
-  if (normalized.startsWith('ff')) return false // multicast
-  if (normalized.startsWith('::ffff:')) {
-    // IPv4-mapped: validate the embedded IPv4 part.
-    return isPublicIpv4(normalized.slice('::ffff:'.length))
+  if (g0 === 0x64 && g1 === 0xff9b) {
+    // NAT64 well-known prefix 64:ff9b::/96 embeds the IPv4 target;
+    // 64:ff9b:1::/48 is the local-use NAT64 prefix (RFC 8215).
+    if (g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) return isPublicIpv4(ipv4)
+    return false
   }
-  if (normalized.startsWith('64:ff9b:')) return false // NAT64 (embeds IPv4)
-  if (normalized.startsWith('2001:db8:')) return false // documentation
-  if (normalized.startsWith('2002:')) {
-    // 6to4 (2002:AABB:CCDD::/48): groups 2 and 3 embed the IPv4 address
-    // AA.BB.CC.DD - validate it against the IPv4 rules.
-    const groups = expandIpv6(normalized)
-    if (!groups) return false
-    const [, high = 0, low = 0] = groups
-    return isPublicIpv4(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`)
+  if (g0 === 0x2002) {
+    // 6to4 (2002:AABB:CCDD::/48): groups 1 and 2 embed AA.BB.CC.DD.
+    return isPublicIpv4(embeddedIpv4(g1, g2))
   }
-  if (
-    normalized.startsWith('fec') ||
-    normalized.startsWith('fed') ||
-    normalized.startsWith('fee') ||
-    normalized.startsWith('fef')
-  ) {
-    return false // deprecated site-local fec0::/10
-  }
-  if (normalized.startsWith('100:')) return false // discard-only 100::/64
+  if (g0 === 0x2001 && g1 === 0) return false // Teredo 2001::/32 (obfuscated IPv4)
+  if (g0 === 0x2001 && g1 === 0xdb8) return false // documentation 2001:db8::/32
+  if (g0 === 0x3fff && (g1 & 0xf000) === 0) return false // documentation 3fff::/20
+  if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return false // discard-only 100::/64
+  if ((g0 & 0xffc0) === 0xfe80) return false // link-local fe80::/10
+  if ((g0 & 0xffc0) === 0xfec0) return false // deprecated site-local fec0::/10
+  if ((g0 & 0xfe00) === 0xfc00) return false // unique local fc00::/7
+  if ((g0 & 0xff00) === 0xff00) return false // multicast ff00::/8
   return true
 }
 

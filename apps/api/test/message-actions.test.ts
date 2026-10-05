@@ -19,6 +19,9 @@ import type { FolderSummary, MessageActionJobPayload, MessageListItem } from '@f
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
 const databaseUrl = process.env.DATABASE_URL
@@ -133,7 +136,11 @@ describe.skipIf(!databaseUrl)('message actions api', () => {
     const setup = await app.inject({
       method: 'POST',
       url: '/api/auth/setup',
-      payload: { email: 'actions@example.com', password: 'correct horse battery' },
+      payload: {
+        setupCode: SETUP_CODE,
+        email: 'actions@example.com',
+        password: 'correct horse battery',
+      },
     })
     authToken = setup.cookies.find((c) => c.name === 'fma_session')!.value
     const { rows } = await pool.query<{ id: string }>('SELECT id FROM "user"')

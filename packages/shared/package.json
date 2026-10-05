@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./ssrf": "./src/ssrf.ts"
+    "./ssrf": "./src/ssrf.ts",
+    "./mail-transport": "./src/mail-transport.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

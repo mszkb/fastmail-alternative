@@ -22,7 +22,7 @@
 - **Absoluter Ablauf:** 30 Tage nach dem Login, Aktivität verlängert nicht.
 - **Leerlauf-Ablauf:** 14 Tage ohne Aktivität. Gemessen an `session.rotated_at` (jede aktive Session rotiert mindestens alle 24 h), also ohne Schreibzugriff pro Anfrage; Auflösung ein Tag.
 - **Logout** löscht die Session serverseitig und setzt das Cookie mit denselben Attributen zurück; Geräte-Widerruf löscht alle Sessions des Geräts.
-- **Passwortwechsel** gibt es noch nicht. Sobald er kommt, muss er alle anderen Sessions des Benutzers löschen.
+- **Passwortwechsel** (`POST /api/auth/password`, umgesetzt): verlangt eine gültige Session und das aktuelle Passwort (Argon2id-Prüfung wie beim Login; Fehlversuche zählen für denselben IP-Lockout wie der Login, zusätzlich Rate-Limit `auth`; falsches Passwort → `403` ohne Details). Das neue Passwort muss dieselben Mindestanforderungen wie bei der Ersteinrichtung erfüllen (10–200 Zeichen, sonst `400`). In **einer Transaktion** werden der neue Hash gespeichert, alle anderen Geräte des Benutzers widerrufen, deren Sessions und Push-Subscriptions gelöscht und das Token der aktuellen Session rotiert (neues Cookie). Das aktuelle Gerät behält seine Push-Subscriptions. Passwörter werden nie geloggt (`req.body` ist in den Logs redigiert); CSRF-Schutz greift global (siehe unten).
 
 ## CSRF
 
@@ -48,7 +48,7 @@ In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-li
 | Regel          | Routen                                                                          | Limit/min |
 | -------------- | ------------------------------------------------------------------------------- | --------- |
 | `global`       | alle Anfragen                                                                   | 600       |
-| `auth`         | `POST /api/auth/login`, `POST /api/auth/setup`                                  | 10        |
+| `auth`         | `POST /api/auth/login`, `POST /api/auth/setup`, `POST /api/auth/password`       | 10        |
 | `account-test` | `POST /api/accounts`, `PATCH /api/accounts/:id` (Verbindungstest beim Provider) | 10        |
 | `send`         | `POST /api/outbox`, `POST /api/outbox/:id/retry`                                | 60        |
 | `upload`       | `POST /api/accounts/:id/uploads`                                                | 60        |
@@ -85,6 +85,17 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 | Datenabfluss über Logs         | Zentrale Redaction, Tests dafür; Request-URLs ohne Query-String (Suchbegriffe, ADR-0006)                                                                                                                                                                                                                                                                                                 |
 | Datenabfluss über Push         | Inhaltsfreie Payloads (siehe [push.md](push.md))                                                                                                                                                                                                                                                                                                                                         |
 
+## Verbindungen zu Mailanbietern (IMAP/SMTP)
+
+Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und Suche in der api, alle Worker-Jobs und IMAP IDLE – läuft über einen zentralen Helfer (`packages/shared/src/mail-transport.ts`):
+
+- **TLS-Pflicht:** Ports 993 (IMAP) und 465 (SMTP) nutzen implizites TLS. Auf allen anderen Ports (143, 587, 25 …) ist **STARTTLS Pflicht** (ImapFlow `doSTARTTLS: true`, nodemailer `requireTLS: true`). Bietet der Server kein STARTTLS an – oder entfernt ein Angreifer im Netz die Fähigkeit (Downgrade) –, bricht die Verbindung **vor** `LOGIN`/`AUTH` ab; das Passwort geht nie im Klartext über die Leitung. Fehlercode `TLS_REQUIRED` mit deutscher Meldung, im Log nur Fehlername/-code.
+- **Zertifikatsprüfung** immer gegen den konfigurierten Hostnamen (SNI/`servername`).
+- **SSRF-Schutz:** Der Hostname wird einmal aufgelöst, **alle** Adressen müssen öffentlich sein (`assertPublicHost`). IPv6-Literale werden vor der Prüfung vollständig normalisiert (alle Schreibweisen wie `0:0:0:0:0:ffff:127.0.0.1`, `0::ffff:a00:1`, Großbuchstaben, Zone-IDs); Bereiche mit eingebetteter IPv4 (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible `::/96`, SIIT `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) werden über die eingebettete IPv4-Adresse geprüft; Teredo, lokales NAT64 (`64:ff9b:1::/48`) und Dokumentationsbereiche sind gesperrt.
+- **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. Push-Endpoints: Der Socket-`lookup` des Push-Requests löst den Host genau einmal auf, prüft jede Adresse und verbindet nur mit einer geprüften; die Zertifikatsprüfung läuft weiter gegen den Hostnamen.
+- **Mailserver im LAN:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (api + worker, per `.env`) erlaubt private/interne Ziele, z. B. einen eigenen Mailserver im Heimnetz, und schaltet damit den SSRF-Schutz für Mail-Hosts ab. STARTTLS-Pflicht und Zertifikatsprüfung bleiben **an**; der Server braucht ein gültiges Zertifikat für den konfigurierten Hostnamen. Push-Endpoints sind davon nicht betroffen (immer https auf öffentlichem Host).
+- **Nur Entwicklung/Tests:** `MAIL_INSECURE_TRANSPORT=1` erlaubt Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Fakes zu (GreenMail auf Plain-Ports, selbstsigniert). Standard aus, nicht in Compose/`.env.example`; die Vitest-Configs und die CI setzen ihn. Niemals produktiv setzen. Beide Schalter sind unabhängig (Audit N7).
+
 ## HTML-Mails
 
 Umgesetzt in Roadmap 2.9. Drei unabhängige Schichten, jede für sich soll Script-Ausführung und ungewolltes Nachladen verhindern:
@@ -114,6 +125,15 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 - Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL in CI (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
 - Restore auf einer frischen Installation funktioniert mit dokumentierten Schritten: [Backup & Restore](../operations/backup-restore.md).
 
+## Ersteinrichtung
+
+Umgesetzt im ASVS-Review (#56, Befund M1). `POST /api/auth/setup` ist nur erlaubt, solange kein Benutzer existiert, und verlangt einen **Setup-Code** (`apps/api/src/auth/setup-code.ts`): `SETUP_TOKEN` aus der Umgebung oder – Standard – ein zufälliger Code (6×4 Base32, 120 Bit), den die api einmalig mit `FIRST-RUN SETUP CODE` ins Log schreibt. Vergleich in konstanter Zeit, nach erfolgreichem Setup wird der Code verworfen; das Rate-Limit für `setup` greift zusätzlich. Prüfung „kein Benutzer" und INSERT laufen in einer Transaktion unter `pg_advisory_xact_lock`, parallele Anfragen erzeugen so höchstens einen Benutzer.
+
+## Security Review (ASVS L2)
+
+Der vollständige Audit nach OWASP ASVS 4.0.3 Level 2 mit Status jedes Befunds und den **bewusst akzeptierten Abweichungen** (keine MFA, Session-Dauer, Lockout pro IP, kein `__Host-`-Cookie, Images per Tag) steht in [security/asvs-l2.md](../security/asvs-l2.md).
+
 ## Offene Punkte
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
+- Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy, Fastify-JSON-Schemas): siehe [asvs-l2.md](../security/asvs-l2.md).

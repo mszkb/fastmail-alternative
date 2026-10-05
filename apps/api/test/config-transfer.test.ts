@@ -15,6 +15,9 @@ import type { AccountListResponse, ConfigExport, IdentityListResponse } from '@f
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 process.env.MASTER_KEY ??= randomBytes(32).toString('base64')
 
 const databaseUrl = process.env.DATABASE_URL
@@ -46,7 +49,11 @@ describe.skipIf(!databaseUrl || !greenmailHost)('configuration export/import', (
     const setup = await app.inject({
       method: 'POST',
       url: '/api/auth/setup',
-      payload: { email: 'export@example.com', password: 'correct horse battery' },
+      payload: {
+        setupCode: SETUP_CODE,
+        email: 'export@example.com',
+        password: 'correct horse battery',
+      },
     })
     authToken = setup.cookies.find((c) => c.name === 'fma_session')!.value
 

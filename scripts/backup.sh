@@ -23,5 +23,8 @@ trap 'docker compose start worker' EXIT
 docker compose run --rm --user root -v "$BACKUP_DIR:/backups" worker \
   node dist/backup.js create /backups
 
-find "$BACKUP_DIR" -maxdepth 1 -name 'fma-backup-*.fmabk' -mtime "+$KEEP_DAYS" -delete
+# Never delete the pre-upgrade backup recorded for a rollback (upgrade.sh).
+RECORDED="$(sed -n 's/^PREVIOUS_BACKUP=//p' "$BACKUP_DIR/upgrade-previous" 2>/dev/null || true)"
+find "$BACKUP_DIR" -maxdepth 1 -name 'fma-backup-*.fmabk' ! -name "$(basename "${RECORDED:-none}")" \
+  -mtime "+$KEEP_DAYS" -delete
 find "$BACKUP_DIR" -maxdepth 1 -name 'fma-backup-*.fmabk.partial' -delete

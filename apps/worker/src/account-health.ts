@@ -13,6 +13,12 @@
  *   CIRCUIT_OPEN_AFTER consecutive failures the status turns 'unreachable'
  *   for the status display. Failures of jobs that were already running
  *   during an open window do not count twice.
+ * - rate_limited (roadmap 3.5): provider throttling ([LIMIT], [THROTTLED],
+ *   "too many connections") uses the same backoff as 'unreachable' instead
+ *   of failing in a loop. Response codes and "too many connections" are
+ *   checked before auth (some providers reject the login itself when too
+ *   many connections are open); vague phrases ("try again later") only
+ *   after it, so a failed login is never retried as throttling.
  * - A successful sync (folder_sync/message_sync, which always connect)
  *   closes the circuit: status 'ok', counters reset, last_sync_at.
  *
@@ -20,6 +26,7 @@
  */
 import type { Pool } from '@fma/db'
 import { ACCOUNT_ERROR_MESSAGES, type AccountErrorCode } from '@fma/shared'
+import { isStartTlsUnavailable } from '@fma/shared/mail-transport'
 
 export type AccountErrorKind = 'auth' | 'unreachable'
 
@@ -62,6 +69,39 @@ const NETWORK_CODES: Record<string, AccountErrorCode> = {
   PRIVATE_HOST_BLOCKED: 'BLOCKED_HOST',
 }
 
+/** IMAP response codes (RFC 5530 and provider extensions) for throttling. */
+const THROTTLE_RESPONSE_CODES = new Set(['LIMIT', 'THROTTLED'])
+/**
+ * Throttling phrases in provider responses. The text is only matched here,
+ * never logged or stored (it may quote content). Unambiguous phrases are
+ * checked before the auth check (some providers reject the login itself
+ * when too many connections are open); the vague ones only after it, so a
+ * failed login with "try again later" is never retried with a wrong password.
+ */
+const THROTTLE_TEXT_STRONG = /too many (simultaneous |concurrent |open )?(connections|sessions)/i
+const THROTTLE_TEXT_WEAK = /too many logins|rate.?limit|throttl|try again later/i
+
+/**
+ * True for errors that mean "the provider wants us to slow down".
+ * `strongOnly`: only response codes and unambiguous phrases.
+ */
+export function isThrottleError(err: unknown, strongOnly = false): boolean {
+  if (!err || typeof err !== 'object') return false
+  const error = err as { serverResponseCode?: unknown; responseText?: unknown; response?: unknown }
+  if (
+    typeof error.serverResponseCode === 'string' &&
+    THROTTLE_RESPONSE_CODES.has(error.serverResponseCode.toUpperCase())
+  ) {
+    return true
+  }
+  for (const text of [error.responseText, error.response]) {
+    if (typeof text !== 'string') continue
+    if (THROTTLE_TEXT_STRONG.test(text)) return true
+    if (!strongOnly && THROTTLE_TEXT_WEAK.test(text)) return true
+  }
+  return false
+}
+
 /** Codes reported by jobs themselves (e.g. send_message via SendRetryError). */
 const KNOWN_CODES = new Set<string>(Object.keys(ACCOUNT_ERROR_MESSAGES))
 
@@ -82,11 +122,15 @@ export function classifyAccountError(err: unknown): AccountError | null {
     responseCode?: unknown
     message?: unknown
   }
+  if (isThrottleError(err, true)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
   if (error.authenticationFailed === true || error.serverResponseCode === 'AUTHENTICATIONFAILED') {
     return { code: 'AUTH_FAILED', kind: 'auth' }
   }
+  // Before the auth/response checks: no LOGIN/AUTH was sent at all.
+  if (isStartTlsUnavailable(err)) return { code: 'TLS_REQUIRED', kind: 'unreachable' }
   const code = typeof error.code === 'string' ? error.code : ''
   if (code === 'EAUTH' || code === 'ENOAUTH') return { code: 'AUTH_FAILED', kind: 'auth' }
+  if (isThrottleError(err)) return { code: 'RATE_LIMITED', kind: 'unreachable' }
   if (KNOWN_CODES.has(code))
     return { code: code as AccountErrorCode, kind: kindOf(code as AccountErrorCode) }
   const mapped = NETWORK_CODES[code]

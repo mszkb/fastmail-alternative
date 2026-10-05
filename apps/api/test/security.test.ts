@@ -12,6 +12,9 @@ import { pool } from '../src/db'
 import { isPrivateAddress } from '../src/security/client-ip'
 import { RateLimiter } from '../src/security/rate-limit'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 const databaseUrl = process.env.DATABASE_URL
 const EMAIL = 'hardening@example.com'
 const PASSWORD = 'correct horse battery'
@@ -86,7 +89,7 @@ describe.skipIf(!databaseUrl)('hardening (roadmap 6.4)', () => {
       url: '/api/auth/setup',
       remoteAddress: ip(),
       headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+      payload: JSON.stringify({ setupCode: SETUP_CODE, email: EMAIL, password: PASSWORD }),
     })
     expect(setup.statusCode).toBe(200)
   })

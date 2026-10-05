@@ -8,6 +8,10 @@
  * - Each migration runs in its own transaction.
  * - A session-level advisory lock prevents concurrent api instances from
  *   migrating at the same time.
+ * - A database migrated by a newer app version (applied migrations this
+ *   version does not know) is refused instead of running on an unknown
+ *   schema; rollback = old image + restore of the pre-upgrade backup
+ *   (docs/operations/upgrade.md).
  */
 import type pg from 'pg'
 import { migration0001 } from './migrations/0001_users_devices_sessions'
@@ -29,6 +33,8 @@ import { migration0016 } from './migrations/0016_drafts'
 import { migration0017 } from './migrations/0017_attachment_uploads'
 import { migration0018 } from './migrations/0018_cleanup_indexes'
 import { migration0019 } from './migrations/0019_outbox_attachment_count'
+import { migration0020 } from './migrations/0020_draft_attachments'
+import { migration0021 } from './migrations/0021_draft_keep_source'
 
 export interface Migration {
   /** Unique, ordered name, e.g. `0001_users_devices_sessions`. */
@@ -61,13 +67,30 @@ export const migrations: Migration[] = [
   migration0017,
   migration0018,
   migration0019,
+  migration0020,
+  migration0021,
 ]
+
+/** The database schema is newer than this app version. */
+export class SchemaTooNewError extends Error {
+  constructor(readonly unknownMigrations: string[]) {
+    super(
+      `database schema is newer than this app version (unknown migrations: ${unknownMigrations.join(', ')}); ` +
+        'start the newer version or restore the pre-upgrade backup',
+    )
+    this.name = 'SchemaTooNewError'
+  }
+}
 
 /**
  * Runs all pending migrations. Returns the names of newly applied
  * migrations (empty array when everything was already applied).
  */
-export async function runMigrations(pool: pg.Pool): Promise<string[]> {
+export async function runMigrations(
+  pool: pg.Pool,
+  /** Migrations this app version knows; only tests pass a prefix. */
+  list: readonly Migration[] = migrations,
+): Promise<string[]> {
   const client = await pool.connect()
   try {
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_ID])
@@ -81,9 +104,12 @@ export async function runMigrations(pool: pg.Pool): Promise<string[]> {
 
     const { rows } = await client.query('SELECT name FROM schema_migrations')
     const applied = new Set<string>(rows.map((row) => String(row.name)))
+    const known = new Set(list.map((m) => m.name))
+    const unknown = [...applied].filter((name) => !known.has(name)).sort()
+    if (unknown.length > 0) throw new SchemaTooNewError(unknown)
 
     const newlyApplied: string[] = []
-    for (const migration of migrations) {
+    for (const migration of list) {
       if (applied.has(migration.name)) continue
       await client.query('BEGIN')
       try {

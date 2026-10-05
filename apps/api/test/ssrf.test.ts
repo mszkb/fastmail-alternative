@@ -68,9 +68,47 @@ describe('isPublicIp (IPv6)', () => {
     expect(isPublicIp('::ffff:8.8.8.8')).toBe(true)
   })
 
+  // Audit M3: every spelling of an IPv4-embedding address must be normalized.
+  it.each([
+    ['0:0:0:0:0:ffff:127.0.0.1', 'v4-mapped loopback, long form'],
+    ['0::ffff:10.0.0.1', 'v4-mapped private, partly compressed'],
+    ['::0:ffff:a00:1', 'v4-mapped 10.0.0.1, hex'],
+    ['0:0:0:0:0:ffff:ac12:2', 'v4-mapped 172.18.0.2, hex long form'],
+    ['::FFFF:7F00:1', 'v4-mapped loopback, upper case'],
+    ['0000:0000:0000:0000:0000:ffff:c0a8:0101', 'v4-mapped 192.168.1.1, zero padded'],
+    ['::ffff:0:127.0.0.1', 'IPv4-translated loopback'],
+    ['::127.0.0.1', 'IPv4-compatible loopback'],
+    ['::a9fe:a9fe', 'IPv4-compatible 169.254.169.254'],
+    ['0:0:0:0:0:0:0:1', 'loopback, long form'],
+    ['0:0:0:0:0:0:0:0', 'unspecified, long form'],
+    ['64:ff9b::10.0.0.1', 'NAT64 of private'],
+    ['64:ff9b::7f00:1', 'NAT64 of loopback, hex'],
+    ['64:ff9b:1::8.8.8.8', 'local-use NAT64'],
+    ['2002:0a00:0001::', '6to4 of 10.0.0.1, zero padded'],
+    ['2001:0:4136:e378::1', 'Teredo'],
+    ['FE80:0:0:0::1', 'link-local, upper case'],
+    ['fe80::1%eth0', 'link-local with zone id'],
+    ['3fff::1', 'documentation 3fff::/20'],
+    ['0:0:0:0:1::1', 'reserved ::/64 remainder'],
+  ])('blocks %s (%s)', (address) => {
+    expect(isPublicIp(address)).toBe(false)
+  })
+
+  it('allows embedded public IPv4 in every spelling', () => {
+    expect(isPublicIp('0:0:0:0:0:ffff:8.8.8.8')).toBe(true)
+    expect(isPublicIp('::ffff:808:808')).toBe(true)
+    expect(isPublicIp('64:ff9b::8.8.8.8')).toBe(true)
+  })
+
   it('allows 6to4 addresses of public IPv4 addresses', () => {
     expect(isPublicIp('2002:808:808::1')).toBe(true) // 8.8.8.8
     expect(isPublicIp('2002:5db8:d822::1')).toBe(true) // 93.184.216.34
+  })
+
+  it('blocks only 3fff::/20, not its neighbours', () => {
+    expect(isPublicIp('3fff:fff::1')).toBe(false)
+    expect(isPublicIp('3fff:1000::1')).toBe(true)
+    expect(isPublicIp('3ff0::1')).toBe(true)
   })
 })
 

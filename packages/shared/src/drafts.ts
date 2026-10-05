@@ -7,6 +7,7 @@
  * account's IMAP Drafts folder for other mail clients. Recipients are kept
  * exactly as typed (field text), because a draft may be incomplete.
  */
+import type { UploadedAttachment } from './attachments'
 import type { QueuedOperation } from './offline'
 
 /** Limits of `PUT /api/drafts/:id`. */
@@ -44,6 +45,13 @@ export interface SaveDraftRequest extends DraftContent {
   references?: string[]
   baseVersion?: number
   force?: boolean
+  /**
+   * Uploads kept with the draft (roadmap 5.3), the complete list: uploads
+   * bound before but missing here are released again. Missing field =
+   * leave the attachments unchanged. Unknown ids are ignored (the answer
+   * lists the attachments actually kept).
+   */
+  attachmentIds?: string[]
 }
 
 /** A draft as the API returns it (decrypted). */
@@ -61,6 +69,15 @@ export interface Draft extends DraftContent {
    * uploaded and synced), so a list can show the draft only once.
    */
   messageIds: string[]
+  /** Uploads kept with the draft (roadmap 5.3), in upload order. */
+  attachments: UploadedAttachment[]
+  /**
+   * Only in the answer of `POST /api/messages/:id/draft` that created the
+   * draft: attachments of the other client's draft that could not be
+   * copied (limits, raw mail not stored, too many copies running). The
+   * original then stays in the Drafts folder.
+   */
+  attachmentsSkipped?: number
 }
 
 /** `GET /api/accounts/:id/drafts` - newest first. */
@@ -113,6 +130,9 @@ export function overlayPendingDrafts(
       createdAt: existing?.createdAt ?? entry.createdAt,
       updatedAt: entry.createdAt,
       messageIds: existing?.messageIds ?? [],
+      attachments: body.attachmentIds
+        ? (existing?.attachments ?? []).filter((a) => body.attachmentIds!.includes(a.id))
+        : (existing?.attachments ?? []),
     })
   }
   return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

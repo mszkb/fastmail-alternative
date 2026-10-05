@@ -1,6 +1,7 @@
 import { runMigrations } from '@fma/db/migrate'
 import { pool } from './db'
 import { buildApp } from './app'
+import { ensureSetupCode } from './auth/setup-code'
 
 const host = process.env.HOST ?? '0.0.0.0'
 const port = Number.parseInt(process.env.PORT ?? '3001', 10)
@@ -14,6 +15,11 @@ async function main(): Promise<void> {
   if (applied.length > 0) {
     app.log.info({ applied }, 'migrations applied')
   }
+
+  // First-run setup (ASVS review M1): log the setup code once while the
+  // instance has no user yet.
+  const { rows } = await pool.query('SELECT NOT EXISTS (SELECT 1 FROM "user") AS fresh')
+  if (rows[0].fresh === true) ensureSetupCode(app.log)
 
   await app.listen({ host, port })
 

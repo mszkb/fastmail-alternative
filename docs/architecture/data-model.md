@@ -32,6 +32,7 @@ erDiagram
     FOLDER ||--o{ MESSAGE_LOCATION : "enthält"
     MESSAGE ||--|| MESSAGE_BODY : "hat"
     OUTBOX_MESSAGE ||--o{ ATTACHMENT_UPLOAD : "hat"
+    DRAFT ||--o{ ATTACHMENT_UPLOAD : "behält"
     MAIL_ACCOUNT ||--o{ OUTBOX_MESSAGE : "versendet"
     MAIL_ACCOUNT ||--o{ DRAFT : "entwirft"
     MAIL_ACCOUNT ||--o{ JOB : "betrifft"
@@ -87,7 +88,7 @@ erDiagram
         text key_id "Master-Key-Version"
         text credential_kind "password | oauth2"
         text oauth_provider "microsoft | google | null"
-        timestamptz sync_since "Initial-Sync-Grenze, null = alles"
+        timestamptz sync_since "Sync-Grenze (Tag, Internal Date), null = alles"
         bytea credential_enc
         text status "ok | auth_error | unreachable | disabled"
         int error_count
@@ -161,6 +162,7 @@ erDiagram
         uuid id PK
         uuid account_id FK
         uuid outbox_id FK "NULL bis zum Absenden"
+        uuid draft_id FK "Entwurf, bei dem der Upload liegt (Migration 0020)"
         bytea filename_enc
         text content_type
         int size_bytes
@@ -214,14 +216,14 @@ erDiagram
 
 ### Konten
 
-- **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Initial-Sync-Grenze (`sync_since`, pro Konto wählbar), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
+- **`mail_account`**: Verbindungsdaten, Anmeldeart (`credential_kind`, `oauth_provider`, siehe ADR-0011), Sync-Grenze (`sync_since`, pro Konto wählbar: `message_sync` holt initial und laufend nur Mails, die der Provider per `UID SEARCH SINCE <Tag>` nach Internal Date liefert; `null` = alles; „Ältere Mails laden“ ignoriert die Grenze; bereits gespeicherte ältere Mails bleiben beim Setzen erhalten; API/UI als Kalendertag `YYYY-MM-DD`, UI-Auswahl Alle/30/90 Tage/1 Jahr wird beim Speichern in einen Tag umgerechnet), verschlüsselte Zugangsdaten (`credential_enc`), Data Key des Kontos (`wrapped_dek`) und **Konto-Status** mit Backoff-Feldern für Circuit Breaker und Statusanzeige (Roadmap 3.4). `capabilities` wird beim Verbindungstest erfasst und steuert den Sync-Pfad. `sort_order` bestimmt die Reihenfolge im Kontowechsler.
   - Die API darf `credential_enc` nie in Listen- oder Detail-Antworten ausliefern. Dafür ist **ein explizites Spalten-Select** in der Konto-Abfrage Pflicht (kein `SELECT *`).
 - **`identity`**: Absenderadressen pro Konto (Roadmap 3.6), je Konto eindeutig (Adresse ohne Groß-/Kleinschreibung). Beim Anlegen wird eine Identität aus `email_address` erzeugt und als `mail_account.default_identity_id` gesetzt; weitere Aliase legt der Benutzer an. Die Standard-Identität kann nicht gelöscht werden.
 
 ### Ordner
 
 - **`folder`**: ein IMAP-Mailbox-Eintrag. Ordnerrollen (Roadmap 3.3): `special_use_detected` setzt der Sync aus RFC 6154 bzw. der Namensheuristik (deutsche/englische Ordnernamen, nur für Rollen ohne Attribut), `special_use_override` der Benutzer; `special_use` ist die daraus aufgelöste effektive Rolle (Override vor Erkennung, je Konto höchstens ein Ordner pro Rolle), die alle Aktionen verwenden. Container mit LIST-Flag `\Noselect`/`\NonExistent` (z. B. Gmails `[Gmail]`) haben `selectable = false`: Sie bleiben als Elternknoten im Ordnerbaum, werden aber nicht synchronisiert, bekommen keine Rolle und sind kein Verschiebeziel.
-- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). `folder.uidvalidity` ist der Wert, mit dem `message_sync` die Orte zuletzt synchronisiert hat – nur `message_sync` schreibt ihn, `folder_sync` nicht (sonst bliebe eine Änderung unbemerkt). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners mit anderer `uidvalidity` verworfen, die Nachrichten unter ihren neuen UIDs neu geholt (per Message-ID wieder verknüpft) und Nachrichten ohne verbleibenden Ort gelöscht. Inhalte werden immer per UID (`UID FETCH`) geholt, nie per Sequenznummer – ein paralleles EXPUNGE könnte sonst Inhalte vertauschen.
+- Der Sync-Zustand liegt **pro Ordner** (`uidvalidity`, `uidnext`, `highestmodseq`). `folder.uidvalidity` ist der Wert, mit dem `message_sync` die Orte zuletzt synchronisiert hat – nur `message_sync` schreibt ihn, `folder_sync` nicht (sonst bliebe eine Änderung unbemerkt). Ändert sich `uidvalidity`, werden alle `message_location`-Zeilen des Ordners mit anderer `uidvalidity` verworfen, die Nachrichten unter ihren neuen UIDs neu geholt (per Message-ID wieder verknüpft) und Nachrichten ohne verbleibenden Ort gelöscht. Inhalte werden immer per UID (`UID FETCH`) geholt, nie per Sequenznummer – ein paralleles EXPUNGE könnte sonst Inhalte vertauschen. `folder.highestmodseq` (CONDSTORE, RFC 7162) ist der HIGHESTMODSEQ des Ordners zum SELECT-Zeitpunkt des letzten erfolgreichen `message_sync` (`NULL` ohne CONDSTORE oder bei NOMODSEQ; 63-Bit-Wert, im Code als `BigInt`/String, nie als JS-Number). Ist er bei gleicher `uidvalidity` gesetzt, holt der Sync Flags nur per `CHANGEDSINCE` (bei unverändertem HIGHESTMODSEQ gar nicht) und erkennt Expunges über die UID-Liste (`UID SEARCH ALL`); sonst gilt der volle UID+FLAGS-Abgleich.
 
 ### Nachrichten
 
@@ -232,6 +234,8 @@ Das Modell trennt die **logische Nachricht** von ihrem **Ort auf dem IMAP-Server
 - **`message_body`**: Die verschlüsselte Rohmail (RFC 822) liegt als Datei im Volume. Der Plaintext für die Anzeige liegt verschlüsselt in der DB, damit das Öffnen schnell ist. Das HTML wird beim Öffnen von der API aus der Rohmail extrahiert und sanitisiert (kein Cache; Volume read-only in der API eingebunden, siehe [security.md](security.md#html-mails)). Rohmails über `MAX_RAW_MESSAGE_BYTES` (Standard 20 MB) oder leere werden nicht gespeichert; sie bekommen eine `message_body`-Zeile ohne `storage_ref` mit `skip_reason` (`too_large`/`empty`), damit der Sync sie nicht bei jedem Lauf erneut lädt.
 - **Empfangene Anhänge** (Roadmap 5.3): keine eigene Tabelle. Liste (Name, Typ, Größe) und Inhalt leitet die API beim Abruf aus der verschlüsselten Rohmail ab (MIME-Parser gestreamt, Inhalte anderer Teile werden verworfen), wie beim HTML. Dadurch gibt es keine weitere Kopie, keinen Klartext-Dateinamen in der DB und keinen Backfill für bestehende Mails. `message.has_attachments` (Multipart laut `BODYSTRUCTURE`) ist nur ein Hinweis, ob die Liste geladen wird.
 - **`attachment_upload`** (Migration 0017): Anhang zum Versenden, beim Verfassen hochgeladen. Dateiname und Inhalt mit dem Konto-DEK verschlüsselt (AAD `attachment_upload.filename|content:<id>`). Liegt in der DB statt im Volume, weil die API das Volume nur lesend einbindet; Größe begrenzt (`MAX_ATTACHMENT_BYTES`, `MAX_ATTACHMENTS_TOTAL_BYTES`). `POST /api/outbox` bindet Uploads über `outbox_id` an genau eine Nachricht und merkt sich deren Anzahl in `outbox_message.attachment_count` (Migration 0019; fehlt beim Versand ein Upload, schlägt die Nachricht mit `ATTACHMENT_MISSING` fehl statt ohne Anhang zu gehen); der Worker löscht sie, sobald die Nachricht samt Kopie in „Gesendet" erledigt ist. Nicht gesendete Uploads löscht der Client beim Schließen/Verwerfen; nie gebundene Reste löscht der Cleanup-Job nach `UPLOAD_RETENTION_HOURS` (Standard 168 h = 7 Tage, damit offline geschriebene Nachrichten mit Anhängen auch nach längerer Offline-Phase noch gesendet werden können; ist ein Upload beim Senden weg, antwortet `POST /api/outbox` mit `410` und Code `ATTACHMENT_MISSING`, die Offline-Queue speichert den Text dann als Entwurf und bittet, die Anhänge neu hinzuzufügen), Uploads fehlgeschlagener Nachrichten bleiben für einen erneuten Versuch, bis der Outbox-Eintrag nach `OUTBOX_RETENTION_DAYS` (Standard 30 Tage) entfernt wird (Roadmap 5.5).
+  - **Anhänge in Entwürfen** (Migration 0020 `attachment_upload.draft_id`, #53): `PUT /api/drafts/:id` mit `attachmentIds` hält Uploads beim Entwurf (vollständige Liste; nicht mehr genannte werden freigegeben und fallen unter die normale Aufbewahrung). Solange der Entwurf existiert, löscht der Cleanup sie nicht; die IMAP-Drafts-Kopie enthält sie (gleicher MIME-Aufbau wie beim Versand). Beim Senden wandern sie in derselben Transaktion an die Outbox-Nachricht (`draft_id` wird geleert), beim Verwerfen werden sie gelöscht (sofort per API, Rest per `ON DELETE CASCADE`, wenn der draft_sync-Job die Zeile entfernt). Öffnet man einen Entwurf eines anderen Clients, werden dessen Anhänge in Uploads des neuen Entwurfs kopiert.
+  - **Weiterleiten mit Originalanhängen** (#53): `POST /api/messages/:id/attachments/copy` kopiert die Anhänge einer eigenen Nachricht (ohne Inline-Teile des HTML) beim Öffnen des Weiterleitens in verschlüsselte Uploads des Absendekontos – ein Anhang nach dem anderen aus dem MIME-Parser, Grenzen wie beim Upload (Datei, Summe, Anzahl; Überzählige werden übersprungen und gezählt). Mit `includeInline: true` (Standard des Composers beim Weiterleiten) werden auch Inline-Bilder (cid:, nur PNG/JPEG/GIF/WebP – nie SVG/HTML) als normale Anhänge kopiert, unbenannte als `bild-N.<ext>`: die Weiterleitung geht als Text raus, sonst wären sie verloren. Beim Öffnen fremder Entwürfe bleibt es bei den Nicht-Inline-Anhängen. Danach sind es normale Uploads: im Composer einzeln entfernbar, im Entwurf gespeichert, vom Worker ohne Zugriff auf das `mail-data`-Volume versendet.
 - **Dateiablage:** Pfad `mail-data/<account_id>/<message_id>/…`. Jede Datei ist mit dem DEK des Kontos verschlüsselt (AEAD, Streaming für große Anhänge).
 
 Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
@@ -247,7 +251,7 @@ Archivieren und Verschieben ändern nur `message_location`, nicht `message`.
 ### Ansichten
 
 - **Standard:** ein Konto ist aktiv; Ordnerbaum und Liste zeigen nur dessen Daten. Gewechselt wird über den Kontowechsler.
-- **Optionale Unified Inbox:** nur wenn `user.unified_inbox_enabled`. Sie ist eine Abfrage über die Inbox-Ordner aller Konten des Benutzers, sortiert nach `thread.last_message_at`, mit Konto-Kennzeichnung. Dafür gibt es keine eigene Tabelle und keine eigene Sync-Logik.
+- **Optionale Unified Inbox:** nur wenn `user.unified_inbox_enabled`. Sie ist eine Abfrage über die INBOX-Ordner (IMAP-Name `INBOX`) aller Konten des Benutzers, sortiert wie die Ordnerliste nach Nachrichtendatum (Keyset-Pagination), mit Konto-Kennzeichnung (`accountId` je Nachricht). Sie nutzt den vorhandenen Index `message_location_folder_idx`; Öffnen und Antworten laufen immer über das Konto der Nachricht. Dafür gibt es keine eigene Tabelle und keine eigene Sync-Logik.
 
 ### Versand und Jobs
 

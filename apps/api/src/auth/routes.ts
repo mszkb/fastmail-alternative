@@ -6,13 +6,18 @@
  * CSRF (roadmap 6.4): the cookie is SameSite=Strict and every
  * state-changing request must come from the same origin
  * (security/csrf.ts). Session timeouts: see sessions.ts.
+ *
+ * Password change: requires the current password (same lockout as login),
+ * ends all other devices/sessions and rotates the current session token.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import cookies from '@fastify/cookie'
 import type { Pool } from '@fma/db'
 import { dummyVerify, hashPassword, verifyPassword } from './password'
 import { isLockedOut, recordFail, recordSuccess } from './lockout'
+import { discardSetupCode, ensureSetupCode, setupCodeMatches } from './setup-code'
 import {
+  changePasswordAndEndOtherSessions,
   createDeviceWithSession,
   deleteSession,
   listDevices,
@@ -113,6 +118,16 @@ async function endPreviousSession(request: FastifyRequest): Promise<void> {
   if (previous) await deleteSession(request.server.authPool, previous.sessionId)
 }
 
+/**
+ * Security event for a failed login or password change (ASVS 7.1.3).
+ * Deliberately without email, password or IP: the request id links it to
+ * the access log line, which already carries the client address.
+ */
+function logAuthFailure(request: FastifyRequest, event: string): void {
+  const lockedOut = recordFail(request.ip)
+  request.log.warn({ event, lockedOut }, 'authentication failed')
+}
+
 interface CredentialsBody {
   email?: string
   password?: string
@@ -121,17 +136,66 @@ interface CredentialsBody {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PLATFORMS = new Set(['ios_pwa', 'android_pwa', 'desktop'])
+
+/** Minimum requirements for a new password (setup and password change). */
+function isAcceptablePassword(password: string): boolean {
+  return password.length >= 10 && password.length <= 200
+}
 
 function readCredentials(
   body: CredentialsBody | undefined,
 ): { email: string; password: string; deviceName: string; platform: string } | null {
   const email = body?.email?.trim().toLowerCase() ?? ''
   const password = body?.password ?? ''
-  if (!EMAIL_RE.test(email) || password.length < 10 || password.length > 200) return null
+  if (!EMAIL_RE.test(email) || !isAcceptablePassword(password)) return null
   const deviceName = (body?.deviceName ?? 'Browser').trim().slice(0, 100) || 'Browser'
   const platform = PLATFORMS.has(body?.platform ?? '') ? (body?.platform as string) : 'desktop'
   return { email, password, deviceName, platform }
+}
+
+/** Arbitrary but fixed advisory lock id that serializes the first-run setup. */
+const SETUP_LOCK_ID = 0x2f6d6173n // "fmas"
+
+async function userExists(pool: Pool): Promise<boolean> {
+  const { rows } = await pool.query('SELECT EXISTS (SELECT 1 FROM "user") AS exists')
+  return rows[0].exists === true
+}
+
+/**
+ * Creates the single user, unless one exists. Check and insert run in one
+ * transaction under an advisory lock, so two parallel setup requests cannot
+ * both create a user (ASVS review M1). Returns null if a user exists.
+ */
+async function insertSingleUser(
+  pool: Pool,
+  email: string,
+  passwordHash: string,
+): Promise<string | null> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock($1)', [SETUP_LOCK_ID])
+    const { rows } = await client.query('SELECT EXISTS (SELECT 1 FROM "user") AS exists')
+    if (rows[0].exists === true) {
+      await client.query('ROLLBACK')
+      return null
+    }
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO "user" (email, password_hash) VALUES ($1, $2) RETURNING id`,
+      [email, passwordHash],
+    )
+    await client.query('COMMIT')
+    const userId = inserted.rows[0]?.id
+    if (!userId) throw new Error('user insert returned no id')
+    return String(userId)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
 }
 
 /** Single user, so an email mismatch gets the same timing as a password check. */
@@ -154,34 +218,45 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     })
   })
 
-  app.post<{ Body: CredentialsBody }>('/api/auth/setup', async (request, reply) => {
-    const credentials = readCredentials(request.body)
-    if (!credentials) {
-      await reply.code(400).send({ message: 'Invalid email or password (min. 10 characters)' })
-      return
-    }
-    const { rows } = await pool.query('SELECT count(*)::int AS count FROM "user"')
-    if (rows[0].count > 0) {
-      await reply.code(403).send({ message: 'Setup already completed' })
-      return
-    }
-    const passwordHash = await hashPassword(credentials.password)
-    const inserted = await pool.query<{ id: string }>(
-      `INSERT INTO "user" (email, password_hash) VALUES ($1, $2) RETURNING id`,
-      [credentials.email, passwordHash],
-    )
-    const userId = inserted.rows[0]?.id
-    if (!userId) throw new Error('user insert returned no id')
-    const { token } = await createDeviceWithSession(
-      pool,
-      String(userId),
-      credentials.deviceName,
-      credentials.platform,
-    )
-    recordSuccess(request.ip)
-    setSessionCookie(reply, token)
-    await reply.send({ email: credentials.email })
-  })
+  app.post<{ Body: CredentialsBody & { setupCode?: unknown } }>(
+    '/api/auth/setup',
+    async (request, reply) => {
+      if (await userExists(pool)) {
+        await reply.code(403).send({ message: 'Setup already completed' })
+        return
+      }
+      // A fresh instance is reachable by anyone: only whoever can read the
+      // api log (or .env) may claim it (setup-code.ts).
+      ensureSetupCode(request.log)
+      if (!setupCodeMatches(request.body?.setupCode)) {
+        request.log.warn({ event: 'auth.setup_code_invalid' }, 'setup rejected: invalid setup code')
+        await reply.code(403).send({ message: 'Invalid setup code' })
+        return
+      }
+      const credentials = readCredentials(request.body)
+      if (!credentials) {
+        await reply.code(400).send({ message: 'Invalid email or password (min. 10 characters)' })
+        return
+      }
+      // Hash outside the transaction so the lock is held only briefly.
+      const passwordHash = await hashPassword(credentials.password)
+      const userId = await insertSingleUser(pool, credentials.email, passwordHash)
+      if (!userId) {
+        await reply.code(403).send({ message: 'Setup already completed' })
+        return
+      }
+      discardSetupCode()
+      const { token } = await createDeviceWithSession(
+        pool,
+        userId,
+        credentials.deviceName,
+        credentials.platform,
+      )
+      recordSuccess(request.ip)
+      setSessionCookie(reply, token)
+      await reply.send({ email: credentials.email })
+    },
+  )
 
   app.post<{ Body: CredentialsBody }>('/api/auth/login', async (request, reply) => {
     const lockSeconds = isLockedOut(request.ip)
@@ -197,7 +272,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const credentials = readCredentials(request.body)
     if (!credentials) {
-      recordFail(request.ip)
+      logAuthFailure(request, 'auth.login_failed')
       await reply.code(401).send({ message: 'Invalid email or password' })
       return
     }
@@ -205,7 +280,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const userId = await findUserIdByEmail(pool, credentials.email)
     if (!userId) {
       await dummyVerify(credentials.password)
-      recordFail(request.ip)
+      logAuthFailure(request, 'auth.login_failed')
       await reply.code(401).send({ message: 'Invalid email or password' })
       return
     }
@@ -216,7 +291,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     )
     const passwordHash = rows[0]?.password_hash
     if (!passwordHash || !(await verifyPassword(credentials.password, passwordHash))) {
-      recordFail(request.ip)
+      logAuthFailure(request, 'auth.login_failed')
       await reply.code(401).send({ message: 'Invalid email or password' })
       return
     }
@@ -232,6 +307,62 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     setSessionCookie(reply, token)
     await reply.send({ email: credentials.email })
   })
+
+  app.post<{ Body: { currentPassword?: unknown; newPassword?: unknown } }>(
+    '/api/auth/password',
+    { onRequest: requireAuth },
+    async (request, reply) => {
+      const lockSeconds = isLockedOut(request.ip)
+      if (lockSeconds > 0) {
+        await reply
+          .code(429)
+          .header('retry-after', String(lockSeconds))
+          .send({
+            message: `Too many failed attempts. Try again in ${Math.ceil(lockSeconds / 60)} minutes.`,
+          })
+        return
+      }
+
+      const currentPassword =
+        typeof request.body?.currentPassword === 'string' ? request.body.currentPassword : ''
+      const newPassword =
+        typeof request.body?.newPassword === 'string' ? request.body.newPassword : ''
+      const auth = request.auth!
+
+      const { rows } = await pool.query<{ password_hash: string }>(
+        'SELECT password_hash FROM "user" WHERE id = $1',
+        [auth.userId],
+      )
+      const passwordHash = rows[0]?.password_hash
+      const currentOk =
+        passwordHash !== undefined &&
+        currentPassword.length > 0 &&
+        currentPassword.length <= 200 &&
+        (await verifyPassword(currentPassword, passwordHash))
+      if (!currentOk) {
+        logAuthFailure(request, 'auth.password_change_failed')
+        await reply.code(403).send({ message: 'Current password is incorrect' })
+        return
+      }
+      recordSuccess(request.ip)
+
+      if (!isAcceptablePassword(newPassword)) {
+        await reply.code(400).send({ message: 'New password must have 10 to 200 characters' })
+        return
+      }
+
+      const newHash = await hashPassword(newPassword)
+      const token = await changePasswordAndEndOtherSessions(
+        pool,
+        auth.userId,
+        auth.sessionId,
+        auth.deviceId,
+        newHash,
+      )
+      setSessionCookie(reply, token)
+      await reply.code(204).send()
+    },
+  )
 
   app.delete('/api/auth/session', { onRequest: requireAuth }, async (request, reply) => {
     await deleteSession(pool, request.auth!.sessionId)
@@ -252,7 +383,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         await reply.code(409).send({ message: 'Cannot revoke the current device; log out instead' })
         return
       }
-      const revoked = await revokeDevice(pool, request.auth!.userId, request.params.id)
+      // Non-UUID ids cannot exist; answering 404 here keeps Postgres from
+      // raising an invalid-input error (500).
+      const revoked =
+        UUID_RE.test(request.params.id) &&
+        (await revokeDevice(pool, request.auth!.userId, request.params.id))
       if (!revoked) {
         await reply.code(404).send({ message: 'Device not found' })
         return

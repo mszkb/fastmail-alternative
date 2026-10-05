@@ -10,6 +10,13 @@
  *   The account stays busy until the aborted job has really settled.
  * - Connection-level errors update the account health (circuit breaker,
  *   ./account-health); a successful sync closes the circuit.
+ * - At most `maxConnectionsPerHost` running account jobs per IMAP host
+ *   (roadmap 3.5, IMAP_MAX_CONNECTIONS_PER_HOST): several accounts at the
+ *   same provider never open more parallel job connections than the
+ *   provider allows. Jobs of a saturated host simply stay queued and are
+ *   claimed once a slot of that host frees up (no waiting in a slot).
+ *   IMAP IDLE connections (./idle) are not counted here: they are bounded
+ *   separately (one per account, IMAP_IDLE_MAX_CONNECTIONS).
  * - Priority types (user actions, sending) are claimed before syncs.
  */
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -54,6 +61,7 @@ export const JOB_TYPES = [
 export const PRIORITY_JOB_TYPES = ['message_action', 'send_message', 'draft_sync']
 
 const DEFAULT_CONCURRENCY = 4
+const DEFAULT_MAX_CONNECTIONS_PER_HOST = 4
 /** Hard timeout per job type; message_sync covers a bounded initial sync. */
 const JOB_TIMEOUT_MS: Record<string, number> = {
   folder_sync: 3 * 60_000,
@@ -71,6 +79,15 @@ const FALLBACK_TIMEOUT_MS = 5 * 60_000
 export function workerConcurrency(): number {
   const value = Number(process.env.WORKER_CONCURRENCY)
   return Number.isInteger(value) && value > 0 ? value : DEFAULT_CONCURRENCY
+}
+
+/**
+ * Parallel job connections per IMAP host from IMAP_MAX_CONNECTIONS_PER_HOST
+ * (default 4; invalid values fall back to the default).
+ */
+export function imapMaxConnectionsPerHost(): number {
+  const value = Number(process.env.IMAP_MAX_CONNECTIONS_PER_HOST)
+  return Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_CONNECTIONS_PER_HOST
 }
 
 export function jobTimeoutMs(type: string): number {
@@ -190,6 +207,8 @@ async function updateHealth(
 
 export interface JobRunnerOptions {
   concurrency?: number
+  /** Running account jobs per IMAP host (default IMAP_MAX_CONNECTIONS_PER_HOST). */
+  maxConnectionsPerHost?: number
   /** Hard timeout per job type (tests use short ones). */
   timeoutMs?: (type: string) => number
 }
@@ -198,7 +217,10 @@ export class JobRunner {
   private readonly slots = new Set<Promise<void>>()
   /** Accounts with a job whose work has not settled yet (incl. timed out). */
   private readonly busyAccounts = new Set<string>()
+  /** Unsettled account jobs per IMAP host (lower-cased). */
+  private readonly hostJobs = new Map<string, number>()
   private readonly concurrency: number
+  private readonly maxConnectionsPerHost: number
   private readonly timeoutMs: (type: string) => number
 
   constructor(
@@ -206,6 +228,7 @@ export class JobRunner {
     options: JobRunnerOptions = {},
   ) {
     this.concurrency = options.concurrency ?? workerConcurrency()
+    this.maxConnectionsPerHost = options.maxConnectionsPerHost ?? imapMaxConnectionsPerHost()
     this.timeoutMs = options.timeoutMs ?? jobTimeoutMs
   }
 
@@ -217,9 +240,11 @@ export class JobRunner {
   async fill(): Promise<number> {
     let started = 0
     while (this.slots.size < this.concurrency) {
-      const exclude = { excludeAccountIds: [...this.busyAccounts] }
       let job: Job | null = null
       try {
+        const exclude = {
+          excludeAccountIds: [...this.busyAccounts, ...(await this.saturatedHostAccounts())],
+        }
         job =
           (await claimNextJob(this.pool, PRIORITY_JOB_TYPES, exclude)) ??
           (await claimNextJob(this.pool, JOB_TYPES, exclude))
@@ -227,7 +252,7 @@ export class JobRunner {
         log.error({ err: (err as Error).message }, 'claim failed')
       }
       if (!job) break
-      this.start(job)
+      await this.start(job)
       started++
     }
     return started
@@ -256,14 +281,47 @@ export class JobRunner {
     await Promise.allSettled([...this.slots])
   }
 
-  private start(job: Job): void {
-    const slot = this.execute(job).finally(() => {
+  /** Number of unsettled account jobs per IMAP host (tests, diagnostics). */
+  hostJobCounts(): Map<string, number> {
+    return new Map(this.hostJobs)
+  }
+
+  /** Accounts whose IMAP host has no free connection slot. */
+  private async saturatedHostAccounts(): Promise<string[]> {
+    const hosts = [...this.hostJobs]
+      .filter(([, count]) => count >= this.maxConnectionsPerHost)
+      .map(([host]) => host)
+    if (hosts.length === 0) return []
+    const { rows } = await this.pool.query<{ id: string }>(
+      'SELECT id FROM mail_account WHERE lower(imap_host) = ANY($1)',
+      [hosts],
+    )
+    return rows.map((row) => String(row.id))
+  }
+
+  private async imapHostOf(accountId: string): Promise<string | null> {
+    try {
+      const { rows } = await this.pool.query<{ host: string }>(
+        'SELECT lower(imap_host) AS host FROM mail_account WHERE id = $1',
+        [accountId],
+      )
+      return rows[0]?.host ?? null
+    } catch {
+      return null
+    }
+  }
+
+  private async start(job: Job): Promise<void> {
+    // Reserve the host slot before the next claim (fill() is sequential).
+    const host = job.accountId ? await this.imapHostOf(job.accountId) : null
+    if (host) this.hostJobs.set(host, (this.hostJobs.get(host) ?? 0) + 1)
+    const slot = this.execute(job, host).finally(() => {
       this.slots.delete(slot)
     })
     this.slots.add(slot)
   }
 
-  private async execute(job: Job): Promise<void> {
+  private async execute(job: Job, host: string | null): Promise<void> {
     log.info(
       { jobId: job.id, type: job.type, accountId: job.accountId, attempts: job.attempts },
       'job started',
@@ -279,6 +337,7 @@ export class JobRunner {
         .catch(() => {})
         .finally(() => {
           this.busyAccounts.delete(accountId)
+          if (host) this.releaseHost(host)
         })
     }
 
@@ -300,6 +359,12 @@ export class JobRunner {
       clearTimeout(timer)
     }
     await updateHealth(this.pool, job, health)
+  }
+
+  private releaseHost(host: string): void {
+    const count = (this.hostJobs.get(host) ?? 1) - 1
+    if (count > 0) this.hostJobs.set(host, count)
+    else this.hostJobs.delete(host)
   }
 
   private async fail(job: Job, err: unknown): Promise<void> {

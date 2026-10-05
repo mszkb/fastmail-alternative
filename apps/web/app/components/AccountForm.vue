@@ -2,6 +2,8 @@
 // Account form with live connection test: create (roadmap 2.1) and edit
 // (roadmap 3.1, `account` prop). Stored credentials are never sent to the
 // client; in edit mode empty user/password fields keep the stored values.
+import { SYNC_SINCE_CHOICES, syncSinceFromDays } from '@fma/shared'
+
 interface EditableAccount {
   id: string
   displayName: string
@@ -9,6 +11,7 @@ interface EditableAccount {
   imap: { host: string; port: number }
   smtp: { host: string; port: number }
   sortOrder?: number
+  syncSince?: string | null
 }
 
 const props = defineProps<{ account?: EditableAccount }>()
@@ -29,6 +32,31 @@ const smtpPassword = ref('')
 // Edit mode: no checkbox; empty SMTP fields keep the stored credentials, and
 // SMTP credentials that matched IMAP follow IMAP changes (api).
 const samePassword = ref(!props.account)
+// Sync period (#28): 'keep' = stored day unchanged, 'all' = no limit, else
+// days before today (converted to a day on save).
+const storedSyncSince = props.account?.syncSince ?? null
+const syncChoice = ref<string>(storedSyncSince ? 'keep' : 'all')
+const syncChoices = computed(() => [
+  ...(storedSyncSince
+    ? [
+        {
+          value: 'keep',
+          label: `Seit ${new Date(`${storedSyncSince}T00:00:00Z`).toLocaleDateString('de-DE', { timeZone: 'UTC' })}`,
+        },
+      ]
+    : []),
+  ...SYNC_SINCE_CHOICES.map((choice) => ({
+    value: choice.days === null ? 'all' : String(choice.days),
+    label: choice.label,
+  })),
+])
+
+/** Chosen `syncSince` (`YYYY-MM-DD` or null); undefined = unchanged. */
+function chosenSyncSince(): string | null | undefined {
+  if (syncChoice.value === 'keep') return undefined
+  if (syncChoice.value === 'all') return null
+  return syncSinceFromDays(Number(syncChoice.value))
+}
 
 const busy = ref(false)
 const error = ref('')
@@ -41,6 +69,8 @@ const ERROR_TEXT: Record<string, string> = {
   CONNECTION_REFUSED: 'Verbindung abgelehnt – Host und Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden.',
   TLS_ERROR: 'TLS-Fehler – das Server-Zertifikat konnte nicht verifiziert werden.',
+  TLS_REQUIRED:
+    'Der Server bietet keine verschlüsselte Verbindung (STARTTLS) an – das Passwort wurde nicht gesendet. Einen TLS-Port (IMAP 993, SMTP 465) verwenden.',
 }
 
 function testErrorText(stage: 'imap' | 'smtp', test: { code?: string; message?: string }): string {
@@ -57,6 +87,10 @@ function updateBody(account: EditableAccount): Record<string, unknown> {
     body.displayName = displayName.value.trim()
   }
   if (sortOrder.value !== (account.sortOrder ?? 0)) body.sortOrder = sortOrder.value
+  const syncSince = chosenSyncSince()
+  if (syncSince !== undefined && syncSince !== (account.syncSince ?? null)) {
+    body.syncSince = syncSince
+  }
   const imapChanged =
     imapHost.value !== account.imap.host ||
     imapPort.value !== account.imap.port ||
@@ -130,6 +164,7 @@ async function submit(): Promise<void> {
       body: JSON.stringify({
         displayName: displayName.value || undefined,
         emailAddress: emailAddress.value,
+        syncSince: chosenSyncSince() ?? undefined,
         imap: {
           host: imapHost.value,
           port: imapPort.value,
@@ -166,6 +201,7 @@ async function submit(): Promise<void> {
     smtpHost.value = ''
     smtpUser.value = ''
     smtpPassword.value = ''
+    syncChoice.value = 'all'
     emit('created')
   } catch {
     error.value = 'API nicht erreichbar.'
@@ -197,6 +233,18 @@ async function submit(): Promise<void> {
     <label v-if="editing"
       >Reihenfolge (kleinere Zahl zuerst)
       <input v-model.number="sortOrder" type="number" step="1" />
+    </label>
+    <label
+      >Mails synchronisieren
+      <select v-model="syncChoice">
+        <option v-for="choice in syncChoices" :key="choice.value" :value="choice.value">
+          {{ choice.label }}
+        </option>
+      </select>
+      <span class="hint sync-hint"
+        >Gilt für neue Mails nach Empfangsdatum. Bereits geladene ältere Mails bleiben erhalten;
+        „Ältere Mails laden“ holt sie trotzdem.</span
+      >
     </label>
 
     <fieldset>
@@ -300,13 +348,19 @@ h2 {
   color: #52606d;
 }
 
+.sync-hint {
+  display: block;
+  margin: 0.25rem 0 0;
+}
+
 label {
   display: block;
   margin-bottom: 0.6rem;
   font-size: 0.9rem;
 }
 
-input {
+input,
+select {
   display: block;
   width: 100%;
   margin-top: 0.25rem;

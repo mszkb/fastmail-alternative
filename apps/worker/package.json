@@ -8,7 +8,8 @@
     "build": "tsup",
     "start": "node dist/main.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "loadtest": "tsx loadtest/run.ts"
   },
   "devDependencies": {
     "@types/mailparser": "^3.9.0",

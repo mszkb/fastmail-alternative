@@ -56,6 +56,27 @@ export interface MessageListResponse {
   nextCursor: string | null
 }
 
+/**
+ * Optional unified inbox (roadmap 3.7): list entry with the account and the
+ * INBOX folder it belongs to. Opening/replying always uses that account.
+ */
+export interface UnifiedMessageListItem extends MessageListItem {
+  accountId: string
+  folderId: string
+}
+
+/** `GET /api/unified/inbox` - 404 while the setting is off. */
+export interface UnifiedMessageListResponse {
+  messages: UnifiedMessageListItem[]
+  nextCursor: string | null
+}
+
+/** `GET/PUT /api/settings` - per-user settings. */
+export interface UserSettings {
+  /** Unified inbox across all accounts (opt-in, default off). */
+  unifiedInbox: boolean
+}
+
 /** `GET /api/messages/:id` - plain text body; the HTML body comes from MessageHtmlResponse. */
 export interface MessageDetail {
   id: string
@@ -232,6 +253,7 @@ export type OutboxErrorCode =
   | 'CONNECTION_REFUSED'
   | 'TIMEOUT'
   | 'TLS_ERROR'
+  | 'TLS_REQUIRED'
   | 'ATTACHMENT_MISSING'
   | 'UNKNOWN'
 
@@ -244,6 +266,8 @@ export const OUTBOX_ERROR_MESSAGES: Record<OutboxErrorCode, string> = {
   CONNECTION_REFUSED: 'Verbindung zum SMTP-Server abgelehnt - Host/Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden mit dem SMTP-Server.',
   TLS_ERROR: 'TLS-Fehler - Zertifikat des SMTP-Servers konnte nicht verifiziert werden.',
+  TLS_REQUIRED:
+    'Der SMTP-Server bietet keine verschlüsselte Verbindung (STARTTLS) an - das Passwort wurde nicht gesendet. Port 465 verwenden oder Anbieter prüfen.',
   ATTACHMENT_MISSING:
     'Ein Anhang ist nicht mehr vorhanden - bitte die Nachricht neu schreiben und den Anhang erneut hinzufügen.',
   UNKNOWN: 'Versand fehlgeschlagen.',
@@ -291,6 +315,62 @@ export interface OutboxContent {
   text: string
 }
 
+/**
+ * Choices for the sync period offered in the account settings: a number of
+ * days before today (converted to an absolute `syncSince` date on save),
+ * null = all messages.
+ */
+export const SYNC_SINCE_CHOICES: ReadonlyArray<{ days: number | null; label: string }> = [
+  { days: null, label: 'Alle' },
+  { days: 30, label: '30 Tage' },
+  { days: 90, label: '90 Tage' },
+  { days: 365, label: '1 Jahr' },
+]
+
+const ISO_DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/** `YYYY-MM-DD` (UTC) of a date. */
+export function isoDay(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
+/**
+ * UTC midnight of a `YYYY-MM-DD` day, for binding to the timestamptz column
+ * `mail_account.sync_since`. Binding the bare day string would let Postgres
+ * interpret it in the session TimeZone (east of UTC: previous UTC day).
+ */
+export function utcMidnight(day: string): Date
+export function utcMidnight(day: string | null): Date | null
+export function utcMidnight(day: string | null): Date | null {
+  return day === null ? null : new Date(`${day}T00:00:00.000Z`)
+}
+
+/** `YYYY-MM-DD` of the day `days` days before `now` (UTC). */
+export function syncSinceFromDays(days: number, now: Date = new Date()): string {
+  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  date.setUTCDate(date.getUTCDate() - days)
+  return isoDay(date)
+}
+
+/**
+ * Validates a `syncSince` input (roadmap 2.2, #28): null (no limit) or a
+ * calendar day `YYYY-MM-DD` between 1970-01-01 and today (UTC; one day of
+ * slack for clients east of UTC). IMAP SEARCH SINCE compares days only, so
+ * a time of day carries no meaning. Returns undefined when invalid.
+ */
+export function parseSyncSince(value: unknown, now: Date = new Date()): string | null | undefined {
+  if (value === null) return null
+  if (typeof value !== 'string') return undefined
+  const match = ISO_DAY_RE.exec(value)
+  if (!match) return undefined
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  // Rejects impossible days like 2026-02-30 (Date.UTC rolls them over).
+  if (Number.isNaN(date.getTime()) || isoDay(date) !== value) return undefined
+  if (date.getTime() < 0) return undefined
+  if (value > syncSinceFromDays(-1, now)) return undefined
+  return value
+}
+
 /** One mail account as the api lists it (never credentials or keys). */
 export interface AccountSummary {
   id: string
@@ -306,6 +386,12 @@ export interface AccountSummary {
   capabilities: string[]
   sortOrder: number
   lastSyncAt: string | null
+  /**
+   * Sync limit (roadmap 2.2, #28), `YYYY-MM-DD`: the message sync only
+   * fetches messages whose IMAP internal date is on or after this day;
+   * null = no limit. "Load older messages" ignores it.
+   */
+  syncSince: string | null
   /**
    * Unread messages in the INBOX (special-use `inbox`) - the number shown in
    * the account switcher, computed like the folder counts.
@@ -337,10 +423,14 @@ export type AccountErrorCode =
   | 'CONNECTION_LOST'
   | 'TIMEOUT'
   | 'TLS_ERROR'
+  /** Plain port without STARTTLS (or STARTTLS stripped): login refused. */
+  | 'TLS_REQUIRED'
   | 'BLOCKED_HOST'
   | 'JOB_TIMEOUT'
   /** Imported account (roadmap 4.7): the export never contains passwords. */
   | 'CREDENTIALS_REQUIRED'
+  /** Provider throttling or too many connections (roadmap 3.5): backoff. */
+  | 'RATE_LIMITED'
 
 export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   AUTH_FAILED: 'Der Mailserver hat die Zugangsdaten abgelehnt.',
@@ -349,9 +439,13 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   CONNECTION_LOST: 'Die Verbindung zum Mailserver ist abgebrochen.',
   TIMEOUT: 'Der Mailserver antwortet nicht (Zeitüberschreitung).',
   TLS_ERROR: 'TLS-Fehler – das Zertifikat des Mailservers konnte nicht verifiziert werden.',
+  TLS_REQUIRED:
+    'Der Mailserver bietet keine verschlüsselte Verbindung (STARTTLS) an – das Passwort wurde nicht gesendet. Einen TLS-Port (IMAP 993, SMTP 465) verwenden oder den Anbieter prüfen.',
   BLOCKED_HOST: 'Interner Host ist blockiert (SSRF-Schutz).',
   JOB_TIMEOUT: 'Der Mailserver hat zu lange gebraucht; der Abgleich wurde abgebrochen.',
   CREDENTIALS_REQUIRED: 'Das Konto wurde importiert – das Passwort muss neu eingegeben werden.',
+  RATE_LIMITED:
+    'Der Mailanbieter bremst gerade (zu viele Verbindungen oder Anfragen); der Abgleich pausiert kurz.',
 }
 
 export interface AccountStatusInfo {

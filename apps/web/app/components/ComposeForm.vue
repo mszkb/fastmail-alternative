@@ -27,6 +27,7 @@ import {
   type SaveDraftRequest,
   type SendMessageRequest,
   type UploadedAttachment,
+  type CopyAttachmentsResponse,
   type AttachmentMissingResponse,
   ATTACHMENT_LIMIT_DEFAULTS,
   ATTACHMENT_MISSING,
@@ -47,6 +48,8 @@ const props = defineProps<{
   draft: ComposeDraft
   /** Saved draft to continue (roadmap 2.8); its fields replace the prefill. */
   saved?: Draft
+  /** Forward: id of the forwarded message, whose attachments are taken over (5.3). */
+  forwardOf?: string
 }>()
 const emit = defineEmits<{
   close: []
@@ -84,9 +87,10 @@ const clientId = newId()
 const textInput = ref<HTMLTextAreaElement | null>(null)
 
 // Attachments (roadmap 5.3): uploaded right away (encrypted on the server),
-// sent by id. They are not part of the draft: closing or discarding the
-// form removes them on the server.
-const attachments = ref<UploadedAttachment[]>([])
+// sent by id. Saved with the draft (attachmentIds), so they survive closing
+// and reopening it; discarding the draft (or closing a never saved form)
+// removes them on the server. Forwards take over the original's attachments.
+const attachments = ref<UploadedAttachment[]>([...(props.saved?.attachments ?? [])])
 const uploading = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -153,7 +157,11 @@ const version = ref(saved?.version ?? 0)
 const everSaved = ref(Boolean(saved))
 const saveState = ref<'' | 'saving' | 'saved' | 'queued' | 'error'>(saved ? 'saved' : '')
 const conflict = ref<Draft | null>(null)
-let lastSaved = JSON.stringify(initial)
+/** Compared to detect unsaved changes: the form plus the attachment ids. */
+function snapshotOf(): string {
+  return JSON.stringify({ ...form, attachmentIds: attachments.value.map((a) => a.id) })
+}
+let lastSaved = snapshotOf()
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saving: Promise<void> | null = null
 // After send/discard (or once the draft is gone on the server): no more saves.
@@ -163,7 +171,7 @@ let finished = false
 let forceSaves = false
 
 const title = computed(() => (saved ? 'Entwurf' : TITLES[props.draft.mode]))
-const dirty = computed(() => JSON.stringify(form) !== lastSaved)
+const dirty = computed(() => snapshotOf() !== lastSaved)
 const saveLabel = computed(() => {
   switch (saveState.value) {
     case 'saving':
@@ -199,6 +207,7 @@ function draftBody(): SaveDraftRequest {
     text: form.text,
     inReplyTo,
     references,
+    attachmentIds: attachments.value.map((a) => a.id),
     baseVersion: version.value,
     ...(forceSaves ? { force: true } : {}),
   }
@@ -214,7 +223,7 @@ async function saveDraft(options: { force?: boolean; keepalive?: boolean } = {})
   clearTimeout(saveTimer)
   while (saving) await saving
   if (finished || (conflict.value && !options.force)) return
-  const snapshot = JSON.stringify(form)
+  const snapshot = snapshotOf()
   if (snapshot === lastSaved && !options.force) return
   const body = draftBody()
   if (options.force) body.force = true
@@ -281,6 +290,7 @@ function scheduleSave(): void {
 }
 
 watch(form, scheduleSave, { deep: true })
+watch(attachments, scheduleSave, { deep: true })
 
 /** Conflict: replace the form with the version saved on the other device. */
 function loadOtherVersion(): void {
@@ -295,8 +305,9 @@ function loadOtherVersion(): void {
     text: other.text,
   })
   if (other.cc || other.bcc) showCcBcc.value = true
+  attachments.value = [...other.attachments]
   version.value = other.version
-  lastSaved = JSON.stringify(form)
+  lastSaved = snapshotOf()
   conflict.value = null
   saveState.value = 'saved'
 }
@@ -310,12 +321,6 @@ function keepMine(): void {
 /** Closes the form and keeps the draft (saved right away if it changed). */
 async function close(): Promise<void> {
   if (sending.value) return
-  if (
-    attachments.value.length > 0 &&
-    !window.confirm('Anhänge werden nicht im Entwurf gespeichert. Trotzdem schließen?')
-  ) {
-    return
-  }
   if (!finished && dirty.value) {
     await saveDraft()
     if (saveState.value === 'error' && !conflict.value) {
@@ -328,7 +333,8 @@ async function close(): Promise<void> {
   }
   finished = true
   clearTimeout(saveTimer)
-  dropAttachments()
+  // Saved drafts keep their attachments on the server.
+  if (!everSaved.value) dropAttachments()
   emit('close')
 }
 
@@ -487,12 +493,55 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
+/** Forward: copies the original's attachments into uploads (server side). */
+async function takeOverAttachments(messageId: string): Promise<void> {
+  uploading.value++
+  try {
+    const res = await fetch(`/api/messages/${messageId}/attachments/copy`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // Inline images too: the forward is sent as text (#53).
+      body: JSON.stringify({ accountId: props.accountId, includeInline: true }),
+    })
+    const payload = (await res.json().catch(() => null)) as
+      (CopyAttachmentsResponse & { message?: string }) | null
+    if (!res.ok || !payload) {
+      error.value = `Anhänge des Originals: ${payload?.message ?? `nicht übernommen (Fehler ${res.status}).`}`
+      return
+    }
+    if (finished) {
+      for (const attachment of payload.attachments) {
+        void fetch(`/api/uploads/${attachment.id}`, { method: 'DELETE' }).catch(() => {})
+      }
+      return
+    }
+    // Untouched form: the taken over attachments are part of the prefill.
+    const untouched = snapshotOf() === lastSaved
+    attachments.value.push(...payload.attachments)
+    if (untouched) lastSaved = snapshotOf()
+    if (payload.skipped > 0) {
+      error.value =
+        `${payload.skipped} ${payload.skipped === 1 ? 'Anhang wurde' : 'Anhänge wurden'} ` +
+        'wegen der Größen- oder Anzahlgrenze nicht übernommen.'
+    }
+  } catch {
+    error.value = 'Anhänge des Originals konnten nicht übernommen werden (offline?).'
+  } finally {
+    uploading.value--
+  }
+}
+
 // MailView saves the draft before it closes the form (e.g. account switch).
 defineExpose({ flush: () => saveDraft() })
 
 onMounted(() => {
   window.addEventListener('pagehide', onPageHide)
   document.addEventListener('visibilitychange', onPageHide)
+  if (props.forwardOf && !saved) void takeOverAttachments(props.forwardOf)
+  if (saved?.attachmentsSkipped) {
+    error.value =
+      'Einige Anhänge konnten nicht übernommen werden; das Original bleibt im Entwürfe-Ordner erhalten.'
+  }
   // New mail and forwards start with the recipients, replies with the text.
   if (props.draft.mode === 'new' || props.draft.mode === 'forward') {
     toInput.value?.focus()

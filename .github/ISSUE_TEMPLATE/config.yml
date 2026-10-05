@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Sicherheitslücke melden
+    url: https://github.com/mszkb/fastmail-alternative/security/advisories/new
+    about: Bitte vertraulich über GitHub Private Vulnerability Reporting melden, nicht als öffentliches Issue (siehe SECURITY.md).
+  - name: Betreiber-Doku und Troubleshooting
+    url: https://github.com/mszkb/fastmail-alternative/blob/main/docs/operations/troubleshooting.md
+    about: Häufige Probleme bei Installation, TLS, Push, Konten und Upgrades.

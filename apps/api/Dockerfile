@@ -13,6 +13,10 @@ RUN pnpm --filter @fma/api build
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Release version (set by .github/workflows/release.yml from the tag);
+# reported by /api/health. Local builds without the arg stay 0.0.0-dev.
+ARG APP_VERSION=0.0.0-dev
+ENV APP_VERSION=$APP_VERSION
 
 COPY --from=build /repo/LICENSE ./LICENSE
 COPY --from=build /repo/apps/api/dist ./dist

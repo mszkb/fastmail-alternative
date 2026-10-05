@@ -9,7 +9,8 @@
  *    for accounts without a running job and without a queued message_action
  *    (a sync may be relinking such messages; an expunge is pending).
  * 2. Attachment uploads never bound to a message (closed browser) after
- *    UPLOAD_RETENTION_HOURS; uploads of settled messages whose deletion was
+ *    UPLOAD_RETENTION_HOURS - not those kept with a draft (`draft_id`, they
+ *    are deleted with the draft); uploads of settled messages whose deletion was
  *    interrupted.
  * 3. Outbox entries: sent and settled ones (content already cleared) and
  *    failed ones the user did not retry, after OUTBOX_RETENTION_DAYS
@@ -293,14 +294,15 @@ export async function runCleanup(
   // conditions after the lock wait, not against the subquery's. Rows
   // locked right now are skipped (SKIP LOCKED) and handled next run.
 
-  // 2. Uploads never bound to a message, and uploads of settled messages.
+  // 2. Uploads never bound to a message nor kept with a draft (those go with
+  //    the draft row), and uploads of settled messages.
   let uploads = await deleteInBatches(
     pool,
     `DELETE FROM attachment_upload
-     WHERE outbox_id IS NULL AND created_at < now() - $2::interval
+     WHERE outbox_id IS NULL AND draft_id IS NULL AND created_at < now() - $2::interval
        AND id IN (
          SELECT id FROM attachment_upload
-         WHERE outbox_id IS NULL AND created_at < now() - $2::interval
+         WHERE outbox_id IS NULL AND draft_id IS NULL AND created_at < now() - $2::interval
          LIMIT $1 FOR UPDATE SKIP LOCKED)`,
     [interval(settings.uploadRetentionMs)],
   )

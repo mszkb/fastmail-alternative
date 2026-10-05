@@ -23,7 +23,9 @@
  *   (MAX_ATTACHMENTS_TOTAL_BYTES). A missing upload (expired, removed or
  *   already sent) answers 410 with code ATTACHMENT_MISSING and its ids;
  *   nothing is stored then. `attachment_count` lets the worker detect an
- *   upload that vanished before sending.
+ *   upload that vanished before sending. Uploads kept with a draft
+ *   (`draft_id`) move to the message (draft_id cleared, so deleting the
+ *   draft row does not cascade to them).
  *
  * Ownership: everything is scoped via mail_account.user_id; foreign or
  * unknown ids answer 404. Decrypted content is never logged.
@@ -345,9 +347,10 @@ export async function outboxRoutes(app: FastifyInstance): Promise<void> {
           ],
         )
         if (parsed.attachmentIds.length > 0) {
-          // Each upload belongs to one message only (outbox_id IS NULL).
+          // Each upload belongs to one message only (outbox_id IS NULL);
+          // uploads kept with the draft being sent move to the message.
           const { rows: attached } = await client.query<{ id: string; size_bytes: number }>(
-            `UPDATE attachment_upload SET outbox_id = $1
+            `UPDATE attachment_upload SET outbox_id = $1, draft_id = NULL
              WHERE account_id = $2 AND outbox_id IS NULL AND id = ANY($3::uuid[])
              RETURNING id::text AS id, size_bytes`,
             [id, account.id, parsed.attachmentIds],

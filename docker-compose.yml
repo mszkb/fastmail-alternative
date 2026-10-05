@@ -74,6 +74,9 @@ services:
       MAX_CONCURRENT_UPLOADS: ${MAX_CONCURRENT_UPLOADS:-2}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      # Optional: mail server in the LAN (SSRF exception, TLS stays mandatory).
+      MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
       # Public key only: the api hands it to browsers; sending is the worker's job.
@@ -118,9 +121,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       MAIL_DATA_DIR: /app/mail-data
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+      SYNC_MIN_INTERVAL_SECONDS: ${SYNC_MIN_INTERVAL_SECONDS:-10}
       IMAP_IDLE: ${IMAP_IDLE:-1}
       IMAP_IDLE_MAX_CONNECTIONS: ${IMAP_IDLE_MAX_CONNECTIONS:-50}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      IMAP_MAX_CONNECTIONS_PER_HOST: ${IMAP_MAX_CONNECTIONS_PER_HOST:-4}
       MAX_RAW_MESSAGE_BYTES: ${MAX_RAW_MESSAGE_BYTES:-20971520}
       CLEANUP_INTERVAL_HOURS: ${CLEANUP_INTERVAL_HOURS:-6}
       JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-7}
@@ -128,6 +133,8 @@ services:
       UPLOAD_RETENTION_HOURS: ${UPLOAD_RETENTION_HOURS:-168}
       OUTBOX_RETENTION_DAYS: ${OUTBOX_RETENTION_DAYS:-30}
       ORPHAN_FILE_GRACE_HOURS: ${ORPHAN_FILE_GRACE_HOURS:-24}
+      # Optional: mail server in the LAN (SSRF exception, TLS stays mandatory).
+      MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
       MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -136,7 +143,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mail}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-mail}
-    # No healthcheck yet: the worker gets real jobs (IMAP/SMTP/push) in phase 2.
+    # No HTTP port: the main loop writes a heartbeat file (/tmp/worker-heartbeat,
+    # WORKER_HEARTBEAT_FILE) every 30 s after a successful `SELECT 1`;
+    # dist/healthcheck.js fails if it is older than 120 s (loop stuck or
+    # database unreachable). start_period covers migrations on startup.
+    healthcheck:
+      test: ['CMD', 'node', 'dist/healthcheck.js']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy

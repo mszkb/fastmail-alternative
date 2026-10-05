@@ -30,8 +30,13 @@ const WINDOW_MS = 60_000
 export const DEFAULT_RATE_LIMITS: RateLimitRule[] = [
   // Generous ceiling for everything: the PWA syncs folders/lists in bursts.
   { name: 'global', max: 600 },
-  // Password guessing (on top of the lockout) and the one-time setup.
-  { name: 'auth', max: 10, method: 'POST', routes: ['/api/auth/login', '/api/auth/setup'] },
+  // Password guessing (on top of the lockout), password change, one-time setup.
+  {
+    name: 'auth',
+    max: 10,
+    method: 'POST',
+    routes: ['/api/auth/login', '/api/auth/setup', '/api/auth/password'],
+  },
   // Creating/updating an account tests the credentials at the provider.
   { name: 'account-test', max: 10, method: 'POST', routes: ['/api/accounts'] },
   { name: 'account-test', max: 10, method: 'PATCH', routes: ['/api/accounts/:id'] },

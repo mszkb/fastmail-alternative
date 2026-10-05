@@ -4,11 +4,21 @@
  *
  * Error mapping turns low-level errors into stable codes the frontend can
  * translate: AUTH_FAILED, HOST_NOT_FOUND, BLOCKED_HOST, CONNECTION_REFUSED,
- * TIMEOUT, TLS_ERROR, UNKNOWN.
+ * TIMEOUT, TLS_ERROR, TLS_REQUIRED, UNKNOWN.
+ *
+ * Every connection goes through `@fma/shared/mail-transport` (SSRF check on
+ * the resolved address, mandatory STARTTLS on plain ports).
  */
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
-import { assertPublicHost } from '@fma/shared/ssrf'
+import {
+  imapTransportOptions,
+  isStartTlsUnavailable,
+  smtpTransportOptions,
+  type MailTransportPolicy,
+} from '@fma/shared/mail-transport'
+
+export { isSecurePort } from '@fma/shared/mail-transport'
 
 export interface TestResult {
   ok: boolean
@@ -28,20 +38,30 @@ export interface HostConfig {
 
 const CONNECT_TIMEOUT_MS = 15_000
 
-/** Implicit TLS for 993/465, otherwise plain/STARTTLS. */
-export function isSecurePort(port: number): boolean {
-  return port === 993 || port === 465
+/** Minimal logger shape (the request's redacting pino logger). */
+export interface WarnLogger {
+  warn(obj: Record<string, unknown>, msg: string): void
 }
 
-/** Short-lived test mode for CI/local GreenMail (plain ports, self-signed). */
-function testMode(): boolean {
-  return process.env.MAIL_ALLOW_PRIVATE_HOSTS === '1'
+export interface TestOptions {
+  /** Redacting logger; only error name/code are logged, never server texts. */
+  log?: WarnLogger
+  /** Test override of the transport policy (default: environment). */
+  policy?: MailTransportPolicy
 }
 
 function classifyError(err: unknown): { code: string; message: string } {
   const text = String((err as Error)?.message ?? err)
   const code = (err as { code?: string; authenticationFailed?: boolean }) ?? {}
 
+  // First: refused before LOGIN/AUTH, so it is never an auth failure.
+  if (isStartTlsUnavailable(err)) {
+    return {
+      code: 'TLS_REQUIRED',
+      message:
+        'Der Server bietet keine verschlüsselte Verbindung (STARTTLS) an – das Passwort wurde nicht gesendet. Einen TLS-Port (IMAP 993, SMTP 465) verwenden oder den Anbieter prüfen.',
+    }
+  }
   if (
     code.authenticationFailed ||
     /AUTHENTICATIONFAILED|invalid credentials|535 |530 /i.test(text)
@@ -67,28 +87,35 @@ function classifyError(err: unknown): { code: string; message: string } {
       message: 'TLS-Fehler - Zertifikat des Servers konnte nicht verifiziert werden.',
     }
   }
-  if (text.includes('private address')) {
+  if (code.code === 'PRIVATE_HOST_BLOCKED' || text.includes('private address')) {
     return { code: 'BLOCKED_HOST', message: 'Interner Host ist blockiert (SSRF-Schutz).' }
   }
-  return { code: 'UNKNOWN', message: `Verbindung fehlgeschlagen: ${text.slice(0, 200)}` }
+  // No server text: it may echo user data or leak banners of internal hosts.
+  return { code: 'UNKNOWN', message: 'Verbindung fehlgeschlagen.' }
+}
+
+function logFailure(log: WarnLogger | undefined, stage: string, err: unknown, code: string): void {
+  const error = (err ?? {}) as { name?: unknown; code?: unknown }
+  log?.warn(
+    {
+      stage,
+      code,
+      errName: typeof error.name === 'string' ? error.name : undefined,
+      errCode: typeof error.code === 'string' ? error.code : undefined,
+    },
+    'connection test failed',
+  )
 }
 
 /** Tests IMAP: connect + login + capability list. */
-export async function testImap(config: HostConfig): Promise<TestResult> {
+export async function testImap(config: HostConfig, options: TestOptions = {}): Promise<TestResult> {
   let client: ImapFlow | null = null
   try {
-    if (!testMode()) await assertPublicHost(config.host)
-
     client = new ImapFlow({
-      host: config.host,
-      port: config.port,
-      secure: config.secure,
+      ...(await imapTransportOptions(config, options.policy)),
       auth: { user: config.user, pass: config.password },
       logger: false,
       connectionTimeout: CONNECT_TIMEOUT_MS,
-      tls: testMode() ? { rejectUnauthorized: false } : undefined,
-      // Test mode talks to plain GreenMail ports even when STARTTLS is offered.
-      ...(testMode() ? { doSTARTTLS: false as const } : {}),
     })
 
     await client.connect()
@@ -109,10 +136,8 @@ export async function testImap(config: HostConfig): Promise<TestResult> {
     )
     return { ok: true, capabilities }
   } catch (err) {
-    // Full stack server-side for every failure, so bundling/platform quirks
-    // are diagnosable without leaking internals to the client.
-    console.warn('[connection-test] imap error:', err)
     const { code, message } = classifyError(err)
+    logFailure(options.log, 'imap', err, code)
     return { ok: false, code, message }
   } finally {
     client?.close()
@@ -120,22 +145,20 @@ export async function testImap(config: HostConfig): Promise<TestResult> {
 }
 
 /** Tests SMTP: connect + authenticate via nodemailer's verify(). */
-export async function testSmtp(config: HostConfig): Promise<TestResult> {
+export async function testSmtp(config: HostConfig, options: TestOptions = {}): Promise<TestResult> {
+  let transport
   try {
-    if (!testMode()) await assertPublicHost(config.host)
+    transport = await smtpTransportOptions(config, options.policy)
   } catch (err) {
     const { code, message } = classifyError(err)
+    logFailure(options.log, 'smtp', err, code)
     return { ok: false, code, message }
   }
 
   const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
+    ...transport,
     auth: { user: config.user, pass: config.password },
     connectionTimeout: CONNECT_TIMEOUT_MS,
-    tls: testMode() ? { rejectUnauthorized: false } : undefined,
-    ignoreTLS: testMode(),
   })
 
   try {
@@ -143,6 +166,7 @@ export async function testSmtp(config: HostConfig): Promise<TestResult> {
     return { ok: true }
   } catch (err) {
     const { code, message } = classifyError(err)
+    logFailure(options.log, 'smtp', err, code)
     return { ok: false, code, message }
   } finally {
     transporter.close()

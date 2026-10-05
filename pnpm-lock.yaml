@@ -344,6 +344,9 @@ importers:
         specifier: ^8.16.0
         version: 8.23.1
     devDependencies:
+      '@fma/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.1

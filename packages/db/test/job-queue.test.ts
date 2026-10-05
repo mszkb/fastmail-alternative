@@ -62,6 +62,10 @@ describe.skipIf(!databaseUrl)('job queue', () => {
       expect(claimed?.id).toBe(id)
       expect(claimed?.attempts).toBe(attempt)
 
+      if (attempt === MAX_JOB_ATTEMPTS) {
+        // Backdate run_at so the assertion below proves failJob restamps it.
+        await pool.query(`UPDATE job SET run_at = now() - interval '1 day' WHERE id = $1`, [id])
+      }
       await failJob(pool, claimed!.id, claimed!.attempts, 'boom')
       if (attempt < MAX_JOB_ATTEMPTS) {
         // Backoff: not immediately eligible again.
@@ -72,9 +76,15 @@ describe.skipIf(!databaseUrl)('job queue', () => {
       }
     }
 
-    const { rows } = await pool.query('SELECT state, last_error FROM job WHERE id = $1', [id])
+    const { rows } = await pool.query(
+      `SELECT state, last_error, run_at > now() - interval '1 minute' AS failed_recently
+       FROM job WHERE id = $1`,
+      [id],
+    )
     expect(rows[0].state).toBe('failed')
     expect(rows[0].last_error).toBe('boom')
+    // The terminal failure stamps run_at with the time of failure.
+    expect(rows[0].failed_recently).toBe(true)
   })
 
   it('clears last_error on successful completion', async () => {

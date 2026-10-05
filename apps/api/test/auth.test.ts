@@ -13,6 +13,9 @@ import { runMigrations } from '@fma/db/migrate'
 import { buildApp } from '../src/app'
 import { pool } from '../src/db'
 
+/** Setup code configured for the tests (vitest.config.ts). */
+const SETUP_CODE = 'test-setup-code'
+
 const databaseUrl = process.env.DATABASE_URL
 let app: FastifyInstance
 
@@ -67,6 +70,7 @@ describe.skipIf(!databaseUrl)('auth flow', () => {
   it('setup creates the single user and starts a session', async () => {
     const res = await inject('POST', '/api/auth/setup', {
       payload: {
+        setupCode: SETUP_CODE,
         email: 'Martin@Example.com',
         password: 'correct horse battery',
         deviceName: 'Test-Pi',
@@ -86,7 +90,11 @@ describe.skipIf(!databaseUrl)('auth flow', () => {
 
   it('setup is refused once a user exists', async () => {
     const res = await inject('POST', '/api/auth/setup', {
-      payload: { email: 'other@example.com', password: 'another password 123' },
+      payload: {
+        setupCode: SETUP_CODE,
+        email: 'other@example.com',
+        password: 'another password 123',
+      },
     })
     expect(res.statusCode).toBe(403)
   })
@@ -235,5 +243,114 @@ describe.skipIf(!databaseUrl)('auth flow', () => {
   it('unauthenticated requests get 401', async () => {
     const res = await inject('GET', '/api/auth/devices')
     expect(res.statusCode).toBe(401)
+  })
+  describe('password change', () => {
+    async function login(password: string, deviceName: string) {
+      return inject('POST', '/api/auth/login', {
+        payload: { email: 'martin@example.com', password, deviceName },
+      })
+    }
+
+    it('requires a session', async () => {
+      const res = await inject('POST', '/api/auth/password', {
+        payload: { currentPassword: 'correct horse battery', newPassword: 'brand new password 1' },
+      })
+      expect(res.statusCode).toBe(401)
+    })
+
+    it('is covered by the global CSRF check', async () => {
+      const token = cookieToken(await login('correct horse battery', 'PW-CSRF'))
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/password',
+        remoteAddress: ip(),
+        payload: JSON.stringify({
+          currentPassword: 'correct horse battery',
+          newPassword: 'brand new password 1',
+        }),
+        headers: {
+          'content-type': 'application/json',
+          cookie: `fma_session=${token}`,
+          'sec-fetch-site': 'cross-site',
+        },
+      })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().message).toBe('Cross-origin request rejected')
+    })
+
+    it('rejects a wrong current password without details', async () => {
+      const token = cookieToken(await login('correct horse battery', 'PW-Wrong'))
+      const res = await inject('POST', '/api/auth/password', {
+        token,
+        payload: { currentPassword: 'not my password 1', newPassword: 'brand new password 1' },
+      })
+      expect(res.statusCode).toBe(403)
+      expect(JSON.stringify(res.json())).not.toContain('not my password')
+      // Old password still valid.
+      expect((await login('correct horse battery', 'PW-Check')).statusCode).toBe(200)
+    })
+
+    it('locks out after repeated wrong current passwords', async () => {
+      const token = cookieToken(await login('correct horse battery', 'PW-Lock'))
+      const attacker = ip()
+      for (let i = 0; i < 5; i += 1) {
+        const res = await inject('POST', '/api/auth/password', {
+          token,
+          ip: attacker,
+          payload: { currentPassword: 'guess number ' + i, newPassword: 'brand new password 1' },
+        })
+        expect(res.statusCode).toBe(403)
+      }
+      const locked = await inject('POST', '/api/auth/password', {
+        token,
+        ip: attacker,
+        payload: { currentPassword: 'correct horse battery', newPassword: 'brand new password 1' },
+      })
+      expect(locked.statusCode).toBe(429)
+    })
+
+    it('rejects a too weak new password', async () => {
+      const token = cookieToken(await login('correct horse battery', 'PW-Weak'))
+      const res = await inject('POST', '/api/auth/password', {
+        token,
+        payload: { currentPassword: 'correct horse battery', newPassword: 'short' },
+      })
+      expect(res.statusCode).toBe(400)
+      expect((await login('correct horse battery', 'PW-Check')).statusCode).toBe(200)
+    })
+
+    it('changes the password, ends other sessions and keeps (rotates) the current one', async () => {
+      const otherToken = cookieToken(await login('correct horse battery', 'PW-Other'))
+      const currentToken = cookieToken(await login('correct horse battery', 'PW-Current'))
+
+      const res = await inject('POST', '/api/auth/password', {
+        token: currentToken,
+        payload: { currentPassword: 'correct horse battery', newPassword: 'brand new password 1' },
+      })
+      expect(res.statusCode).toBe(204)
+      const rotatedToken = cookieToken(res)
+      expect(rotatedToken).not.toBe(currentToken)
+
+      // Other session is gone, the old token of the current session too.
+      const other = await inject('GET', '/api/auth/status', { token: otherToken })
+      expect(other.json().authenticated).toBe(false)
+      const old = await inject('GET', '/api/auth/status', { token: currentToken })
+      expect(old.json().authenticated).toBe(false)
+      // The current session continues with the rotated token.
+      const current = await inject('GET', '/api/auth/status', { token: rotatedToken })
+      expect(current.json().authenticated).toBe(true)
+
+      // Only the current device remains, no sessions on other devices.
+      const devices = await inject('GET', '/api/auth/devices', { token: rotatedToken })
+      const list = devices.json().devices as { name: string; isCurrent: boolean }[]
+      expect(list).toHaveLength(1)
+      expect(list[0]).toMatchObject({ name: 'PW-Current', isCurrent: true })
+      const { rows } = await pool.query('SELECT count(*)::int AS count FROM session')
+      expect(rows[0].count).toBe(1)
+
+      // Old password no longer works, new one does.
+      expect((await login('correct horse battery', 'PW-Old')).statusCode).toBe(401)
+      expect((await login('brand new password 1', 'PW-New')).statusCode).toBe(200)
+    })
   })
 })

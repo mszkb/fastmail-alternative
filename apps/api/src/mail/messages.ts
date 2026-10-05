@@ -49,7 +49,7 @@ const SPECIAL_USE_RANK: Record<string, number> = {
 const FALLBACK_MESSAGE_ID_RE = /^<[0-9a-f]{64}@fma\.local>$/
 
 /** Sort date of a message: Date header, falling back to arrival/insert time. */
-const SORT_AT = 'coalesce(m.sent_at, m.received_at, m.created_at)'
+export const SORT_AT = 'coalesce(m.sent_at, m.received_at, m.created_at)'
 
 interface FolderRow {
   id: string
@@ -264,12 +264,12 @@ export function buildFolderTree(rows: FolderRow[]): FolderSummary[] {
   return result
 }
 
-function encodeCursor(sortKey: string, locationId: string): string {
+export function encodeCursor(sortKey: string, locationId: string): string {
   return Buffer.from(`${sortKey}|${locationId}`, 'utf8').toString('base64url')
 }
 
 /** Returns [sortKey, locationId] or null for malformed cursors. */
-function decodeCursor(cursor: string): [string, string] | null {
+export function decodeCursor(cursor: string): [string, string] | null {
   const decoded = Buffer.from(cursor, 'base64url').toString('utf8')
   const index = decoded.lastIndexOf('|')
   if (index <= 0) return null
@@ -281,7 +281,7 @@ function decodeCursor(cursor: string): [string, string] | null {
   return [sortKey, locationId]
 }
 
-function parseLimit(value: string | undefined): number | null {
+export function parseLimit(value: string | undefined): number | null {
   if (value === undefined || value === '') return DEFAULT_LIMIT
   const limit = Number(value)
   if (!Number.isInteger(limit) || limit < 1) return null

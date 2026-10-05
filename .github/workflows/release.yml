@@ -1,0 +1,90 @@
+name: Release images
+
+# Runs only for SemVer tags (vX.Y.Z, optionally with a pre-release suffix such
+# as v0.3.0-rc.1) or by hand for an existing tag. Never on branches or pull
+# requests. Process: docs/process/release.md
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, e.g. v0.1.0'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # keyless cosign signing (Sigstore OIDC)
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build, push and sign ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Check tag format
+        run: |
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "not a SemVer tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          echo "APP_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/fastmail-alternative-${{ matrix.app }}
+          # latest only for releases without a pre-release suffix
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.RELEASE_TAG }}
+            type=raw,value=latest,enable=${{ !contains(env.RELEASE_TAG, '-') }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            APP_VERSION=${{ env.APP_VERSION }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: Sign image (keyless)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/fastmail-alternative-${{ matrix.app }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        # Signs the multi-arch index by digest; tags are just pointers to it.
+        run: cosign sign --yes "${IMAGE,,}@${DIGEST}"

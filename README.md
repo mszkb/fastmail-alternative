@@ -2,7 +2,18 @@
 
 wip: self hosted fastmail-alternative
 
-→ Planung: [ROADMAP.md](ROADMAP.md) · Doku: [docs/](docs/README.md) · Lizenz: [ISC](LICENSE)
+→ Planung: [ROADMAP.md](ROADMAP.md) · Doku: [docs/](docs/README.md) · Changelog: [CHANGELOG.md](CHANGELOG.md) · Sicherheit: [SECURITY.md](SECURITY.md) · Lizenz: [ISC](LICENSE)
+
+## Installation
+
+```sh
+git clone https://github.com/mszkb/fastmail-alternative.git && cd fastmail-alternative
+node scripts/setup-env.mjs   # erzeugt .env mit MASTER_KEY – separat sichern!
+# DOMAIN in .env auf die eigene Domain setzen
+docker compose up -d --build --wait
+```
+
+Ausführlich (Voraussetzungen, Ersteinrichtung, Push, Backup, Upgrade, Troubleshooting): [Betreiber-Doku](docs/operations/README.md)
 
 ## Systemanforderungen
 
@@ -22,7 +33,7 @@ Details & Messung: [docs/operations/system-requirements.md](docs/operations/syst
 ```bash
 pnpm install
 pnpm dev:web    # Nuxt-PWA (http://localhost:3000)
-pnpm dev:api    # Fastify-API (http://localhost:3001, /health)
+pnpm dev:api    # Fastify-API (http://localhost:3001, /api/health)
 pnpm dev:worker # Worker-Skeleton
 ```
 

@@ -40,14 +40,19 @@ import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import type { Pool } from '@fma/db'
-import { decryptBytes, decryptField, outboxContentAad, uploadFieldAad } from '@fma/crypto'
+import { decryptField, outboxContentAad } from '@fma/crypto'
 import { MAX_JOB_ATTEMPTS } from '@fma/db/job-queue'
 import type { OutboxContent, OutboxErrorCode, OutboxStatus, SentCopyStatus } from '@fma/shared'
 import { loadAccountContext, type AccountContext } from '../accounts'
 import { closeOnJobAbort } from '../job-context'
 import { log } from '../log'
-import { assertMailHost, mailTestMode } from '../ports'
+import {
+  imapTransportOptions,
+  isStartTlsUnavailable,
+  smtpTransportOptions,
+} from '@fma/shared/mail-transport'
 import { enqueueMessageSync } from '../scheduler'
+import { composerAttachments, loadUploads, type OutgoingAttachment } from '../uploads'
 
 const CONNECT_TIMEOUT_MS = 15_000
 const SOCKET_TIMEOUT_MS = 60_000
@@ -94,6 +99,9 @@ export function classifySmtpError(err: unknown): { code: OutboxErrorCode; perman
   const error = (err ?? {}) as { code?: string; responseCode?: number; message?: string }
   const text = String(error.message ?? err)
   if (error.code === 'PRIVATE_HOST_BLOCKED') return { code: 'BLOCKED_HOST', permanent: true }
+  // Checked before the response codes: a stripped/rejected STARTTLS comes
+  // with a 5xx reply, but retrying can help (the downgrade may be transient).
+  if (isStartTlsUnavailable(err)) return { code: 'TLS_REQUIRED', permanent: false }
   if (error.code === 'EAUTH' || error.code === 'ENOAUTH') {
     return { code: 'AUTH_FAILED', permanent: true }
   }
@@ -123,40 +131,6 @@ export function providerSavesSentCopy(ctx: AccountContext): boolean {
   return AUTO_SAVE_HOST_RE.test(ctx.smtp.host) || AUTO_SAVE_HOST_RE.test(ctx.imap.host)
 }
 
-/** A decrypted upload attached to the message (roadmap 5.3). */
-interface OutgoingAttachment {
-  filename: string
-  contentType: string
-  content: Buffer
-}
-
-/** Decrypts the uploads bound to an outbox message, in upload order. */
-async function loadAttachments(
-  pool: Pool,
-  dek: Buffer,
-  outboxId: string,
-): Promise<OutgoingAttachment[]> {
-  const { rows } = await pool.query<{
-    id: string
-    filename_enc: Buffer
-    content_type: string
-    content_enc: Buffer
-  }>(
-    `SELECT id, filename_enc, content_type, content_enc FROM attachment_upload
-     WHERE outbox_id = $1 ORDER BY created_at, id`,
-    [outboxId],
-  )
-  return rows.map((upload) => ({
-    filename: decryptField(
-      dek,
-      upload.filename_enc.toString('utf8'),
-      uploadFieldAad('filename', upload.id),
-    ),
-    contentType: upload.content_type,
-    content: decryptBytes(dek, upload.content_enc, uploadFieldAad('content', upload.id)),
-  }))
-}
-
 /** Settled message: its uploads are not needed anymore. */
 async function deleteAttachments(pool: Pool, outboxId: string): Promise<void> {
   await pool.query('DELETE FROM attachment_upload WHERE outbox_id = $1', [outboxId])
@@ -171,11 +145,7 @@ async function buildMessage(
   keepBcc: boolean,
 ): Promise<{ raw: Buffer; envelope: { from: string; to: string[] } }> {
   const composer = new MailComposer({
-    attachments: attachments.map((attachment) => ({
-      filename: attachment.filename,
-      contentType: attachment.contentType,
-      content: attachment.content,
-    })),
+    attachments: composerAttachments(attachments),
     from: content.from,
     to: content.to,
     cc: content.cc,
@@ -201,17 +171,12 @@ async function sendViaSmtp(
   raw: Buffer,
   envelope: { from: string; to: string[] },
 ): Promise<void> {
-  await assertMailHost(ctx.smtp.host)
   const transporter = nodemailer.createTransport({
-    host: ctx.smtp.host,
-    port: ctx.smtp.port,
-    secure: ctx.smtp.secure,
+    ...(await smtpTransportOptions(ctx.smtp)),
     auth: { user: ctx.smtp.user, pass: ctx.smtp.password },
     connectionTimeout: CONNECT_TIMEOUT_MS,
     greetingTimeout: CONNECT_TIMEOUT_MS,
     socketTimeout: SOCKET_TIMEOUT_MS,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ignoreTLS: mailTestMode(),
   })
   const unregister = closeOnJobAbort(() => transporter.close())
   try {
@@ -223,16 +188,11 @@ async function sendViaSmtp(
 }
 
 async function appendToSent(ctx: AccountContext, path: string, raw: Buffer, date: Date) {
-  await assertMailHost(ctx.imap.host)
   const client = new ImapFlow({
-    host: ctx.imap.host,
-    port: ctx.imap.port,
-    secure: ctx.imap.secure,
+    ...(await imapTransportOptions(ctx.imap)),
     auth: { user: ctx.imap.user, pass: ctx.imap.password },
     logger: false,
     greetingTimeout: CONNECT_TIMEOUT_MS,
-    tls: mailTestMode() ? { rejectUnauthorized: false } : undefined,
-    ...(mailTestMode() ? { doSTARTTLS: false as const } : {}),
   })
   const unregister = closeOnJobAbort(() => client.close())
   try {
@@ -281,7 +241,7 @@ export async function runSendMessage(
   const content = JSON.parse(
     decryptField(ctx.dek, row.content_enc.toString('utf8'), outboxContentAad(row.id)),
   ) as OutboxContent
-  const attachments = await loadAttachments(pool, ctx.dek, row.id)
+  const attachments = await loadUploads(pool, ctx.dek, { outboxId: row.id })
   const attachmentsMissing = attachments.length < row.attachment_count
   if (attachmentsMissing && !row.sent_at) {
     // Never send without an attachment the user added.

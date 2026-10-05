@@ -1,0 +1,23 @@
+# Optional override: run the signed release images from GHCR instead of
+# building on the host (roadmap 7.2, docs/process/release.md). Building locally
+# with plain `docker compose up --build` stays the default.
+#
+#   FMA_VERSION=0.1.0 docker compose -f docker-compose.yml -f docker-compose.release.yml pull
+#   FMA_VERSION=0.1.0 docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+#
+# FMA_VERSION: release without the leading "v" (e.g. 0.1.0, or 0.1 for the
+# newest patch of a minor line). FMA_IMAGE_PREFIX: registry/owner prefix for
+# forks. `!reset` needs Docker Compose >= 2.24.4.
+
+services:
+  web:
+    image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-web:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}
+    build: !reset null
+
+  api:
+    image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-api:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}
+    build: !reset null
+
+  worker:
+    image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-worker:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}
+    build: !reset null

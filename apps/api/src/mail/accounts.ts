@@ -16,15 +16,21 @@
  * - Editing connection data re-runs the connection test before anything is
  *   saved; credentials stay encrypted with the same DEK and are never sent
  *   back to the client (empty user/password fields mean "unchanged").
+ * - `syncSince` (`YYYY-MM-DD` or null, #28) limits the message sync to
+ *   messages received on or after that day; changing it never deletes
+ *   already stored older messages.
  */
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { enqueueJob } from '@fma/db/job-queue'
-import type {
-  AccountErrorCode,
-  AccountListResponse,
-  AccountStatus,
-  AccountSummary,
+import {
+  isoDay,
+  utcMidnight,
+  parseSyncSince,
+  type AccountErrorCode,
+  type AccountListResponse,
+  type AccountStatus,
+  type AccountSummary,
 } from '@fma/shared'
 import {
   decryptField,
@@ -52,6 +58,7 @@ interface MailAccountRow {
   capabilities: string[]
   sort_order: number
   last_sync_at: string | null
+  sync_since: Date | null
   /** Only selected by the list query. */
   unread_count?: number
   syncing?: boolean
@@ -62,11 +69,13 @@ interface CreateAccountBody {
   emailAddress?: string
   imap?: { host?: string; port?: number; user?: string; password?: string }
   smtp?: { host?: string; port?: number; user?: string; password?: string }
+  syncSince?: unknown
 }
 
 interface ParsedAccount {
   displayName: string
   emailAddress: string
+  syncSince: string | null
   imap: HostConfig
   smtp: HostConfig
 }
@@ -74,6 +83,7 @@ interface ParsedAccount {
 interface UpdateAccountBody {
   displayName?: unknown
   sortOrder?: unknown
+  syncSince?: unknown
   imap?: { host?: unknown; port?: unknown; user?: unknown; password?: unknown }
   smtp?: { host?: unknown; port?: unknown; user?: unknown; password?: unknown }
 }
@@ -91,7 +101,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Explicit column select: credential_enc and wrapped_dek must never leak. */
 const PUBLIC_COLUMNS = `id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
-  status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at`
+  status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at, sync_since`
 
 function credentialAad(accountId: string): string {
   return `mail_account.credential:${accountId}`
@@ -109,18 +119,34 @@ function isValidPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string'
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
 function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | null {
+  // The body is only typed, not validated by Fastify: check every field's
+  // runtime type so malformed input yields 400 instead of a TypeError (500).
+  if (!isOptionalString(body?.displayName) || !isOptionalString(body?.emailAddress)) return null
   const emailAddress = body?.emailAddress?.trim().toLowerCase() ?? ''
   if (!EMAIL_RE.test(emailAddress)) return null
   const imap = body?.imap
   const smtp = body?.smtp
-  if (!imap?.host || !imap.user || !imap.password) return null
-  if (!smtp?.host) return null
+  if (!isNonEmptyString(imap?.host) || !isNonEmptyString(imap.user)) return null
+  if (!isNonEmptyString(imap.password)) return null
+  if (!isNonEmptyString(smtp?.host)) return null
+  if (!isOptionalString(smtp.user) || !isOptionalString(smtp.password)) return null
   if (!isValidPort(imap.port) || !isValidPort(smtp.port)) return null
+  const syncSince = body?.syncSince === undefined ? null : parseSyncSince(body.syncSince)
+  if (syncSince === undefined) return null
 
   return {
     displayName: body?.displayName?.trim().slice(0, 100) || emailAddress,
     emailAddress,
+    syncSince,
     imap: {
       host: imap.host.trim().toLowerCase().slice(0, 253),
       port: imap.port,
@@ -153,6 +179,7 @@ function toPublicAccount(row: MailAccountRow): AccountSummary {
     capabilities: row.capabilities,
     sortOrder: row.sort_order,
     lastSyncAt: row.last_sync_at,
+    syncSince: row.sync_since ? isoDay(row.sync_since) : null,
     unreadCount: row.unread_count ?? 0,
     syncing: row.syncing ?? false,
   }
@@ -168,7 +195,8 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       const parsed = parseCreateBody(request.body)
       if (!parsed) {
         await reply.code(400).send({
-          message: 'Ungültige Kontodaten (E-Mail, Host, Port, Benutzer, Passwort prüfen).',
+          message:
+            'Ungültige Kontodaten (E-Mail, Host, Port, Benutzer, Passwort, Sync-Zeitraum prüfen).',
         })
         return
       }
@@ -186,12 +214,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Connection test FIRST: broken accounts are not persisted.
-      const imapResult = await testImap(parsed.imap)
+      const imapResult = await testImap(parsed.imap, { log: request.log })
       if (!imapResult.ok) {
         await reply.code(422).send({ stage: 'imap', test: imapResult })
         return
       }
-      const smtpResult = await testSmtp(parsed.smtp)
+      const smtpResult = await testSmtp(parsed.smtp, { log: request.log })
       if (!smtpResult.ok) {
         await reply.code(422).send({ stage: 'smtp', test: smtpResult })
         return
@@ -215,8 +243,9 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       const inserted = await pool.query<{ id: string }>(
         `INSERT INTO mail_account
            (id, user_id, display_name, email_address, imap_host, imap_port,
-            smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, status, capabilities)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ok', $12)
+            smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, status, capabilities,
+            sync_since)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'ok', $12, $13)
          RETURNING id`,
         [
           accountId,
@@ -231,6 +260,7 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
           keyId,
           credentialEnc,
           imapResult.capabilities ?? [],
+          utcMidnight(parsed.syncSince),
         ],
       )
       if (!inserted.rows[0]) throw new Error('account insert returned no id')
@@ -290,7 +320,8 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       const update = parseUpdateBody(request.body)
       if (!update) {
         await reply.code(400).send({
-          message: 'Ungültige Kontodaten (Name, Host, Port, Benutzer, Passwort prüfen).',
+          message:
+            'Ungültige Kontodaten (Name, Host, Port, Benutzer, Passwort, Sync-Zeitraum prüfen).',
         })
         return
       }
@@ -321,6 +352,9 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       }
       if (update.displayName !== undefined) set('display_name', update.displayName)
       if (update.sortOrder !== undefined) set('sort_order', update.sortOrder)
+      // Takes effect with the next message_sync; already stored older
+      // messages are kept (no deletion when the period gets shorter).
+      if (update.syncSince !== undefined) set('sync_since', utcMidnight(update.syncSince))
 
       let test: { imap: TestResult; smtp: TestResult } | undefined
       if (update.imap || update.smtp) {
@@ -331,12 +365,12 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
         const merged = mergeConnection(current, stored, update)
 
         // Connection test FIRST: nothing is saved when the new data fails.
-        const imapResult = await testImap(merged.imap)
+        const imapResult = await testImap(merged.imap, { log: request.log })
         if (!imapResult.ok) {
           await reply.code(422).send({ stage: 'imap', test: imapResult })
           return
         }
-        const smtpResult = await testSmtp(merged.smtp)
+        const smtpResult = await testSmtp(merged.smtp, { log: request.log })
         if (!smtpResult.ok) {
           await reply.code(422).send({ stage: 'smtp', test: smtpResult })
           return
@@ -369,8 +403,10 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
       if (sets.length > 0) {
         await pool.query(`UPDATE mail_account SET ${sets.join(', ')} WHERE id = $1`, values)
       }
-      // Re-sync right away with the new connection data.
-      if (test) await enqueueJob(pool, { type: 'folder_sync', accountId })
+      // Re-sync right away with the new connection data or sync limit.
+      if (test || update.syncSince !== undefined) {
+        await enqueueJob(pool, { type: 'folder_sync', accountId })
+      }
 
       const account = await pool.query<MailAccountRow>(
         `SELECT ${PUBLIC_COLUMNS} FROM mail_account WHERE id = $1`,
@@ -424,6 +460,8 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
 interface ParsedUpdate {
   displayName?: string
   sortOrder?: number
+  /** `YYYY-MM-DD`; null = no limit (all messages). */
+  syncSince?: string | null
   imap?: { host?: string; port?: number; user?: string; password?: string }
   smtp?: { host?: string; port?: number; user?: string; password?: string }
 }
@@ -448,6 +486,11 @@ function parseUpdateBody(body: UpdateAccountBody | undefined): ParsedUpdate | nu
       return null
     }
     result.sortOrder = order
+  }
+  if (body.syncSince !== undefined) {
+    const since = parseSyncSince(body.syncSince)
+    if (since === undefined) return null
+    result.syncSince = since
   }
   for (const stage of ['imap', 'smtp'] as const) {
     const input = body[stage]

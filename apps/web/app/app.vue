@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Auth UI (roadmap 1.6), mail view (roadmap 2.3) and settings with account
-// management (roadmap 2.1/3.1) and devices. The account list (with unread
-// counts for the switcher, 3.2) is refreshed periodically and on focus.
+// management (roadmap 2.1/3.1), devices and password change. The account
+// list (with unread counts for the switcher, 3.2) is refreshed periodically
+// and on focus.
 // Sync on start and focus (4.5, push-independent): on start, when the app
 // becomes visible/focused again and when it comes back online, it asks the
 // server to sync all accounts (POST /api/sync) and then polls the account
@@ -18,8 +19,8 @@
 // soon as it is back online; queued actions (utils/offline-queue.ts) are
 // replayed first, then the usual sync runs. Logout, an expired or revoked
 // session (401) or another user clear all offline data on this device.
-import { ForegroundSyncPolicy, unreadBadgeCount } from '@fma/shared'
-import type { AccountListResponse, AccountSummary } from '@fma/shared'
+import { ForegroundSyncPolicy, SwipeBack, hasUnsavedInput, unreadBadgeCount } from '@fma/shared'
+import type { AccountListResponse, AccountSummary, UserSettings } from '@fma/shared'
 import {
   clearOfflineData,
   cacheDeleteAccount,
@@ -58,6 +59,7 @@ const section = ref<'mail' | 'settings'>('mail')
 const email = ref('')
 const password = ref('')
 const deviceName = ref('')
+const setupCode = ref('')
 const busy = ref(false)
 const error = ref('')
 const info = ref('')
@@ -76,6 +78,116 @@ let sessionVerified = false
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
+
+// Swipe navigation (4.9): a swipe to the right goes one step back
+// (message -> list, account form -> settings, settings -> mail). The
+// gesture logic lives in SwipeBack (@fma/shared); listeners are passive,
+// so scrolling is never delayed.
+const mailView = ref<{
+  goBack: () => boolean
+  openFromUnified: (accountId: string, messageId: string) => Promise<void>
+} | null>(null)
+const swipe = new SwipeBack()
+const swipeDistance = ref(0)
+const swipeArmed = ref(false)
+
+/** Elements whose own horizontal gestures must win over the swipe. */
+function swipeAllowedFrom(target: EventTarget | null): boolean {
+  if (view.value !== 'app') return false
+  const selection = window.getSelection()
+  if (selection && !selection.isCollapsed) return false
+  let element = target instanceof Element ? target : null
+  if (
+    element?.closest('input, textarea, select, [contenteditable], dialog[open], .compose-backdrop')
+  ) {
+    return false
+  }
+  for (; element && element !== document.body; element = element.parentElement) {
+    if (element.scrollWidth > element.clientWidth) {
+      const overflow = getComputedStyle(element).overflowX
+      if (overflow === 'auto' || overflow === 'scroll') return false
+    }
+  }
+  return true
+}
+
+function onSwipeStart(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch || event.touches.length > 1 || !swipeAllowedFrom(event.target)) {
+    swipe.cancel()
+    swipeDistance.value = 0
+    return
+  }
+  swipe.start(touch.clientX, touch.clientY, event.timeStamp)
+}
+
+function onSwipeMove(event: TouchEvent): void {
+  const touch = event.touches[0]
+  if (!touch) return
+  swipeDistance.value = swipe.move(touch.clientX, touch.clientY)
+  swipeArmed.value = swipe.armed
+}
+
+function onSwipeEnd(event: TouchEvent): void {
+  const trigger = swipe.end(event.timeStamp)
+  swipeDistance.value = 0
+  swipeArmed.value = false
+  if (trigger) goBack()
+}
+
+/** A cancelled touch (e.g. system gesture) never navigates. */
+function onSwipeCancel(): void {
+  swipe.cancel()
+  swipeDistance.value = 0
+  swipeArmed.value = false
+}
+
+// Value of each settings field before the user first touched/focused it.
+// v-model leaves `defaultValue` empty, so this baseline is what "unsaved"
+// is measured against; fields never interacted with count as unchanged.
+const fieldBaseline = new WeakMap<Element, { value: string; checked: boolean }>()
+
+function recordFieldBaseline(event: Event): void {
+  const field = event.target
+  if (
+    (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) &&
+    field.closest('.settings') &&
+    !fieldBaseline.has(field)
+  ) {
+    const checked = field instanceof HTMLInputElement && field.checked
+    fieldBaseline.set(field, { value: field.value, checked })
+  }
+}
+
+/** One navigation step back; does nothing on the top-level mail list. */
+function goBack(): void {
+  if (section.value === 'settings') {
+    // Leaving the settings unmounts any open form; never drop unsaved input.
+    const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      '.settings input, .settings textarea',
+    )
+    const states = [...fields].map((field) => {
+      const base = fieldBaseline.get(field)
+      const checked = field instanceof HTMLInputElement ? field.checked : undefined
+      return {
+        type: field.type,
+        value: field.value,
+        defaultValue: base ? base.value : field.value,
+        checked,
+        defaultChecked: base ? base.checked : checked,
+      }
+    })
+    if (hasUnsavedInput(states)) return
+    if (editAccountId.value) editAccountId.value = ''
+    else section.value = 'mail'
+    return
+  }
+  if (unifiedOpen.value) {
+    unifiedOpen.value = false
+    return
+  }
+  mailView.value?.goBack()
+}
 
 // beforeinstallprompt fires once, early: listen before anything else mounts.
 if (import.meta.client) listenForInstallPrompt()
@@ -150,6 +262,16 @@ async function syncNow(force = false): Promise<void> {
   if (view.value !== 'app' || !syncPolicy.trigger(force)) return
   await fetch('/api/sync', { method: 'POST' }).catch(() => {})
   await loadAccounts()
+}
+
+/**
+ * Refresh button / pull-to-refresh in MailView (4.8) already asked the
+ * server: open the poll window and refresh, so the view reloads once the
+ * sync finished.
+ */
+function onManualSync(): void {
+  syncPolicy.trigger(true)
+  void loadAccounts()
 }
 
 /**
@@ -261,6 +383,7 @@ async function enterApp(userEmail: string): Promise<void> {
   await loadQueue()
   await replayQueue()
   await loadDevices()
+  await loadSettings()
   await loadAccounts()
   void syncNow(true)
 }
@@ -318,9 +441,11 @@ async function submit(): Promise<void> {
         password: password.value,
         deviceName: deviceName.value || undefined,
         platform: guessPlatform(),
+        ...(view.value === 'setup' ? { setupCode: setupCode.value } : {}),
       }),
     })
     password.value = ''
+    setupCode.value = ''
     info.value = ''
     await enterApp(res.email)
   } catch (err) {
@@ -328,6 +453,51 @@ async function submit(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+// Optional unified inbox (3.7): server-side setting, off by default. While
+// it is on, the mail view offers "Alle Posteingänge" above the accounts.
+const unifiedEnabled = ref(false)
+const unifiedOpen = ref(false)
+const unifiedBusy = ref(false)
+
+async function loadSettings(): Promise<void> {
+  try {
+    const res = await api<UserSettings>('/api/settings')
+    unifiedEnabled.value = res.unifiedInbox
+  } catch {
+    // Offline or failed: keep the current value (default off).
+  }
+  if (!unifiedEnabled.value) unifiedOpen.value = false
+}
+
+async function setUnifiedInbox(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  unifiedBusy.value = true
+  error.value = ''
+  try {
+    const res = await api<UserSettings>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ unifiedInbox: input.checked }),
+    })
+    unifiedEnabled.value = res.unifiedInbox
+  } catch (err) {
+    error.value =
+      err instanceof Error ? err.message : 'Einstellung konnte nicht gespeichert werden.'
+  } finally {
+    input.checked = unifiedEnabled.value
+    // Saved immediately: the toggle never counts as unsaved input.
+    fieldBaseline.set(input, { value: input.value, checked: input.checked })
+    unifiedBusy.value = false
+    if (!unifiedEnabled.value) unifiedOpen.value = false
+  }
+}
+
+/** A message picked in the unified inbox opens in its own account's view. */
+async function openUnifiedMessage(accountId: string, messageId: string): Promise<void> {
+  unifiedOpen.value = false
+  await nextTick()
+  await mailView.value?.openFromUnified(accountId, messageId)
 }
 
 async function loadDevices(): Promise<void> {
@@ -374,6 +544,12 @@ onMounted(() => {
   window.addEventListener('online', onForeground)
   window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onForeground)
+  window.addEventListener('touchstart', onSwipeStart, { passive: true })
+  window.addEventListener('touchmove', onSwipeMove, { passive: true })
+  window.addEventListener('touchend', onSwipeEnd, { passive: true })
+  window.addEventListener('touchcancel', onSwipeCancel, { passive: true })
+  document.addEventListener('focusin', recordFieldBaseline, true)
+  document.addEventListener('pointerdown', recordFieldBaseline, true)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', onWorkerMessage)
   }
@@ -386,6 +562,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', onForeground)
   window.removeEventListener('offline', onOffline)
   document.removeEventListener('visibilitychange', onForeground)
+  window.removeEventListener('touchstart', onSwipeStart)
+  window.removeEventListener('touchmove', onSwipeMove)
+  window.removeEventListener('touchend', onSwipeEnd)
+  window.removeEventListener('touchcancel', onSwipeCancel)
+  document.removeEventListener('focusin', recordFieldBaseline, true)
+  document.removeEventListener('pointerdown', recordFieldBaseline, true)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.removeEventListener('message', onWorkerMessage)
   }
@@ -402,6 +584,19 @@ onBeforeUnmount(() => {
     <form v-else-if="view === 'setup'" class="card form" @submit.prevent="submit">
       <h2>Einrichtung</h2>
       <p class="hint">Ersten Benutzer anlegen (Single-User-Instanz, ADR-0004).</p>
+      <label
+        >Setup-Code<input
+          v-model="setupCode"
+          type="text"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          required
+      /></label>
+      <p class="hint">
+        Steht im Log der API: <code>docker compose logs api</code> (oder
+        <code>SETUP_TOKEN</code> aus <code>.env</code>).
+      </p>
       <label>E-Mail<input v-model="email" type="email" autocomplete="username" required /></label>
       <label
         >Passwort (min. 10 Zeichen)<input
@@ -472,8 +667,34 @@ onBeforeUnmount(() => {
 
       <InstallBanner @guide="showInstallGuide" />
 
+      <!-- Swipe back (4.9): arrow at the left edge follows the finger -->
+      <div
+        v-if="swipeDistance > 0"
+        class="swipe-indicator"
+        :class="{ armed: swipeArmed }"
+        :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
+        aria-hidden="true"
+      >
+        &larr;
+      </div>
+
       <template v-if="section === 'mail'">
-        <MailView v-if="accounts.length > 0" :accounts="accounts" @edit-account="editAccount" />
+        <UnifiedInbox
+          v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen"
+          :accounts="accounts"
+          @open="openUnifiedMessage"
+          @back="unifiedOpen = false"
+        />
+        <MailView
+          v-if="accounts.length > 0"
+          v-show="!(unifiedEnabled && unifiedOpen)"
+          ref="mailView"
+          :accounts="accounts"
+          :unified-inbox="unifiedEnabled"
+          @open-unified="unifiedOpen = true"
+          @edit-account="editAccount"
+          @sync-requested="onManualSync"
+        />
         <div v-else class="card">
           <p>Noch kein E-Mail-Konto verbunden.</p>
           <button type="button" @click="section = 'settings'">Konto hinzufügen</button>
@@ -519,6 +740,26 @@ onBeforeUnmount(() => {
           </ul>
         </div>
 
+        <div class="card">
+          <h2>Posteingang</h2>
+          <label class="checkbox">
+            <input
+              type="checkbox"
+              :checked="unifiedEnabled"
+              :disabled="unifiedBusy"
+              @change="setUnifiedInbox"
+            />
+            Gemeinsamer Posteingang (alle Konten)
+          </label>
+          <p class="hint">
+            Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Posteingänge“ die
+            Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem Konto; geantwortet
+            wird immer aus dem Konto der Nachricht. Nur online verfügbar.
+          </p>
+        </div>
+
+        <PasswordChange @changed="loadDevices" />
+
         <InstallGuide />
         <PushSettings />
       </div>
@@ -531,6 +772,41 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.swipe-indicator {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-top: -1.25rem;
+  border-radius: 50%;
+  background: #e4e9ee;
+  color: #52606d;
+  font-size: 1.2rem;
+  opacity: 0.7;
+  pointer-events: none;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.swipe-indicator.armed {
+  background: #1273de;
+  color: #fff;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-indicator {
+    transform: none !important;
+    transition: none;
+  }
+}
+
 .shell {
   max-width: 28rem;
   margin: 3rem auto;
@@ -638,6 +914,12 @@ button.link {
 h2 {
   margin: 0 0 0.25rem;
   font-size: 1.1rem;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .hint {
