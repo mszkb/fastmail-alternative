@@ -29,6 +29,7 @@ import { loadAccountContext } from '../src/accounts'
 import {
   BackupError,
   createBackup,
+  masterKeyFromEnv,
   pendingOutboxCount,
   pgTargetFromEnv,
   restoreBackup,
@@ -40,6 +41,29 @@ const MASTER_KEY = randomBytes(32).toString('base64')
 const WRONG_KEY = randomBytes(32).toString('base64')
 const TABLES =
   'session, device, push_subscription, "user", mail_account, identity, folder, job, message, message_location, message_body, thread, outbox_message, attachment_upload'
+
+describe('masterKeyFromEnv', () => {
+  it('accepts a 32-byte base64 key', () => {
+    expect(masterKeyFromEnv({ MASTER_KEY })).toBe(MASTER_KEY)
+  })
+
+  it('rejects a missing or malformed key with a clear message without the key', () => {
+    expect(() => masterKeyFromEnv({})).toThrow(new BackupError('MASTER_KEY is not set'))
+    expect(() => masterKeyFromEnv({ MASTER_KEY: '  ' })).toThrow('MASTER_KEY is not set')
+    const short = randomBytes(16).toString('base64')
+    for (const value of [short, randomBytes(64).toString('base64'), 'not-a-key']) {
+      let error: unknown
+      try {
+        masterKeyFromEnv({ MASTER_KEY: value })
+      } catch (err) {
+        error = err
+      }
+      expect(error).toBeInstanceOf(BackupError)
+      expect((error as Error).message).toMatch(/^MASTER_KEY is invalid: expected 32 bytes/)
+      expect((error as Error).message).not.toContain(value)
+    }
+  })
+})
 
 describe.skipIf(!databaseUrl)('backup and restore', () => {
   let pool: pg.Pool
