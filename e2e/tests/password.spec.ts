@@ -52,4 +52,7 @@ test('password change signs out the other session, not this one', async ({ page,
   // Back to the original password for later runs against the same stack.
   form = await changePassword(page, 'e2e-password-2', USER.password)
   await expect(form.getByText('Passwort geändert. Andere Geräte wurden abgemeldet.')).toBeVisible()
+  // Each change rotates this session's token, which the specs after this one
+  // share via the storage state: store the current one.
+  await page.context().storageState({ path: '.auth/state.json' })
 })

@@ -38,6 +38,7 @@ import {
   unwrapAccountKey,
   wrapDataKey,
 } from '@fma/crypto'
+import { isAllowedMailPort, type MailProtocol } from '@fma/shared/mail-transport'
 import { requireAuth } from '../auth/routes'
 import { IDENTITY_IS_DEFAULT } from './identities'
 
@@ -99,6 +100,7 @@ function port(value: unknown): number | null {
 
 function parseHost(
   value: unknown,
+  protocol: MailProtocol,
   label: string,
 ): { host: string; port: number; user: string } | Invalid {
   const input = (value ?? {}) as Record<string, unknown>
@@ -107,6 +109,9 @@ function parseHost(
   const user = str(input.user ?? '', 320)
   if (!host || !HOST_RE.test(host) || parsedPort === null || user === null) {
     return { error: `${label}: Host, Port oder Benutzer ungültig.` }
+  }
+  if (!isAllowedMailPort(protocol, parsedPort)) {
+    return { error: `${label}: Port ${parsedPort} ist nicht erlaubt (MAIL_EXTRA_PORTS).` }
   }
   return { host, port: parsedPort, user }
 }
@@ -139,10 +144,10 @@ function parseAccount(value: unknown, index: number): ConfigExportAccount | Inva
   if (!emailAddress || !EMAIL_RE.test(emailAddress)) {
     return { error: `${label}: ungültige E-Mail-Adresse.` }
   }
-  const imap = parseHost(input.imap, `${label} (IMAP)`)
+  const imap = parseHost(input.imap, 'imap', `${label} (IMAP)`)
   if ('error' in imap) return imap
   if (!imap.user) return { error: `${label} (IMAP): Benutzername fehlt.` }
-  const smtp = parseHost(input.smtp, `${label} (SMTP)`)
+  const smtp = parseHost(input.smtp, 'smtp', `${label} (SMTP)`)
   if ('error' in smtp) return smtp
 
   const rawIdentities = Array.isArray(input.identities) ? input.identities : []

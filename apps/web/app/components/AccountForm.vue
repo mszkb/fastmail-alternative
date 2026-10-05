@@ -66,6 +66,8 @@ const ERROR_TEXT: Record<string, string> = {
   AUTH_FAILED: 'Zugangsdaten wurden vom Server abgelehnt.',
   HOST_NOT_FOUND: 'Host nicht gefunden – bitte Namen prüfen.',
   BLOCKED_HOST: 'Interner Host ist blockiert (Schutz vor Server-seitigem Request Forging).',
+  BLOCKED_PORT:
+    'Port nicht erlaubt – IMAP 143/993, SMTP 25/465/587/2525 (weitere per MAIL_EXTRA_PORTS auf dem Server).',
   CONNECTION_REFUSED: 'Verbindung abgelehnt – Host und Port prüfen.',
   TIMEOUT: 'Zeitüberschreitung beim Verbinden.',
   TLS_ERROR: 'TLS-Fehler – das Server-Zertifikat konnte nicht verifiziert werden.',

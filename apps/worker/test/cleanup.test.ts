@@ -349,7 +349,7 @@ describe.skipIf(!databaseUrl)('cleanup job', () => {
 
     const outcome = await runCleanup(pool, SETTINGS)
     expect(outcome.jobs).toBe(2)
-    const { rows } = await pool.query<{ id: string }>('SELECT id::text FROM job ORDER BY id')
+    const { rows } = await pool.query<{ id: string }>('SELECT id::text FROM job ORDER BY job.id')
     expect(rows.map((row) => row.id)).toEqual([doneNew, failedMid, queuedOld, runningOld])
   })
 

@@ -67,6 +67,7 @@ const NETWORK_CODES: Record<string, AccountErrorCode> = {
   NoConnection: 'CONNECTION_LOST',
   ETLS: 'TLS_ERROR',
   PRIVATE_HOST_BLOCKED: 'BLOCKED_HOST',
+  PORT_NOT_ALLOWED: 'BLOCKED_PORT',
 }
 
 /** IMAP response codes (RFC 5530 and provider extensions) for throttling. */

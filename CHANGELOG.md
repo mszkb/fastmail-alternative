@@ -29,24 +29,32 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Release-Prozess nach SemVer: Tags `vX.Y.Z` erzeugen signierte Multi-Arch-Images (amd64, arm64) für api, worker und web in der GitHub Container Registry; Signaturprüfung mit `cosign verify`; `/api/health` meldet die Release-Version ([Release-Prozess](docs/process/release.md), #62)
 - **Betreiber:** Optional `docker-compose.release.yml` (mit `FMA_VERSION`, optional `FMA_IMAGE_PREFIX`) für fertige Images statt lokalem Build; der lokale Build bleibt Standard, keine `.env`-Änderung nötig
 
-- Browser-Tests mit Playwright (`e2e/`, #74): Ersteinrichtung, Login, Konto anlegen, Lesen mit Inline-Bild und Anhang, Entwurf mit Anhang, Weiterleiten, `sync_since`, Speicheranzeige, gemeinsamer Posteingang, Aktualisieren, Pull-to-Refresh, Swipe-Back und Passwortwechsel im Handy-Viewport mit Touch; `e2e/stack.mjs` startet api, worker und web lokal aus dem Build. `Makefile` mit Kurzbefehlen für Betrieb und Tests
+- Browser-Tests mit Playwright (`e2e/`, #74): Ersteinrichtung, Login, Konto anlegen, Lesen mit Inline-Bild und Anhang, Entwurf mit Anhang, Weiterleiten, `sync_since`, Speicheranzeige, gemeinsamer Posteingang, Aktualisieren, Pull-to-Refresh, Swipe-Back und Passwortwechsel im Handy-Viewport mit Touch; `e2e/stack.mjs` startet api, worker und web lokal aus dem Build. `Makefile` mit Kurzbefehlen für Betrieb und Tests; läuft in CI als eigener Job „Browser tests (Playwright)“ gegen PostgreSQL und GreenMail (Report und Traces bei Fehlschlag als Artifact)
+- Doku: [Mailanbieter und Kompatibilitätsmatrix](docs/product/mail-providers.md) (#18), [UX-Flows](docs/product/ux-flows.md) (#19), [offene Produktfragen](docs/product/offene-fragen.md) und Entwurf [ADR-0012 Anonyme Nutzungsstatistik (Opt-in)](docs/adr/0012-usage-telemetry.md) (#78, Status Proposed)
 - **Betreiber:** `POSTGRES_HOST_PORT` (optional, Standard `5432`) verschiebt den Wartungsport von PostgreSQL auf `127.0.0.1`, falls auf dem Host schon eine PostgreSQL-Instanz läuft
 
 ### Changed
 
 - **Betreiber:** Der Worker hat jetzt einen Docker-Healthcheck (Heartbeat-Datei, aktualisiert alle 30 s nach erfolgreichem Datenbankzugriff; `unhealthy` ab 120 s ohne Heartbeat). `docker compose up --wait` und `scripts/upgrade.sh` warten damit auch auf den Worker; keine `.env`-Änderung nötig
+- **Betreiber:** `scripts/upgrade.sh` bricht vor dem Backup ab, wenn untracked Dateien mit Dateien des Ziels kollidieren (vorher scheiterte erst `git checkout`), und bei Release-Images (`COMPOSE_FILE` mit `docker-compose.release.yml`) mit Hinweis auf den händischen Ablauf. Nach dem Upgrade entfernt es nur noch unbenannte Images des eigenen Compose-Projekts statt aller ungenutzten Images des Docker-Hosts
+- **Betreiber:** Release-Images lassen sich dauerhaft per `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml` und `FMA_VERSION` in der `.env` einschalten (auskommentiert in `.env.example`); eine eigene `docker-compose.override.yml` muss dann in `COMPOSE_FILE` angehängt werden. Upgrade-Doku ergänzt: erstes Upgrade von Versionen ohne `scripts/upgrade.sh` (Skript nach `.upgrade-bootstrap/`), ältere Versionen ohne Worker-Healthcheck, detached HEAD nach Rollback, `UPGRADE_TARGET` im händischen Ablauf
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
 - Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 - Weiterleiten übernimmt eingebettete Bilder (cid:, PNG/JPEG/GIF/WebP) der Originalmail als normale Anhänge, da die Weiterleitung als Text versendet wird; SVG/HTML-Inline-Teile werden nicht übernommen, Größen- und Anzahlgrenzen gelten wie bisher (#53)
 
 ### Fixed
 
-- Ein neu verbundenes Konto zeigte keine Ordner („Noch keine Ordner synchronisiert“), bis die Seite neu geladen wurde, wenn es während des ersten Abgleichs geöffnet wurde
+- `backup.js` (`create`, `verify`, `restore`) meldet einen fehlenden oder ungültigen `MASTER_KEY` jetzt vorab und verständlich (`MASTER_KEY is invalid: expected 32 bytes, base64-encoded …`, ohne Key-Inhalt) statt nur `backup failed: Error`
+- Die Anhangsliste im Verfassen-Dialog hatte keinen Innenabstand und klebte am linken Rand
+- Ein neu verbundenes Konto zeigte keine Ordner („Noch keine Ordner synchronisiert“), bis die Seite neu geladen wurde, wenn es während des ersten Abgleichs geöffnet wurde; außerdem bemerkt die App das Ende des ersten Abgleichs eines neu hinzugefügten oder importierten Kontos jetzt binnen Sekunden statt erst beim nächsten 60-s-Kontenabgleich
 - Beim Verfassen erschien „Entwurf gespeichert“ nie, und Schließen speicherte einen unveränderten Entwurf erneut
 - **Betreiber:** Restore-Anleitung startete den Worker sofort und verschickte dabei ungesendete Postausgangs-Einträge aus dem Backup ohne Prüfung; jetzt erst ohne Worker starten und den Postausgang prüfen ([Backup & Restore](docs/operations/backup-restore.md#restore-auf-einer-frischen-instanz)). Installations-, Konfigurations- und Upgrade-Doku nach einem Testlauf korrigiert ([Testbericht](docs/operations/test-report-2026-10-05.md))
 
 ### Security
 
+- ASVS-Review (#56), letzte Punkte: Mail-Verbindungen nur noch auf Standard-Ports (IMAP 143/993, SMTP 25/465/587/2525), damit ein Konto nicht als Port-Scanner dient; neuer Fehlercode `BLOCKED_PORT`. **Betreiber:** Konten auf anderen Ports schlagen nun fehl – Port umstellen oder in `.env` per `MAIL_EXTRA_PORTS=1143,10465` freigeben (neu, optional, an api und worker durchgereicht)
+- **Betreiber:** Neue optionale Variable `COOKIE_SECURE` (`1`/`0`) für das `Secure`-Flag des Session-Cookies, z. B. `1` hinter einem eigenen TLS-Proxy vor caddy mit `DOMAIN=:80`
+- `pnpm audit --prod --audit-level=high` läuft in CI und blockiert bei neuen Lücken; zwei ungepatchte Advisories der Nuxt-Build-Werkzeuge sind begründet ausgenommen (`pnpm-workspace.yaml`)
 - Envelope-Encryption (AES-256-GCM, Schlüssel pro Konto) für Zugangsdaten und alle lesbaren Mailinhalte at rest; Master-Key nur aus der Umgebung
 - Logs, Fehlermeldungen und Push-Payloads ohne Mailinhalte, Adressen, Zugangsdaten oder Fehlertexte der Anbieter
 - Rate Limits, CSRF-Origin-Prüfung, Session-Härtung, Security-Header/CSP, Login-Lockout

@@ -99,6 +99,7 @@ export function classifySmtpError(err: unknown): { code: OutboxErrorCode; perman
   const error = (err ?? {}) as { code?: string; responseCode?: number; message?: string }
   const text = String(error.message ?? err)
   if (error.code === 'PRIVATE_HOST_BLOCKED') return { code: 'BLOCKED_HOST', permanent: true }
+  if (error.code === 'PORT_NOT_ALLOWED') return { code: 'BLOCKED_PORT', permanent: true }
   // Checked before the response codes: a stripped/rejected STARTTLS comes
   // with a 5xx reply, but retrying can help (the downgrade may be transient).
   if (isStartTlsUnavailable(err)) return { code: 'TLS_REQUIRED', permanent: false }

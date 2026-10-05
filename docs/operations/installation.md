@@ -96,13 +96,20 @@ Das baut die Images (web, api, worker), startet alle Dienste und wartet, bis all
 
 **Port belegt?** postgres ist auf dem Host unter `127.0.0.1:5432` erreichbar (SSH-Tunnel/Wartung). Läuft auf dem Host schon eine andere PostgreSQL-Instanz, bricht der Start mit `Bind for 127.0.0.1:5432 failed: port is already allocated` ab – dann in der `.env` einen freien Port setzen, z. B. `POSTGRES_HOST_PORT=55432`. Sind 80/443 belegt, die caddy-Ports in einer eigenen `docker-compose.override.yml` mit `ports: !override` ändern (siehe [Konfiguration](configuration.md#fest-eingestellt)).
 
-**Optional: fertige Images statt lokal bauen.** Wenn ein Release veröffentlicht und signiert ist, gibt es dafür Multi-Arch-Images (amd64, arm64) in der GitHub Container Registry. Das spart auf schwacher Hardware den Build; lokal bauen bleibt der Standard und braucht keine Registry. Die Versionsnummer unten ist nur ein Beispiel – vorhandene Releases stehen auf der Release-Seite des Repositorys:
+**Optional: fertige Images statt lokal bauen.** Wenn ein Release veröffentlicht und signiert ist, gibt es dafür Multi-Arch-Images (amd64, arm64) in der GitHub Container Registry. Das spart auf schwacher Hardware den Build; lokal bauen bleibt der Standard und braucht keine Registry. Dauerhaft einschalten über zwei Zeilen in der `.env` (die Versionsnummer ist nur ein Beispiel – vorhandene Releases stehen auf der Release-Seite des Repositorys):
 
 ```sh
-export FMA_VERSION=0.1.0   # Beispiel: gewünschtes Release ohne "v"
-docker compose -f docker-compose.yml -f docker-compose.release.yml pull
-docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+# in .env ergänzen
+COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+FMA_VERSION=0.1.0   # gewünschtes Release ohne "v"
 ```
+
+```sh
+docker compose pull
+docker compose up -d --wait
+```
+
+Mit `COMPOSE_FILE` in der `.env` nutzen alle weiteren `docker compose`-Befehle (auch `scripts/backup.sh`) die Release-Images. Eine eigene `docker-compose.override.yml` (z. B. für andere caddy-Ports) wird dann **nicht mehr automatisch geladen** und muss angehängt werden: `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml:docker-compose.override.yml`. Upgrades mit Release-Images: [Upgrade](upgrade.md#fertige-images-statt-lokal-bauen).
 
 Signatur vorher prüfen und weitere Details: [Release-Prozess](../process/release.md).
 

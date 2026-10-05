@@ -34,3 +34,13 @@ Ein eigener Index wird erst erwogen, wenn IMAP `SEARCH` in der Praxis nicht reic
 - **Zuordnung:** Die UIDs des Providers werden mit der aktuellen UIDVALIDITY auf lokal synchronisierte Nachrichten (`message_location`) abgebildet; angezeigt werden nur diese (neueste 100). Treffer ohne lokale Kopie werden nur gezählt („weitere Treffer beim Anbieter“) – kein Nachladen auf Verdacht.
 - **Kein Klartext gespeichert oder geloggt:** Suchbegriffe und Ergebnisse landen weder in der DB noch in Logs (Request-URLs werden ohne Query-String geloggt, Fehler nur als Code). Die UID-Listen einer Suche liegen höchstens 60 s im Speicher der API, unter einem gesalzenen Hash der Anfrage; Flags und Inhalte werden bei jeder Antwort frisch aus der DB gelesen. Antworten tragen `Cache-Control: no-store` und werden im Client nicht offline gespeichert.
 - Die Suchqualität hängt vom Provider ab (z. B. vergleicht GreenMail `FROM` nur mit der vollständigen Adresse, RFC 3501 verlangt Teilstrings).
+
+## Wann ein eigener Index wieder auf den Tisch kommt (Roadmap 5.2, 2026-10-05)
+
+Die Entscheidung bleibt: kein eigener Index. Roadmap 5.2 (#52) wird erst begonnen, wenn mindestens einer dieser Punkte eintritt. Die ersten beiden müssen im Betrieb belegt sein (Issue mit Anbieter und Messwert, ohne Suchbegriffe oder Inhalte); der dritte ist eine Produktentscheidung:
+
+- Ein in der [Anbieter-Matrix](../product/mail-providers.md) gelisteter Anbieter liefert für `TEXT`/`FROM`/`SUBJECT` regelmäßig falsche oder keine Treffer (z. B. nur exakte Adressen statt Teilstrings).
+- Suchen dauern bei üblichen Postfächern (bis 10 000 Nachrichten je Ordner) regelmäßig länger als 10 s oder laufen in die 30-s-Frist.
+- Offline-Suche wird zur Anforderung; dann zuerst die Suche über den verschlüsselten Offline-Cache auf dem Gerät prüfen, bevor ein Server-Index entsteht.
+
+Ein Index muss dann die Bedingungen aus „Entscheidung“ erfüllen (verträglich mit der Verschlüsselung at rest) und braucht eine neue ADR.

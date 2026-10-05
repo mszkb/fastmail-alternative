@@ -8,3 +8,10 @@ minimumReleaseAgeExclude:
   - vue-tsc@3.3.12
 allowBuilds:
   esbuild: true
+# pnpm audit (CI, ASVS N5): ignored advisories have no patched version and
+# only reach the Nuxt build toolchain of apps/web, never a runtime image
+# (web ships static files in nginx). Review when Dependabot offers updates.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-86w9-cpqp-85rv # node-forge via listhen (nuxt dev server certs)
+    - GHSA-vfj7-8cjw-p6xm # braces via micromatch (nitropack globbing)

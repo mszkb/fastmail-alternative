@@ -267,7 +267,9 @@ async function syncNow(force = false): Promise<void> {
 /**
  * Refresh button / pull-to-refresh in MailView (4.8) already asked the
  * server: open the poll window and refresh, so the view reloads once the
- * sync finished.
+ * sync finished. Same after adding or importing accounts: their first sync
+ * is already queued, without the poll window the view would only notice
+ * its end with the next regular account refresh (60 s).
  */
 function onManualSync(): void {
   syncPolicy.trigger(true)
@@ -715,8 +717,8 @@ onBeforeUnmount(() => {
           @deleted="loadAccounts"
           @changed="loadAccounts"
         />
-        <AccountForm @created="loadAccounts" />
-        <ConfigTransfer @imported="loadAccounts" />
+        <AccountForm @created="onManualSync" />
+        <ConfigTransfer @imported="onManualSync" />
 
         <div class="card">
           <h2>Geräte</h2>

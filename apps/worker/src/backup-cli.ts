@@ -17,6 +17,7 @@ import {
   BackupError,
   createBackup,
   fileSize,
+  masterKeyFromEnv,
   pendingOutboxCount,
   pgTargetFromEnv,
   restoreBackup,
@@ -54,8 +55,8 @@ async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2)
   const force = rest.includes('--force')
   const args = rest.filter((arg) => !arg.startsWith('--'))
-  const masterKey = process.env.MASTER_KEY
-  if (!masterKey) throw new BackupError('MASTER_KEY is not set')
+  // Checked first, so a wrong key never ends in a bare "backup failed: Error".
+  const masterKey = masterKeyFromEnv()
   const common = {
     db: pgTargetFromEnv(),
     mailDataDir: process.env.MAIL_DATA_DIR ?? '/app/mail-data',

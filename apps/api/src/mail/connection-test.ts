@@ -3,7 +3,7 @@
  * returns a machine-readable result with a human-understandable message.
  *
  * Error mapping turns low-level errors into stable codes the frontend can
- * translate: AUTH_FAILED, HOST_NOT_FOUND, BLOCKED_HOST, CONNECTION_REFUSED,
+ * translate: AUTH_FAILED, HOST_NOT_FOUND, BLOCKED_HOST, BLOCKED_PORT, CONNECTION_REFUSED,
  * TIMEOUT, TLS_ERROR, TLS_REQUIRED, UNKNOWN.
  *
  * Every connection goes through `@fma/shared/mail-transport` (SSRF check on
@@ -54,7 +54,14 @@ function classifyError(err: unknown): { code: string; message: string } {
   const text = String((err as Error)?.message ?? err)
   const code = (err as { code?: string; authenticationFailed?: boolean }) ?? {}
 
-  // First: refused before LOGIN/AUTH, so it is never an auth failure.
+  // Refused before connecting: port outside the allowlist (ASVS N2).
+  if (code.code === 'PORT_NOT_ALLOWED') {
+    return {
+      code: 'BLOCKED_PORT',
+      message: 'Port nicht erlaubt (IMAP 143/993, SMTP 25/465/587/2525).',
+    }
+  }
+  // Refused before LOGIN/AUTH, so it is never an auth failure.
   if (isStartTlsUnavailable(err)) {
     return {
       code: 'TLS_REQUIRED',

@@ -81,6 +81,24 @@ export class BackupError extends Error {
   }
 }
 
+/**
+ * MASTER_KEY from the environment, checked before any backup work: a
+ * missing or malformed key gets a clear message instead of a bare error
+ * type. The message never contains the key or parts of it.
+ */
+export function masterKeyFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  const value = env.MASTER_KEY
+  if (!value?.trim()) throw new BackupError('MASTER_KEY is not set')
+  try {
+    loadMasterKey(value)
+  } catch {
+    throw new BackupError(
+      'MASTER_KEY is invalid: expected 32 bytes, base64-encoded (as written by scripts/setup-env.mjs)',
+    )
+  }
+  return value
+}
+
 /** PgTarget from DATABASE_URL or the POSTGRES_* variables (same as createPool). */
 export function pgTargetFromEnv(env: NodeJS.ProcessEnv = process.env): PgTarget {
   if (env.DATABASE_URL) {

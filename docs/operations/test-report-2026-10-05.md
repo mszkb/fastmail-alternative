@@ -13,7 +13,7 @@ Dauern mit warmem Build-Cache – nicht repräsentativ für den Pi.
 | 3   | Backup/Restore in frisches Projekt (#57)        | ok – **Doppelversand nach Restore** behoben (Doku) |
 | 4   | Release-Override (#62), `docker compose config` | ok                                                 |
 | 5   | UI-Abnahme im Browser (Handy-Viewport, Touch)   | ok – 2 Bugs gefunden und behoben                   |
-| 6   | Playwright-E2E (#74, #75)                       | Setup im Repo (`e2e/`), lokal grün; CI-Job offen   |
+| 6   | Playwright-E2E (#74, #75)                       | ok – CI-Job, erster Gesamtlauf: 3 Befunde behoben  |
 | 7   | Lasttest (#60)                                  | nicht durchgeführt (optional)                      |
 
 ## 1. Frische Installation nach `installation.md`
@@ -93,10 +93,28 @@ Kleiner Layout-Befund: Im Verfassen-Dialog klebt die Anhangsliste am linken Rand
 
 `apps/worker/test/quotas.test.ts › never runs more jobs per IMAP host than the limit` war auf `main` unter macOS rot (`listen EADDRNOTAVAIL 127.0.0.2`: macOS bindet nur `127.0.0.1` auf `lo0`). Der Test überspringt sich jetzt, wenn die Adresse nicht bindbar ist; unter Linux/CI läuft er unverändert.
 
+## Nachtrag: erster Gesamtlauf und CI-Job (#74)
+
+Lokal liefen die Specs nur einzeln. Der erste Gesamtlauf in einem Durchgang (Linux-Container, Node 24, PostgreSQL 16, GreenMail 2.1.14 als JAR, Chromium) war zunächst rot:
+
+| Befund                                                                                       | Ursache                                                                                                                                                  | Behebung                                                                                             |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Alle Specs nach `password.spec` landeten auf der Anmeldeseite                                | Der Passwortwechsel rotiert das Token der eigenen Sitzung (gewollt); die gemeinsame `.auth/state.json` hielt noch das alte                               | Test: Storage-State nach dem Wechsel neu schreiben                                                   |
+| Swipe-Back-Tests: leere Seite nach dem Wischen                                               | Das volle Chromium führt bei der Touch-Geste die eigene History-Navigation aus (die Headless-Shell nicht)                                                | Test-Konfiguration: `--disable-features=OverscrollHistoryNavigation`                                 |
+| **Neues Konto blieb leer** („Noch keine Ordner synchronisiert“), auch einzeln reproduzierbar | **App-Bug:** Nach „Konto hinzufügen“ (und Import) öffnete die App das Poll-Fenster nicht; das Ende des Erst-Syncs fiel erst beim 60-s-Kontenabgleich auf | `app.vue`: Poll-Fenster wie beim manuellen Sync öffnen; `new-account.spec` deckt das ab (vorher rot) |
+
+Danach alle 12 Tests grün in ca. 75 s. Der CI-Job „Browser tests (Playwright)“ (`.github/workflows/ci.yml`) startet PostgreSQL (eigene Datenbank `mail_e2e`) und GreenMail als Services, baut, installiert Chromium und lädt bei Fehlschlag HTML-Report und Traces als Artifact hoch.
+
+Weitere Punkte aus diesem Bericht, inzwischen erledigt:
+
+- `upgrade.md`: Bootstrap für das erste Upgrade (`.upgrade-bootstrap/`), ältere Versionen ohne Worker-Healthcheck, detached HEAD nach Rollback, `UPGRADE_TARGET` im händischen `printf`.
+- Release-Images dauerhaft per `COMPOSE_FILE` in `.env` (installation, configuration, upgrade, release); mit Compose 5.3 per `docker compose config` geprüft, auch dass eine eigene `docker-compose.override.yml` dann nur geladen wird, wenn sie in `COMPOSE_FILE` steht.
+- `backup.js`: ungültiger `MASTER_KEY` → `backup failed: MASTER_KEY is invalid: expected 32 bytes, base64-encoded …` (Test in `apps/worker/test/backup.test.ts`).
+- `upgrade.sh`: `image prune` nur mit `label=com.docker.compose.project=<projekt>`; Abbruch vor dem Backup bei untracked Dateien, die das Ziel mitbringt; Abbruch bei Release-Images. Geprüft mit einem Test-Repository und einem Docker-Stub (Docker selbst lief in dieser Umgebung nicht).
+- Anhangsliste im Verfassen-Dialog: gleicher Innenabstand wie die Felder (Assertion in `compose.spec`, vorher rot).
+- Produktfragen zum Sync-Verhalten: [offene-fragen.md](../product/offene-fragen.md).
+
 ## Offene Punkte
 
-- `upgrade.md`: Bootstrap-Hinweis für Installationen ohne `scripts/upgrade.sh`; ältere Versionen ohne Worker-Healthcheck; detached HEAD nach Rollback; `UPGRADE_TARGET` im händischen `printf`.
-- Release-Images dauerhaft: `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml` in `.env` dokumentieren (inkl. eigener Override-Datei).
-- `backup-cli`: ungültiger `MASTER_KEY` ergibt nur `backup failed: Error` – vorab prüfen und klar melden.
-- `upgrade.sh`: `docker image prune -f` auf Projekt-Images begrenzen; Kollision untracked Dateien mit dem Ziel vor dem Backup prüfen.
-- E2E als CI-Job (Postgres + GreenMail als Services), Makefile, Lasttest (#60), Anhangsliste-Layout.
+- Lasttest (#60) – braucht Docker mit Speicherlimits, bleibt lokal.
+- `upgrade.sh`-Änderungen einmal gegen ein echtes Compose-Projekt laufen lassen (Label-Filter beim `image prune`).

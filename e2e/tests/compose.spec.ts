@@ -17,6 +17,10 @@ test('saves a draft with attachment and reopens it', async ({ page }) => {
     buffer: Buffer.from('Anhang im Entwurf'),
   })
   await expect(compose.getByText('notizen.txt')).toBeVisible()
+  // Layout: the attachment list has the same left inset as the fields.
+  const nameBox = (await compose.getByText('notizen.txt').boundingBox())!
+  const labelBox = (await compose.getByText('Betreff', { exact: true }).boundingBox())!
+  expect(Math.round(nameBox.x)).toBe(Math.round(labelBox.x))
   await expect(compose.getByRole('status')).toHaveText('Entwurf gespeichert')
   await compose.getByTitle('Schließen, Entwurf behalten (Esc)').click()
   await expect(compose).toBeHidden()

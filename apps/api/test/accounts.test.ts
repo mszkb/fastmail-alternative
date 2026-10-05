@@ -81,6 +81,28 @@ describe.skipIf(!databaseUrl || !greenmailHost)('mail accounts', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('rejects hosts that are neither a hostname nor an IP literal', async () => {
+    for (const host of [
+      'imap example.com',
+      'https://imap.example.com',
+      'imap.example.com:993',
+      'imap.example.com/path',
+      '-imap.example.com',
+      'imap..example.com',
+      `${'a'.repeat(64)}.example.com`,
+    ]) {
+      const res = await inject('POST', '/api/accounts', {
+        token: authToken,
+        payload: {
+          emailAddress: 'x@example.com',
+          imap: { host, port: 993, user: 'x', password: 'y' },
+          smtp: { host: 'smtp.example.com', port: 465 },
+        },
+      })
+      expect(res.statusCode, host).toBe(400)
+    }
+  })
+
   it('processes loopback hosts in test mode without persisting on failure', async () => {
     // MAIL_ALLOW_PRIVATE_HOSTS=1 disables the SSRF guard in test environments
     // (blocking itself is covered by ssrf.test.ts). Wrong credentials must

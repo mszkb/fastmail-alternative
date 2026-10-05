@@ -21,6 +21,7 @@
  *   already stored older messages.
  */
 import { randomUUID } from 'node:crypto'
+import { isIP } from 'node:net'
 import type { FastifyInstance } from 'fastify'
 import { enqueueJob } from '@fma/db/job-queue'
 import {
@@ -119,6 +120,19 @@ function isValidPort(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535
 }
 
+/** DNS hostname labels (letters, digits, inner hyphens), optional trailing dot. */
+const HOSTNAME_RE =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/
+
+/**
+ * Normalized mail host, or null when it is neither a hostname nor an IP
+ * literal (no URLs, ports, paths or spaces; ASVS 5.1.3).
+ */
+function parseHostName(value: string): string | null {
+  const host = value.trim().toLowerCase()
+  return HOSTNAME_RE.test(host) || isIP(host) !== 0 ? host : null
+}
+
 function isOptionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === 'string'
 }
@@ -140,6 +154,9 @@ function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | n
   if (!isNonEmptyString(smtp?.host)) return null
   if (!isOptionalString(smtp.user) || !isOptionalString(smtp.password)) return null
   if (!isValidPort(imap.port) || !isValidPort(smtp.port)) return null
+  const imapHost = parseHostName(imap.host)
+  const smtpHost = parseHostName(smtp.host)
+  if (!imapHost || !smtpHost) return null
   const syncSince = body?.syncSince === undefined ? null : parseSyncSince(body.syncSince)
   if (syncSince === undefined) return null
 
@@ -148,14 +165,14 @@ function parseCreateBody(body: CreateAccountBody | undefined): ParsedAccount | n
     emailAddress,
     syncSince,
     imap: {
-      host: imap.host.trim().toLowerCase().slice(0, 253),
+      host: imapHost,
       port: imap.port,
       secure: isSecurePort(imap.port),
       user: imap.user.trim().slice(0, 320),
       password: imap.password,
     },
     smtp: {
-      host: smtp.host.trim().toLowerCase().slice(0, 253),
+      host: smtpHost,
       port: smtp.port,
       secure: isSecurePort(smtp.port),
       // Empty strings count as "not provided" -> fall back to IMAP credentials.
@@ -498,8 +515,9 @@ function parseUpdateBody(body: UpdateAccountBody | undefined): ParsedUpdate | nu
     if (!input || typeof input !== 'object') return null
     const parsed: NonNullable<ParsedUpdate['imap']> = {}
     if (input.host !== undefined) {
-      if (typeof input.host !== 'string' || !input.host.trim()) return null
-      parsed.host = input.host.trim().toLowerCase().slice(0, 253)
+      const host = typeof input.host === 'string' ? parseHostName(input.host) : null
+      if (!host) return null
+      parsed.host = host
     }
     if (input.port !== undefined) {
       if (!isValidPort(input.port)) return null

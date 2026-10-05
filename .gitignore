@@ -19,3 +19,6 @@ backups/
 # logs & os
 *.log
 .DS_Store
+
+# one-off upgrade.sh copy for the first upgrade (docs/operations/upgrade.md)
+.upgrade-bootstrap/

@@ -16,6 +16,7 @@ Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktue
 | -------------------------- | --------------------------------------- |
 | Phasen, Milestones, Epics  | `ROADMAP.md`                            |
 | Vision, Zielgruppen, Scope | `docs/product/vision.md`                |
+| Offene Produktfragen       | `docs/product/offene-fragen.md`         |
 | Architektur                | `docs/architecture/overview.md`         |
 | Datenmodell (ER)           | `docs/architecture/data-model.md`       |
 | Daten- & Sicherheitsmodell | `docs/architecture/security.md`         |

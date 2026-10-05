@@ -24,6 +24,18 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 1
 fi
 
+# Release images (COMPOSE_FILE with docker-compose.release.yml in .env)
+# have no build: the script would switch the checkout but keep the old
+# images running. Those upgrades are manual (FMA_VERSION in .env). Checked
+# per app service, so a build in an own override file does not count.
+CONFIG="$(docker compose config web api worker)"
+if [ "$(printf '%s\n' "$CONFIG" | grep -c '^    build:')" -ne 3 ]; then
+  echo "upgrade: web, api and worker are not all built locally (release images?) - upgrade by hand," >&2
+  echo "upgrade: see 'Fertige Images statt lokal bauen' in docs/operations/upgrade.md" >&2
+  exit 1
+fi
+PROJECT="$(printf '%s\n' "$CONFIG" | sed -n 's/^name: *//p' | tr -d "\"'")"
+
 PREVIOUS="$(git rev-parse HEAD)"
 echo "upgrade: current version $(git describe --tags --always)"
 
@@ -49,6 +61,35 @@ if ! git merge-base --is-ancestor "$PREVIOUS" "$TARGET_COMMIT"; then
   echo "upgrade: target $TARGET_COMMIT is not a successor of the current commit $PREVIOUS" >&2
   echo "upgrade: a downgrade needs the backup of the old version - see 'Rollback' in docs/operations/upgrade.md" >&2
   exit 1
+fi
+
+# Untracked files in the way of the target make `git checkout` fail - only
+# after the backup. Check first: an untracked file at a path the target
+# adds, at one of its parent directories, or below it (the target adds a
+# file where an untracked directory is). Ignored files are overwritten by git.
+UNTRACKED="$(git ls-files --others --exclude-standard)"
+if [ -n "$UNTRACKED" ]; then
+  COLLISIONS="$(git diff --name-only --no-renames --diff-filter=A "$PREVIOUS" "$TARGET_COMMIT" |
+    UNTRACKED="$UNTRACKED" awk '
+      BEGIN {
+        n = split(ENVIRON["UNTRACKED"], files, "\n")
+        for (i = 1; i <= n; i++) {
+          file[files[i]] = 1
+          dir = files[i]
+          while (sub(/\/[^\/]*$/, "", dir)) parent[dir] = 1
+        }
+      }
+      {
+        hit = ($0 in file) || ($0 in parent)
+        dir = $0
+        while (!hit && sub(/\/[^\/]*$/, "", dir)) hit = (dir in file)
+        if (hit) print
+      }')"
+  if [ -n "$COLLISIONS" ]; then
+    echo "upgrade: untracked files are in the way of the target - move them away first:" >&2
+    printf '%s\n' "$COLLISIONS" | sed 's/^/upgrade:   /' >&2
+    exit 1
+  fi
 fi
 
 echo "upgrade: 2/5 backup"
@@ -124,5 +165,9 @@ if ! docker compose up -d --wait; then
   exit 1
 fi
 
-docker image prune -f >/dev/null
+# Only dangling images of this compose project (the replaced old version),
+# never those of other projects on the same Docker host.
+if [ -n "$PROJECT" ]; then
+  docker image prune -f --filter "label=com.docker.compose.project=$PROJECT" >/dev/null
+fi
 echo "upgrade: done"

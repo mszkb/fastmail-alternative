@@ -5,8 +5,10 @@ import { deliver, imapPort, mailHost, smtpPort, textMail } from './helpers'
 // Ordner synchronisiert") until a reload when it was opened while the first
 // sync was still running.
 test('a new account shows its inbox after the first sync without reload', async ({ page }) => {
-  const mailbox = `e2e-c-${process.env.E2E_RUN}@example.com`
-  const name = `Neu ${process.env.E2E_RUN}`
+  // Unique per attempt: a retry must not find the account of the first try.
+  const id = `${process.env.E2E_RUN}-${test.info().retry}`
+  const mailbox = `e2e-c-${id}@example.com`
+  const name = `Neu ${id}`
   await deliver(mailbox, textMail(mailbox, 'Erste Mail', 'Willkommen'))
 
   await page.goto('/')

@@ -20,18 +20,45 @@ Im Projektverzeichnis (auf dem Raspberry Pi `~/fastmail-alternative`):
 
 Das Skript
 
-- bricht ab, wenn der Checkout lokale Änderungen hat,
+- bricht ab, wenn der Checkout lokale Änderungen hat oder **untracked Dateien** einen Pfad belegen, den das Ziel mitbringt – auch als übergeordnetes Verzeichnis oder als Verzeichnis an der Stelle einer neuen Datei (sonst würde `git checkout` erst nach dem Backup scheitern),
+- bricht ab, wenn web, api und worker nicht alle lokal gebaut werden, also bei [Release-Images](#fertige-images-statt-lokal-bauen) (`COMPOSE_FILE` mit `docker-compose.release.yml`) – dafür gilt der händische Ablauf unten,
 - holt die neuen Stände (`git fetch`) und löst das Ziel auf – bei einem Branch-Namen den Stand von `origin/<branch>`, nicht einen evtl. veralteten lokalen Branch – und bricht ab, wenn das Ziel **kein Nachfolger** des aktuellen Commits ist (ein Downgrade ist ein [Rollback](#rollback) und braucht das Backup der alten Version),
 - erstellt mit `scripts/backup.sh` ein verschlüsseltes Backup nach `./backups/` (Worker ist dafür kurz gestoppt, die API läuft weiter) und verwendet nur eine Datei, die **dieser Lauf** geschrieben hat (Marker-Datei vor dem Backup, `find -newer`) – nie ein älteres Backup,
 - hält den bisherigen Commit **und den Pfad dieses Backups** in `backups/upgrade-previous` fest (`PREVIOUS_REF=…`, `PREVIOUS_BACKUP=…`, `UPGRADE_TARGET=…`). Bei einem erneuten Aufruf, wenn der Checkout schon auf dem Ziel steht (z. B. nach einem fehlgeschlagenen Build), bleibt die Datei unverändert – sie verweist weiter auf das Backup von vor dem ersten Versuch. Existiert diese Backup-Datei nicht mehr, bricht `upgrade.sh` nicht ab, warnt aber deutlich, dass ein Rollback per Restore nicht möglich ist (ein neues Backup ersetzt sie bewusst nicht, weil es schon migrierte Daten enthalten kann). `scripts/backup.sh` löscht die dort genannte Datei bei der Aufbewahrung (`BACKUP_KEEP_DAYS`) nicht,
 - wechselt auf die neue Version (`git checkout` bzw. fast-forward des Branches auf `origin/<branch>`),
 - baut die Images (`docker compose build`),
 - startet alles mit `docker compose up -d --wait` und meldet einen Fehler, wenn ein Dienst nicht `healthy` wird. Alle Dienste haben einen Healthcheck; beim Worker heißt `healthy`, dass seine Hauptschleife läuft und die Datenbank erreicht (Heartbeat, siehe [Troubleshooting](troubleshooting.md)),
-- räumt danach alte, unbenutzte Images weg (`docker image prune -f` – wirkt auf alle ungenutzten, unbenannten Images des Docker-Hosts). Die Images der Vorversion sind danach gelöscht; ein Rollback baut sie neu (auf dem Pi einige Minuten).
+- räumt danach die unbenannten Images **dieses Compose-Projekts** weg (`docker image prune -f --filter label=com.docker.compose.project=<projekt>`); Images anderer Projekte oder Container auf demselben Docker-Host bleiben unberührt. Die Images der Vorversion sind danach gelöscht; ein Rollback baut sie neu (auf dem Pi einige Minuten).
 
 Schlägt ab dem Checkout ein Schritt fehl, gibt das Skript den Rollback-Hinweis mit altem Commit und Backup-Pfad aus.
 
-Nach einem Wechsel auf einen Tag steht der Checkout auf einem „detached HEAD“; das nächste Upgrade dann ebenfalls mit Ziel aufrufen (`./scripts/upgrade.sh v1.3.0`).
+Nach einem Wechsel auf einen Tag oder Commit – und nach einem [Rollback](#rollback) – steht der Checkout auf einem „detached HEAD“. `./scripts/upgrade.sh` ohne Ziel bricht dann mit `no upstream branch (detached HEAD?)` ab; das nächste Upgrade deshalb mit Ziel aufrufen (`./scripts/upgrade.sh v1.3.0` bzw. `./scripts/upgrade.sh main`). Kein `git switch main` von Hand: der lokale Branch kann noch auf der zurückgerollten Version stehen.
+
+### Erstes Upgrade von einer Version ohne `scripts/upgrade.sh`
+
+Ältere Stände (vor PR #77, z. B. 3541603) haben noch kein `scripts/upgrade.sh`, wohl aber `scripts/backup.sh`. Das Skript der neuen Version einmalig in ein eigenes, untracked Verzeichnis legen und von dort starten:
+
+```sh
+git fetch origin
+mkdir -p .upgrade-bootstrap
+git show origin/main:scripts/upgrade.sh > .upgrade-bootstrap/upgrade.sh
+chmod +x .upgrade-bootstrap/upgrade.sh
+./.upgrade-bootstrap/upgrade.sh main       # bzw. ein Tag, z. B. v1.2.0
+rm -r .upgrade-bootstrap                   # danach liegt scripts/upgrade.sh im Checkout
+```
+
+**Nicht nach `scripts/` kopieren:** Eine untracked `scripts/upgrade.sh` kollidiert mit der Datei der neuen Version, `git checkout` bricht dann ab („untracked working tree files would be overwritten“). Das Skript wechselt selbst ins Projektverzeichnis und ruft das `scripts/backup.sh` der **alten** Version auf – genau das gewünschte Backup.
+
+Versionen vor `scripts/backup.sh` (vor Roadmap 6.2) haben kein Backup-Werkzeug; dort vor dem Upgrade Datenbank und Volume `mail-data` bei gestoppten Containern von Hand sichern (z. B. Volume-Snapshot), ein Restore über `backup.js` ist dafür nicht möglich.
+
+### Ältere Versionen ohne Worker-Healthcheck
+
+Vor dem Worker-Healthcheck (#22) hatte der Worker keinen Healthcheck: `docker compose up -d --wait` wartet bei solchen Versionen für den Worker nur, bis der Container läuft. Das betrifft vor allem den [Rollback](#rollback) auf eine alte Version und das erste Upgrade von ihr (die Backup-Phase läuft noch mit der alten Version). Dort den Worker zusätzlich von Hand prüfen:
+
+```sh
+docker compose ps worker                  # "running" statt "healthy" - kein Fehler
+docker compose logs --tail=50 worker      # keine Start-/Migrationsfehler, kein Neustart-Loop
+```
 
 Händisch entspricht das:
 
@@ -40,8 +67,9 @@ git fetch --tags origin
 git merge-base --is-ancestor HEAD v1.2.0   # Ziel muss Nachfolger sein
 ./scripts/backup.sh
 # PREVIOUS_BACKUP = die Datei, die backup.sh eben ausgegeben hat ("backup written: …")
-printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\n' "$(git rev-parse HEAD)" \
-  "backups/fma-backup-<zeitstempel>.fmabk" > backups/upgrade-previous
+printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\nUPGRADE_TARGET=%s\n' "$(git rev-parse HEAD)" \
+  "backups/fma-backup-<zeitstempel>.fmabk" "$(git rev-parse 'v1.2.0^{commit}')" \
+  > backups/upgrade-previous
 git checkout v1.2.0
 docker compose build
 docker compose up -d --wait
@@ -53,20 +81,37 @@ Zwischen Backup und Neustart geschriebene Daten (neue Mails, gesendete Nachricht
 
 ## Fertige Images statt lokal bauen
 
-Optional, statt `docker compose build` auf dem Server (Standard auf dem Pi bleibt der lokale Build per `upgrade.sh`). Ablauf wie oben, nur mit den signierten Release-Images ([Release-Prozess](../process/release.md)):
+Optional, statt `docker compose build` auf dem Server (Standard auf dem Pi bleibt der lokale Build per `upgrade.sh`). Die signierten Release-Images ([Release-Prozess](../process/release.md)) dauerhaft einschalten, indem die Instanz die Compose-Dateien und die Version aus der `.env` liest:
 
 ```sh
-./scripts/backup.sh                  # Backup der bisherigen Version, Pfad notieren
-git fetch --tags origin && git checkout v1.2.0   # Compose-Datei/Doku zur Version
-export FMA_VERSION=1.2.0
-cosign verify --certificate-identity-regexp '^https://github\.com/mszkb/fastmail-alternative/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/mszkb/fastmail-alternative-api:$FMA_VERSION   # optional, ebenso worker/web
-docker compose -f docker-compose.yml -f docker-compose.release.yml pull
-docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+# in .env
+COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+FMA_VERSION=1.1.0
 ```
 
-`scripts/upgrade.sh` baut immer lokal; bei Release-Images die Schritte oben von Hand ausführen und `PREVIOUS_REF`/`PREVIOUS_BACKUP` wie im händischen Ablauf in `backups/upgrade-previous` festhalten. Rollback: alte Version mit `FMA_VERSION=<alt>` plus Backup-Restore wie unter [Rollback](#rollback). Patch-Releases enthalten keine Migrationen und lassen sich ohne Restore zurücksetzen.
+Damit benutzen **alle** `docker compose`-Befehle – auch `scripts/backup.sh`, die Restore-Befehle und die Befehle in dieser Doku – die Release-Images, ohne jedes Mal `-f … -f …` anzugeben. Eine eigene `docker-compose.override.yml` lädt Compose dann **nicht mehr automatisch**; sie muss als dritte Datei angehängt werden: `COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml:docker-compose.override.yml`. Prüfen mit `docker compose config --images` (web, api, worker zeigen auf `ghcr.io/…:<FMA_VERSION>`).
+
+`scripts/upgrade.sh` bricht bei Release-Images ab (es würde sonst nur den Checkout wechseln, aber die alten Images weiterlaufen lassen). Upgrade von Hand – das Backup läuft dabei bewusst noch mit der **alten** `FMA_VERSION`:
+
+```sh
+git fetch --tags origin
+git merge-base --is-ancestor HEAD v1.2.0   # Ziel muss Nachfolger sein
+./scripts/backup.sh                        # alte Version, Pfad aus "backup written: …" notieren
+printf 'PREVIOUS_REF=%s\nPREVIOUS_BACKUP=%s\nUPGRADE_TARGET=%s\n' "$(git rev-parse HEAD)" \
+  "backups/fma-backup-<zeitstempel>.fmabk" "$(git rev-parse 'v1.2.0^{commit}')" \
+  > backups/upgrade-previous
+git checkout v1.2.0                        # Compose-Datei und Doku zur Version
+# in .env: FMA_VERSION=1.2.0 (alte Version notieren - für einen Rollback)
+cosign verify --certificate-identity-regexp '^https://github\.com/mszkb/fastmail-alternative/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/mszkb/fastmail-alternative-api:1.2.0   # optional, ebenso worker/web
+docker compose pull
+docker compose up -d --wait
+```
+
+Rollback: wie unter [Rollback](#rollback), statt `docker compose build` die alte `FMA_VERSION` in `.env` eintragen und `docker compose pull`. Patch-Releases enthalten keine Migrationen und lassen sich ohne Restore zurücksetzen.
+
+Ohne Eintrag in `.env` funktionieren die Release-Images auch pro Befehl (`FMA_VERSION=1.2.0 docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait`); dann aber jeden weiteren Befehl ebenso aufrufen – ein schlichtes `docker compose` (auch in `backup.sh`) würde lokal bauen.
 
 ## Wie Migrationen laufen
 
@@ -100,6 +145,8 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -
 #   DELETE FROM outbox_message WHERE id = '"'"'<id>'"'"'"'
 docker compose up -d --wait worker
 ```
+
+Danach steht der Checkout auf einem **detached HEAD** (`$PREVIOUS_REF` ist ein Commit): das nächste Upgrade mit Ziel aufrufen, z. B. `./scripts/upgrade.sh main` ([siehe oben](#upgrade-mit-dem-skript)). Ist die alte Version älter als der Worker-Healthcheck, meldet `up -d --wait worker` schon „running“ als Erfolg – Worker-Logs dann [von Hand prüfen](#ältere-versionen-ohne-worker-healthcheck).
 
 **Doppelversand vermeiden:** Das Backup kann Postausgangs-Einträge enthalten, die damals noch nicht gesendet waren, inzwischen (nach dem Backup) aber per SMTP verschickt wurden. Nach dem Restore stehen sie wieder als ungesendet in der Datenbank – ein Start des Workers würde sie **erneut senden**. Deshalb den Worker erst starten, nachdem die ausstehenden Einträge geprüft wurden: Was laut Gesendet-Ordner beim Anbieter schon verschickt ist, entfernen. `restore` weist auf solche Einträge hin (`warning: N unsent outbox message(s) …`, nur die Anzahl). Beim Rollback läuft `restore` mit dem Image der **alten** Version; ältere Versionen warnen noch nicht – die Outbox-Abfrage oben deshalb immer ausführen.
 

@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import {
+  MAIL_PORTS,
   imapTransportOptions,
+  isAllowedMailPort,
   isStartTlsUnavailable,
   smtpTransportOptions,
   type MailTransportPolicy,
@@ -19,7 +21,11 @@ import {
 import { classifyAccountError } from '../src/account-health'
 import { classifySmtpError } from '../src/jobs/send-message'
 
-const PRODUCTION_TLS: MailTransportPolicy = { allowPrivateHosts: true, insecureTransport: false }
+const PRODUCTION_TLS: MailTransportPolicy = {
+  allowPrivateHosts: true,
+  insecureTransport: false,
+  anyPort: true,
+}
 
 const servers: net.Server[] = []
 const sockets: net.Socket[] = []
@@ -208,5 +214,58 @@ describe('transport options', () => {
       { allowPrivateHosts: true, insecureTransport: true },
     )
     expect(options).toMatchObject({ doSTARTTLS: false, tls: { rejectUnauthorized: false } })
+  })
+})
+
+describe('port allowlist (audit N2)', () => {
+  const saved = process.env.MAIL_EXTRA_PORTS
+  afterEach(() => {
+    if (saved === undefined) delete process.env.MAIL_EXTRA_PORTS
+    else process.env.MAIL_EXTRA_PORTS = saved
+  })
+  const strict = { insecureTransport: false }
+
+  it('allows the standard ports per protocol only', () => {
+    delete process.env.MAIL_EXTRA_PORTS
+    for (const port of MAIL_PORTS.imap) expect(isAllowedMailPort('imap', port, strict)).toBe(true)
+    for (const port of MAIL_PORTS.smtp) expect(isAllowedMailPort('smtp', port, strict)).toBe(true)
+    expect(isAllowedMailPort('imap', 587, strict)).toBe(false)
+    expect(isAllowedMailPort('smtp', 993, strict)).toBe(false)
+    expect(isAllowedMailPort('imap', 5432, strict)).toBe(false)
+    expect(isAllowedMailPort('smtp', 22, strict)).toBe(false)
+  })
+
+  it('adds MAIL_EXTRA_PORTS and ignores invalid entries', () => {
+    process.env.MAIL_EXTRA_PORTS = '1143, 10465,abc,0,70000,'
+    expect(isAllowedMailPort('imap', 1143, strict)).toBe(true)
+    expect(isAllowedMailPort('smtp', 10465, strict)).toBe(true)
+    expect(isAllowedMailPort('imap', 70000, strict)).toBe(false)
+    expect(isAllowedMailPort('imap', 0, strict)).toBe(false)
+  })
+
+  it('test mode allows any port', () => {
+    delete process.env.MAIL_EXTRA_PORTS
+    expect(isAllowedMailPort('imap', 3143, { insecureTransport: true })).toBe(true)
+  })
+
+  it('refuses before the DNS lookup and maps to BLOCKED_PORT', async () => {
+    delete process.env.MAIL_EXTRA_PORTS
+    let looked = false
+    const lookup = async () => {
+      looked = true
+      return [{ address: '93.184.216.34', family: 4 }]
+    }
+    const error = await imapTransportOptions(
+      { host: 'imap.example.com', port: 5432, secure: false },
+      { insecureTransport: false, lookup },
+    ).catch((err: unknown) => err)
+    expect(error).toMatchObject({ code: 'PORT_NOT_ALLOWED' })
+    expect(looked).toBe(false)
+    expect(classifyAccountError(error)).toMatchObject({ code: 'BLOCKED_PORT' })
+    const smtpError = await smtpTransportOptions(
+      { host: 'smtp.example.com', port: 8080, secure: false },
+      { insecureTransport: false, lookup },
+    ).catch((err: unknown) => err)
+    expect(classifySmtpError(smtpError)).toEqual({ code: 'BLOCKED_PORT', permanent: true })
   })
 })
