@@ -60,7 +60,7 @@ jobs:
       # server version (postgres:17), the runner only ships an older client.
       PG_BIN: /usr/lib/postgresql/17/bin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install PostgreSQL 17 client tools
         run: |
@@ -69,10 +69,10 @@ jobs:
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y -q postgresql-client-17
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         # reads the pinned pnpm version from the packageManager field
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     # Runs on GitHub runners, so no local Docker installation is required.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build app images
         # Build context is the repository root (monorepo, see docker-compose.yml).
