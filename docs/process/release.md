@@ -68,12 +68,19 @@ Für `worker` und `web` entsprechend. Bei einem per `workflow_dispatch` wiederho
 
 ## Fertige Images verwenden (optional)
 
-[`docker-compose.release.yml`](../../docker-compose.release.yml) ersetzt für web, api und worker den lokalen Build durch die Release-Images (benötigt Docker Compose ≥ 2.24.4):
+[`docker-compose.release.yml`](../../docker-compose.release.yml) ersetzt für web, api und worker den lokalen Build durch die Release-Images (benötigt Docker Compose ≥ 2.24.4). Dauerhaft per `.env`, damit jeder `docker compose`-Befehl (auch `scripts/backup.sh`) die Images nutzt:
 
 ```sh
-export FMA_VERSION=0.3.1
-docker compose -f docker-compose.yml -f docker-compose.release.yml pull
-docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --wait
+# in .env
+COMPOSE_FILE=docker-compose.yml:docker-compose.release.yml
+FMA_VERSION=0.3.1
 ```
+
+```sh
+docker compose pull
+docker compose up -d --wait
+```
+
+Eine eigene `docker-compose.override.yml` wird mit `COMPOSE_FILE` nicht mehr automatisch geladen und muss als weitere Datei angehängt werden (`…:docker-compose.release.yml:docker-compose.override.yml`). `scripts/upgrade.sh` baut immer lokal und bricht bei Release-Images ab; Upgrades dann von Hand ([Upgrade](../operations/upgrade.md#fertige-images-statt-lokal-bauen)).
 
 `FMA_IMAGE_PREFIX` (Standard `ghcr.io/mszkb`) zeigt auf eine andere Registry oder einen Fork. Details für Betreiber: [Installation](../operations/installation.md#5-starten) und [Upgrade](../operations/upgrade.md#fertige-images-statt-lokal-bauen).

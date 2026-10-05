@@ -93,6 +93,16 @@ Diese Variablen gehören **nicht** in die `.env`: `scripts/backup.sh` liest sie 
 | `BACKUP_DIR`       | `./backups` | Zielverzeichnis auf dem Host                              |
 | `BACKUP_KEEP_DAYS` | `14`        | Ältere `fma-backup-*.fmabk` im Zielordner werden gelöscht |
 
+## Release-Images (optional)
+
+Nur für fertige Images statt lokalem Build ([Installation](installation.md#5-starten), [Upgrade](upgrade.md#fertige-images-statt-lokal-bauen)). Ohne diese Variablen baut `docker compose` lokal (Standard).
+
+| Variable           | Standard        | Pflicht            | Dienst                     | Zweck                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | --------------- | ------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COMPOSE_FILE`     | leer            | nein               | compose                    | `docker-compose.yml:docker-compose.release.yml` = alle `docker compose`-Befehle (auch `scripts/backup.sh`) nutzen die Release-Images. Eine eigene `docker-compose.override.yml` wird dann nicht mehr automatisch geladen und muss als dritte Datei angehängt werden. `scripts/upgrade.sh` bricht damit ab (Upgrade von Hand). |
+| `FMA_VERSION`      | –               | mit Release-Images | compose (web, api, worker) | Release ohne „v“, z. B. `0.1.0`.                                                                                                                                                                                                                                                                                              |
+| `FMA_IMAGE_PREFIX` | `ghcr.io/mszkb` | nein               | compose (web, api, worker) | Registry/Owner für Forks.                                                                                                                                                                                                                                                                                                     |
+
 ## Fest eingestellt
 
 Folgende Werte sind in `docker-compose.yml`, `Caddyfile` oder im Code fest und brauchen normalerweise keine Änderung:
