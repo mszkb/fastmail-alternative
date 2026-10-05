@@ -37,7 +37,7 @@ Ein eigener Index wird erst erwogen, wenn IMAP `SEARCH` in der Praxis nicht reic
 
 ## Wann ein eigener Index wieder auf den Tisch kommt (Roadmap 5.2, 2026-10-05)
 
-Die Entscheidung bleibt: kein eigener Index. Roadmap 5.2 (#52) wird erst begonnen, wenn mindestens einer dieser Punkte im Betrieb belegt ist (Issue mit Anbieter und Messwert, ohne Suchbegriffe oder Inhalte):
+Die Entscheidung bleibt: kein eigener Index. Roadmap 5.2 (#52) wird erst begonnen, wenn mindestens einer dieser Punkte eintritt. Die ersten beiden müssen im Betrieb belegt sein (Issue mit Anbieter und Messwert, ohne Suchbegriffe oder Inhalte); der dritte ist eine Produktentscheidung:
 
 - Ein in der [Anbieter-Matrix](../product/mail-providers.md) gelisteter Anbieter liefert für `TEXT`/`FROM`/`SUBJECT` regelmäßig falsche oder keine Treffer (z. B. nur exakte Adressen statt Teilstrings).
 - Suchen dauern bei üblichen Postfächern (bis 10 000 Nachrichten je Ordner) regelmäßig länger als 10 s oder laufen in die 30-s-Frist.

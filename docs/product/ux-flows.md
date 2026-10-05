@@ -1,6 +1,6 @@
 # UX-Flows
 
-Die fünf Kernabläufe der PWA, so wie sie umgesetzt sind (Roadmap 0.6, #19). Bildschirmtexte stehen in „Anführungszeichen“; die Abläufe sind im Handy-Viewport per Playwright abgedeckt (`e2e/tests/`, Spec je Abschnitt).
+Die fünf Kernabläufe der PWA, so wie sie umgesetzt sind (Roadmap 0.6, #19). Bildschirmtexte stehen in „Anführungszeichen“; die ersten vier Abläufe sind im Handy-Viewport per Playwright abgedeckt (`e2e/tests/`, Spec je Abschnitt); Push-Opt-in hat keinen Browser-Test.
 
 ## 1. Onboarding: Ersteinrichtung und Anmeldung
 
@@ -71,7 +71,7 @@ flowchart TD
   D -- öffnen --> B
   B -- "„Verwerfen“ + Bestätigung" --> E[Entwurf gelöscht]
   B -- "„Senden“ / Strg+Enter" --> F[Postausgang]
-  F -- offline --> G[Offline-Warteschlange, später genau einmal gesendet]
+  F -- offline --> G["Offline-Warteschlange, später mit derselben clientId übermittelt (kein doppelter Postausgangs-Eintrag)"]
   F --> H{SMTP}
   H -- ok --> I[Kopie in „Gesendet“]
   H -- Fehler --> J["Postausgang zeigt den Grund, „Erneut senden“"]
