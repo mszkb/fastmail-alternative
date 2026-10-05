@@ -11,14 +11,6 @@ Aufgaben mit 🔗 in der [`ROADMAP.md`](../../ROADMAP.md) hängen von Dritten ab
 | **Apple Developer Program / APNs**      | Ausblick native iOS-App, 8.1 | Kosten, Review, Zertifikate nicht self-hostbar                                                                                        | Hosted Push Relay                                                                   |
 | **S3-kompatibler Storage**              | 5.4                          | API-Unterschiede zwischen Anbietern                                                                                                   | Nur Kern-S3-API nutzen, gegen MinIO testen                                          |
 
-## Unterstützte Mailanbieter (Entwurf, zu prüfen in Phase 0)
+## Unterstützte Mailanbieter
 
-| Anbieter                                 | IMAP/SMTP | Auth                             | Bemerkung                       |
-| ---------------------------------------- | --------- | -------------------------------- | ------------------------------- |
-| Generischer IMAP-Server (Dovecot, Cyrus) | ✓         | Passwort                         | Referenz für Tests              |
-| Fastmail                                 | ✓         | App-Passwort                     |                                 |
-| Gmail / Google Workspace                 | ✓         | OAuth2 (XOAUTH2), App-Passwort   | Labels ≠ Ordner                 |
-| Microsoft 365 / Outlook.com              | ✓         | OAuth2 (Basic Auth abgeschaltet) | OAuth Pflicht → frühestens Beta |
-| iCloud Mail                              | ✓         | App-Passwort                     |                                 |
-| GMX / Web.de                             | ✓         | Passwort                         | IMAP muss ggf. aktiviert werden |
-| Posteo / mailbox.org                     | ✓         | Passwort                         |                                 |
+Liste, Zugangsdaten und Kompatibilitätsmatrix (IDLE, CONDSTORE, QRESYNC, MOVE, SPECIAL-USE): [Mailanbieter und Kompatibilität](../product/mail-providers.md).
