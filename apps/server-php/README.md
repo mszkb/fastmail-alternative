@@ -1,6 +1,6 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99), Datenbankschema (#98) und `/api/auth/*` (#100).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99), Datenbankschema (#98), `/api/auth/*` (#100) sowie Job-Queue und Cron-Runner (#102, noch ohne portierte Job-Typen).
 
 ## Aufbau
 
@@ -26,6 +26,21 @@ Datenbank: `DATABASE_URL=mysql://user:passwort@host:3306/datenbank` oder `DB_HOS
 ## Ersteinrichtung
 
 Solange kein Benutzer existiert, verlangt `POST /api/auth/setup` einen Setup-Code: `SETUP_TOKEN` aus der Konfiguration oder – ohne diesen – ein zufälliger Code, der beim ersten Aufruf der App einmal ins PHP-Fehlerlog geschrieben wird. Wer das Log nicht lesen kann, erzeugt einen neuen Code mit `php bin/setup-code.php`. Gespeichert wird nur sein SHA-256.
+
+## Hintergrundjobs (Cron)
+
+Ein Runner arbeitet die `job`-Tabelle ab (ADR-0013); es läuft immer nur einer (`GET_LOCK`), Jobs laufen nacheinander. Nur Job-Typen mit portiertem Handler werden abgeholt, alle anderen bleiben in der Warteschlange.
+
+| Weg                | Aufruf                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Cron (Standard)    | `* * * * * php /pfad/zu/apps/server-php/bin/cron.php` (jede Minute)                                             |
+| Web-Cron (nur URL) | `https://…/cron.php` mit `Authorization: Bearer <CRON_TOKEN>` oder `?token=<CRON_TOKEN>`; ohne `CRON_TOKEN` 404 |
+| Dauer-Worker (VPS) | `php bin/worker.php` – Schleife statt Cron, Heartbeat-Datei `WORKER_HEARTBEAT_FILE`                             |
+
+| Variable                   | Standard | Zweck                                                                                        |
+| -------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `CRON_TIME_BUDGET_SECONDS` | `50`     | Laufzeit je Cron-Aufruf; neue Jobs starten nur mit ≥ 5 s Rest. Unter dem Hoster-Limit halten |
+| `CRON_TOKEN`               | leer     | Geheimnis für den Web-Cron (`public/cron.php`); leer = Web-Cron aus                          |
 
 ## Entwicklung
 
