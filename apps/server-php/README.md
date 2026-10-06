@@ -1,6 +1,6 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – portiert sind Grundgerüst, Verschlüsselung, Schema, Auth, Konten/Identitäten, Lese-API (ohne Suche), Web Push, Aufräumen/Export, Job-Queue mit Cron, `folder_sync`, Backup/Restore und der PostgreSQL-Import. Es fehlen u. a. `message_sync`, Senden/Entwürfe (#105) und die Umstellung (#110); Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – portiert sind Grundgerüst, Verschlüsselung, Schema, Auth, Konten/Identitäten, Lese-API inkl. Suche, Mail-Sync (`folder_sync`, `message_sync`, `message_action`), Web Push, Aufräumen/Export, Job-Queue mit Cron, Backup/Restore und der PostgreSQL-Import. Es fehlen u. a. Senden/Entwürfe (#105), IMAP IDLE im Dauer-Worker und die Umstellung (#110); Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Aufbau
 
