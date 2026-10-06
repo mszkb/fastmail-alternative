@@ -31,6 +31,14 @@ final class CsrfProtectionTest extends TestCase
         yield 'no browser headers (curl, native client)' => ['POST', [], false];
     }
 
+    public function testComparesWithTheRawHostIncludingPort(): void
+    {
+        $request = Http::request('POST', '/api/auth/login', ['Origin' => 'http://127.0.0.1:3102'], ['HTTP_HOST' => '127.0.0.1:3102']);
+        self::assertFalse(CsrfProtection::isCrossOrigin($request));
+        $request = Http::request('POST', '/api/auth/login', ['Origin' => 'http://127.0.0.1:3102'], ['HTTP_HOST' => '127.0.0.1:3103']);
+        self::assertTrue(CsrfProtection::isCrossOrigin($request));
+    }
+
     /** @param array<string, string> $headers */
     #[DataProvider('cases')]
     public function testIsCrossOrigin(string $method, array $headers, bool $expected): void

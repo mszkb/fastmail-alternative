@@ -42,10 +42,21 @@ final class CsrfProtection implements MiddlewareInterface
             }
             $originHost = $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
 
-            return strtolower($originHost) !== strtolower($request->getHeaderLine('Host'));
+            return strtolower($originHost) !== strtolower(self::host($request));
         }
 
         return false;
+    }
+
+    /**
+     * The Host header as sent. slim/psr7 rebuilds the Host header from the
+     * URI and drops the port, so the raw server variable comes first.
+     */
+    private static function host(ServerRequestInterface $request): string
+    {
+        $raw = $request->getServerParams()['HTTP_HOST'] ?? null;
+
+        return \is_string($raw) && $raw !== '' ? $raw : $request->getHeaderLine('Host');
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
