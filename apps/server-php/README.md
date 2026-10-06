@@ -1,6 +1,6 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99) und Datenbankschema (#98).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99), Datenbankschema (#98) und `/api/auth/*` (#100).
 
 ## Aufbau
 
@@ -22,6 +22,10 @@ Variablen wie in [`docs/operations/configuration.md`](../../docs/operations/conf
 2. `config.php` neben `public/` (oder Pfad in `FMA_CONFIG`) – Vorlage `config.example.php`, Rechte `0600`, nie committen.
 
 Datenbank: `DATABASE_URL=mysql://user:passwort@host:3306/datenbank` oder `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+
+## Ersteinrichtung
+
+Solange kein Benutzer existiert, verlangt `POST /api/auth/setup` einen Setup-Code: `SETUP_TOKEN` aus der Konfiguration oder – ohne diesen – ein zufälliger Code, der beim ersten Aufruf der App einmal ins PHP-Fehlerlog geschrieben wird. Wer das Log nicht lesen kann, erzeugt einen neuen Code mit `php bin/setup-code.php`. Gespeichert wird nur sein SHA-256.
 
 ## Entwicklung
 

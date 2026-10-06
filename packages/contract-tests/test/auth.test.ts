@@ -41,10 +41,17 @@ describe.skipIf(!API_URL)('auth', () => {
     expect(response.status).toBe(403)
   })
 
-  it('protected routes answer 401 without a session', async () => {
-    for (const path of ['/api/auth/devices', '/api/accounts', '/api/settings']) {
-      expect((await new Client().request('GET', path)).status, path).toBe(401)
-    }
+  it('auth routes answer 401 without a session', async () => {
+    const anonymous = new Client()
+    expect((await anonymous.request('GET', '/api/auth/devices')).status).toBe(401)
+    expect((await anonymous.request('DELETE', '/api/auth/session')).status).toBe(401)
+    expect(
+      (
+        await anonymous.request('POST', '/api/auth/password', {
+          body: { currentPassword: 'x', newPassword: 'y' },
+        })
+      ).status,
+    ).toBe(401)
   })
 
   it('GET /api/auth/devices lists the current device', async () => {

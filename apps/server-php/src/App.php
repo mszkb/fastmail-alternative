@@ -4,14 +4,21 @@ declare(strict_types=1);
 
 namespace Fma;
 
+use Fma\Auth\Authenticator;
+use Fma\Auth\SessionCookie;
+use Fma\Auth\Sessions;
+use Fma\Auth\SetupCode;
 use Fma\Db\Database;
 use Fma\Http\ErrorHandler;
 use Fma\Http\Json;
 use Fma\Http\Middleware\CsrfProtection;
 use Fma\Http\Middleware\RateLimit;
 use Fma\Http\Middleware\RequestLog;
+use Fma\Http\Middleware\RequireAuth;
 use Fma\Http\Middleware\SecurityHeaders;
 use Fma\Log\Logger;
+use Fma\Routes\AuthRoutes;
+use Fma\Security\LoginLockout;
 use Fma\Security\RateLimiter;
 use Fma\Security\RateLimitRule;
 use Psr\Http\Message\ResponseInterface;
@@ -59,6 +66,12 @@ final class App
         };
 
         self::routes($app, $config, $db, $logger, $metrics);
+        $sessions = new Sessions($db);
+        $cookie = new SessionCookie($config);
+        $authenticator = new Authenticator($sessions, $cookie);
+        $requireAuth = new RequireAuth($authenticator, $responses);
+        (new AuthRoutes($db, $sessions, $authenticator, $cookie, new SetupCode($config, $db, $logger), new LoginLockout($db), $logger))
+            ->register($app, $requireAuth);
 
         // Slim runs the middleware added last first.
         $app->addRoutingMiddleware();
