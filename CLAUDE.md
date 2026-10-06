@@ -60,6 +60,13 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
 - Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007)
 
+## Autonomer Agent
+
+Issues mit dem Label `ready` arbeitet ein lokaler Runner autonom ab (Ablauf, Labels, Grenzen: [`docs/process/autonomous-agent.md`](docs/process/autonomous-agent.md)).
+
+- Für dieses Repo ist der Zugriff auf GitHub per `gh` erlaubt (Issues lesen/anlegen, Labels, Kommentare, PRs) – Ausnahme zur globalen Regel „kein Zugriff auf Repo-Hosting-APIs“.
+- Im Agent-Lauf (Branch `agent/issue-<n>`): nur committen, nie pushen oder Labels ändern. Bei Unklarheit Rückfrage in `QUESTION.md` statt raten; Abschlussbericht in `REPORT.md`. Beide Dateien nie committen.
+
 ## Befehle
 
 Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
