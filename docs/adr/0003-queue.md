@@ -1,6 +1,6 @@
 # ADR-0003: Job-Queue
 
-- **Status:** Accepted
+- **Status:** Accepted, geändert durch [ADR-0013](0013-php-backend.md) (Job-Tabelle in MySQL/MariaDB, Abarbeitung per Cron)
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 2.2, 2.7
 

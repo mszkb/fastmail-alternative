@@ -49,6 +49,8 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
 ## Tech-Stack (entschieden, siehe ADRs)
 
+> **Umstieg geplant ([ADR-0013](docs/adr/0013-php-backend.md), Proposed, Epic #94):** Backend wird in PHP ≥ 8.2 mit Slim 4, MySQL 8 / MariaDB 10.6+ und Cron neu geschrieben (`apps/server-php`, parallel zum Node-Backend bis zur Umstellung). Bis dahin gilt der Stand unten; neue Features nicht mehr ins Node-Backend.
+
 - Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache, offline-first (ADR-0008, ADR-0010)
 - Backend: Fastify (Node/TypeScript) für API und Worker (ADR-0008)
 - API-Vertrag: OpenAPI, Basis für spätere native Clients (ADR-0010)

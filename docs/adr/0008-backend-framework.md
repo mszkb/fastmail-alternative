@@ -1,6 +1,6 @@
 # ADR-0008: Backend-Framework
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0013](0013-php-backend.md)
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 1.1
 
