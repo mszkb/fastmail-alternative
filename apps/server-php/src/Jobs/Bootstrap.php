@@ -24,6 +24,7 @@ final class Bootstrap
         $runner->register('cleanup', new CleanupJob($db, $files, $logger, $config));
         $runner->register('account_cleanup', new AccountCleanupJob($db, $queue, $files));
         $runner->register('message_sync', new MessageSyncJob($db, $config, $queue, $files, $logger));
+        $runner->register('message_action', new MessageActionJob($db, $config, $queue, $files, $logger));
 
         return $runner;
     }

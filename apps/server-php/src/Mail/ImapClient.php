@@ -282,4 +282,56 @@ final class ImapClient
 
         return '"' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
     }
+
+    /**
+     * Sends a command made of text parts and literals (odd indexes are
+     * literal data: non-synchronizing with LITERAL+, otherwise after the
+     * server's continuation) and returns the untagged lines plus the tagged
+     * OK line (response codes such as COPYUID). NO/BAD throws PROTOCOL.
+     *
+     * @param list<string> $parts text, literal, text, literal, ...
+     *
+     * @return array{untagged: list<string>, tagged: string}
+     */
+    public function execute(#[\SensitiveParameter] array $parts): array
+    {
+        $tag = 'A' . (++$this->tag);
+        $literalPlus = \in_array('LITERAL+', $this->capabilities, true);
+        $buffer = "{$tag} ";
+        foreach ($parts as $index => $part) {
+            if ($index % 2 === 0) {
+                $buffer .= $part;
+                continue;
+            }
+            $length = \strlen($part);
+            if ($literalPlus) {
+                $buffer .= "{{$length}+}\r\n{$part}";
+                continue;
+            }
+            $this->socket->write("{$buffer}{{$length}}\r\n");
+            $buffer = '';
+            $line = $this->socket->readLine();
+            if (!str_starts_with($line, '+')) {
+                // Tagged NO/BAD instead of a continuation.
+                throw new MailException('PROTOCOL', 'literal rejected');
+            }
+            $buffer = $part;
+        }
+        $this->socket->write("{$buffer}\r\n");
+        $untagged = [];
+        while (true) {
+            $line = $this->socket->readLine();
+            if (str_starts_with($line, "{$tag} ")) {
+                if (strtoupper(substr($line, \strlen($tag) + 1, 2)) !== 'OK') {
+                    throw new MailException('PROTOCOL', 'command rejected');
+                }
+
+                return ['untagged' => $untagged, 'tagged' => rtrim($line, "\r\n")];
+            }
+            while (preg_match('/\{(\d+)\}\r\n$/', $line, $m) === 1) {
+                $line .= $this->socket->read((int) $m[1]) . $this->socket->readLine();
+            }
+            $untagged[] = $line;
+        }
+    }
 }

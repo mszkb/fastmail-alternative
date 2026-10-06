@@ -93,6 +93,7 @@ final class App
         (new Routes\MessageRoutes($db, $config, $logger))->register($app, $requireAuth);
         (new Routes\MessageActionRoutes($db, $jobs))->register($app, $requireAuth);
         (new Routes\MessageContentRoutes($db, $config, new Mail\RawStorage($config, $logger), $logger))->register($app, $requireAuth);
+        (new Routes\SearchRoutes($db, $config, $logger))->register($app, $requireAuth);
 
         // Slim runs the middleware added last first.
         $app->addRoutingMiddleware();
