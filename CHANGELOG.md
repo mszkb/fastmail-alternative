@@ -31,6 +31,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
 - Browser-Tests mit Playwright (`e2e/`, #74): Ersteinrichtung, Login, Konto anlegen, Lesen mit Inline-Bild und Anhang, Entwurf mit Anhang, Weiterleiten, `sync_since`, Speicheranzeige, gemeinsamer Posteingang, Aktualisieren, Pull-to-Refresh, Swipe-Back und Passwortwechsel im Handy-Viewport mit Touch; `e2e/stack.mjs` startet api, worker und web lokal aus dem Build. `Makefile` mit Kurzbefehlen für Betrieb und Tests; läuft in CI als eigener Job „Browser tests (Playwright)“ gegen PostgreSQL und GreenMail (Report und Traces bei Fehlschlag als Artifact)
 - Doku: [Mailanbieter und Kompatibilitätsmatrix](docs/product/mail-providers.md) (#18), [UX-Flows](docs/product/ux-flows.md) (#19), [offene Produktfragen](docs/product/offene-fragen.md) und Entwurf [ADR-0012 Anonyme Nutzungsstatistik (Opt-in)](docs/adr/0012-usage-telemetry.md) (#78, Status Proposed)
+- PHP-Backend in Arbeit (`apps/server-php`, [ADR-0013](docs/adr/0013-php-backend.md), Epic #94, noch nicht produktiv): Slim-4-Grundgerüst mit `/api/health`, `/api/metrics`, Sicherheitsheadern, CSRF-Schutz, Rate-Limits und Login-Lockout in MySQL/MariaDB (#97); Envelope-Encryption und Backup-Format byte-kompatibel zu `packages/crypto`, geprüft mit Testvektoren in beide Richtungen (#99)
 - **Betreiber:** `POSTGRES_HOST_PORT` (optional, Standard `5432`) verschiebt den Wartungsport von PostgreSQL auf `127.0.0.1`, falls auf dem Host schon eine PostgreSQL-Instanz läuft
 
 ### Changed

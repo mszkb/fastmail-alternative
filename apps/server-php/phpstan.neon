@@ -1,0 +1,8 @@
+parameters:
+  level: 8
+  paths:
+    - src
+    - tests
+    - bin
+    - public
+  tmpDir: .phpstan-cache

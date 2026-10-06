@@ -1,0 +1,47 @@
+{
+  "name": "fma/server-php",
+  "description": "PHP backend (Slim 4, MySQL/MariaDB) of the self-hosted multi-account mail client, see ADR-0013",
+  "type": "project",
+  "license": "ISC",
+  "require": {
+    "php": ">=8.2",
+    "ext-hash": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*",
+    "ext-openssl": "*",
+    "ext-pdo": "*",
+    "ext-pdo_mysql": "*",
+    "slim/psr7": "^1.7",
+    "slim/slim": "^4.14"
+  },
+  "require-dev": {
+    "friendsofphp/php-cs-fixer": "^3.64",
+    "phpstan/phpstan": "^2.0",
+    "phpunit/phpunit": "^11.4"
+  },
+  "autoload": {
+    "psr-4": {
+      "Fma\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Fma\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "platform": {
+      "php": "8.2.0"
+    },
+    "sort-packages": true,
+    "optimize-autoloader": true
+  },
+  "scripts": {
+    "test": "phpunit --testsuite unit",
+    "test:integration": "phpunit --testsuite integration",
+    "analyse": "phpstan analyse --memory-limit=512M",
+    "cs": "php-cs-fixer fix --dry-run --diff",
+    "cs:fix": "php-cs-fixer fix",
+    "migrate": "php bin/migrate.php"
+  }
+}
