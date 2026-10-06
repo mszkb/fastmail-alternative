@@ -1,18 +1,18 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97) und Verschlüsselung (#99).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99) und Datenbankschema (#98).
 
 ## Aufbau
 
-| Pfad                 | Inhalt                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------- |
-| `public/`            | Einziger Ordner im Webroot: `index.php` (Front-Controller) und `.htaccess` (Apache)          |
-| `src/`               | Code, Namespace `Fma\` (PSR-4)                                                               |
-| `src/Crypto/`        | Envelope-Encryption und Backup-Stream, byte-kompatibel zu `packages/crypto`                  |
-| `src/Security/`      | Client-IP hinter Proxy, Rate-Limits und Login-Lockout (in der Datenbank)                     |
-| `src/Http/`          | Middleware (Sicherheitsheader, CSRF, Rate-Limit, Request-Log), Fehlerbehandlung              |
-| `migrations/`        | SQL-Migrationen für MySQL/MariaDB, `bin/migrate.php` wendet sie an                           |
-| `config.example.php` | Vorlage für `config.php` (Hoster ohne Umgebungsvariablen), liegt **außerhalb** von `public/` |
+| Pfad                 | Inhalt                                                                                                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `public/`            | Einziger Ordner im Webroot: `index.php` (Front-Controller) und `.htaccess` (Apache)                                                    |
+| `src/`               | Code, Namespace `Fma\` (PSR-4)                                                                                                         |
+| `src/Crypto/`        | Envelope-Encryption und Backup-Stream, byte-kompatibel zu `packages/crypto`                                                            |
+| `src/Security/`      | Client-IP hinter Proxy, Rate-Limits und Login-Lockout (in der Datenbank)                                                               |
+| `src/Http/`          | Middleware (Sicherheitsheader, CSRF, Rate-Limit, Request-Log), Fehlerbehandlung                                                        |
+| `migrations/`        | SQL-Migrationen für MySQL/MariaDB (Abbildung der PostgreSQL-Typen: `docs/architecture/data-model.md`), `bin/migrate.php` wendet sie an |
+| `config.example.php` | Vorlage für `config.php` (Hoster ohne Umgebungsvariablen), liegt **außerhalb** von `public/`                                           |
 
 ## Konfiguration
 
