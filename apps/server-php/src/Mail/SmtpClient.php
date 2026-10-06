@@ -120,4 +120,59 @@ final class SmtpClient
 
         return \is_string($name) && preg_match('/^[A-Za-z0-9.-]+$/', $name) === 1 ? $name : 'localhost';
     }
+
+    /**
+     * Sends a raw RFC 5322 message (MAIL FROM, RCPT TO, DATA with
+     * dot-stuffing). Rejections throw MailException with SMTP_REJECTED (5xx;
+     * AUTH_FAILED for 530/535) or SMTP_TEMPORARY (4xx) - never the server text.
+     *
+     * @param list<string> $recipients
+     */
+    public function sendMail(string $from, array $recipients, #[\SensitiveParameter] string $raw): void
+    {
+        foreach ([$from, ...$recipients] as $address) {
+            if (preg_match('/[\r\n<>\x00]/', $address) === 1) {
+                throw new MailException('SMTP_REJECTED', 'invalid address');
+            }
+        }
+        $this->smtpStep("MAIL FROM:<{$from}>", 250);
+        foreach ($recipients as $recipient) {
+            $this->smtpStep("RCPT TO:<{$recipient}>", 250, 251);
+        }
+        $this->smtpStep('DATA', 354);
+        $data = (string) preg_replace('/\r\n|\r|\n/', "\r\n", $raw);
+        $data = (string) preg_replace('/^\./m', '..', $data);
+        if (!str_ends_with($data, "\r\n")) {
+            $data .= "\r\n";
+        }
+        $this->socket->write($data . ".\r\n");
+        $this->smtpReply(250);
+    }
+
+    private function smtpStep(#[\SensitiveParameter] string $command, int ...$expected): void
+    {
+        $this->socket->write("{$command}\r\n");
+        $this->smtpReply(...$expected);
+    }
+
+    private function smtpReply(int ...$expected): void
+    {
+        do {
+            $line = rtrim($this->socket->readLine(), "\r\n");
+        } while (isset($line[3]) && $line[3] === '-');
+        $code = (int) substr($line, 0, 3);
+        if (\in_array($code, $expected, true)) {
+            return;
+        }
+        if ($code === 530 || $code === 535) {
+            throw new MailException('AUTH_FAILED', "smtp reply {$code}");
+        }
+        if ($code >= 500 && $code < 600) {
+            throw new MailException('SMTP_REJECTED', "smtp reply {$code}");
+        }
+        if ($code >= 400 && $code < 500) {
+            throw new MailException('SMTP_TEMPORARY', "smtp reply {$code}");
+        }
+        throw new MailException('PROTOCOL', 'unexpected reply');
+    }
 }

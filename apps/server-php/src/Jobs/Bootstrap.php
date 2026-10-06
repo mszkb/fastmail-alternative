@@ -23,8 +23,10 @@ final class Bootstrap
         $files = \Fma\Mail\FileStore::fromConfig($config);
         $runner->register('cleanup', new CleanupJob($db, $files, $logger, $config));
         $runner->register('account_cleanup', new AccountCleanupJob($db, $queue, $files));
-        $runner->register('message_sync', new MessageSyncJob($db, $config, $queue, $files, $logger));
         $runner->register('message_action', new MessageActionJob($db, $config, $queue, $files, $logger));
+        $runner->register('message_sync', new MessageSyncJob($db, $config, $queue, $files, $logger));
+        $runner->register('send_message', new SendMessageJob($db, $config, $queue, $logger));
+        $runner->register('draft_sync', new DraftSyncJob($db, $config, $queue));
 
         return $runner;
     }
