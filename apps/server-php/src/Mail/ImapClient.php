@@ -132,6 +132,123 @@ final class ImapClient
         }
     }
 
+    /**
+     * All mailboxes (LIST, with RETURN (SPECIAL-USE) when supported).
+     * Paths are decoded from modified UTF-7 to UTF-8, like imapflow does.
+     *
+     * @return list<array{path: string, delimiter: ?string, flags: list<string>, specialUse: ?string}>
+     */
+    public function list(): array
+    {
+        $command = \in_array('SPECIAL-USE', $this->capabilities, true) ? 'LIST "" "*" RETURN (SPECIAL-USE)' : 'LIST "" "*"';
+        $mailboxes = [];
+        foreach ($this->command($command) as $line) {
+            if (preg_match('/^\* LIST /i', $line) !== 1) {
+                continue;
+            }
+            $tokens = self::tokens(substr(rtrim($line, "\r\n"), 7));
+            if (\count($tokens) < 3 || !\is_array($tokens[0])) {
+                continue;
+            }
+            $flags = array_values(array_map('strval', $tokens[0]));
+            $specialUse = null;
+            foreach ($flags as $flag) {
+                if (\in_array(strtolower($flag), ['\\sent', '\\drafts', '\\trash', '\\junk', '\\archive', '\\all', '\\flagged'], true)) {
+                    $specialUse = $flag;
+                }
+            }
+            $mailboxes[] = [
+                'path' => self::decodeMailbox((string) $tokens[2]),
+                'delimiter' => $tokens[1] === null ? null : (string) $tokens[1],
+                'flags' => $flags,
+                'specialUse' => $specialUse,
+            ];
+        }
+
+        return $mailboxes;
+    }
+
+    /** @return array{uidNext: ?int, unseen: ?int} */
+    public function status(string $path): array
+    {
+        $status = ['uidNext' => null, 'unseen' => null];
+        foreach ($this->command('STATUS ' . self::quote(self::encodeMailbox($path)) . ' (UIDNEXT UNSEEN)') as $line) {
+            if (preg_match('/UIDNEXT (\d+)/i', $line, $m) === 1) {
+                $status['uidNext'] = (int) $m[1];
+            }
+            if (preg_match('/UNSEEN (\d+)/i', $line, $m) === 1) {
+                $status['unseen'] = (int) $m[1];
+            }
+        }
+
+        return $status;
+    }
+
+    public static function decodeMailbox(string $name): string
+    {
+        return str_contains($name, '&') ? mb_convert_encoding($name, 'UTF-8', 'UTF7-IMAP') : $name;
+    }
+
+    public static function encodeMailbox(string $path): string
+    {
+        return preg_match('/[&\x80-\xFF]/', $path) === 1 ? mb_convert_encoding($path, 'UTF7-IMAP', 'UTF-8') : $path;
+    }
+
+    /**
+     * Tokens of an IMAP response: atoms, quoted strings, literals ({n} with
+     * the data inline, as finish() joins them), NIL and parenthesized lists.
+     *
+     * @return list<mixed>
+     */
+    public static function tokens(string $text): array
+    {
+        $pos = 0;
+
+        return self::parseList($text, $pos, false);
+    }
+
+    /** @return list<mixed> */
+    private static function parseList(string $text, int &$pos, bool $nested): array
+    {
+        $items = [];
+        $length = \strlen($text);
+        while ($pos < $length) {
+            $char = $text[$pos];
+            if ($char === ' ') {
+                ++$pos;
+            } elseif ($char === '(') {
+                ++$pos;
+                $items[] = self::parseList($text, $pos, true);
+            } elseif ($char === ')') {
+                ++$pos;
+                if ($nested) {
+                    return $items;
+                }
+            } elseif ($char === '"') {
+                $value = '';
+                for (++$pos; $pos < $length && $text[$pos] !== '"'; ++$pos) {
+                    if ($text[$pos] === '\\' && $pos + 1 < $length) {
+                        ++$pos;
+                    }
+                    $value .= $text[$pos];
+                }
+                ++$pos;
+                $items[] = $value;
+            } elseif ($char === '{' && preg_match('/\G\{(\d+)\+?\}\r\n/', $text, $m, 0, $pos) === 1) {
+                $pos += \strlen($m[0]);
+                $items[] = substr($text, $pos, (int) $m[1]);
+                $pos += (int) $m[1];
+            } else {
+                preg_match('/\G[^ ()]+/', $text, $m, 0, $pos);
+                $atom = $m[0] ?? $char;
+                $pos += max(1, \strlen($atom));
+                $items[] = strtoupper($atom) === 'NIL' ? null : $atom;
+            }
+        }
+
+        return $items;
+    }
+
     /** @return list<string> */
     private function fetchCapabilities(): array
     {
