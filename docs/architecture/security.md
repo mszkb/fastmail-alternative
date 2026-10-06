@@ -123,7 +123,7 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 ## Backups
 
 - Backups werden **verschlüsselt**: eine Datei aus `pg_dump` und dem Volume `mail-data`, als Ganzes mit AES-256-GCM in 64-KiB-Blöcken verschlüsselt; der Schlüssel wird je Backup per HKDF aus `MASTER_KEY` und zufälligem Salt abgeleitet. Damit sind auch die Klartext-Metadaten der DB (Hostnamen, Benutzernamen, Adressen, Ordner) geschützt. Der `MASTER_KEY` selbst ist nie im Backup.
-- Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL in CI (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
+- Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL im nächtlichen Lauf auf der Gitea-Instanz (`msz/gitea-workflows`) (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
 - Restore auf einer frischen Installation funktioniert mit dokumentierten Schritten: [Backup & Restore](../operations/backup-restore.md).
 
 ## Ersteinrichtung

@@ -20,7 +20,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - PWA mit Service Worker, Installationshinweisen (iOS, Android, Desktop), Web Push ohne Mailinhalte, App-Badge, Sync bei Start und Fokuswechsel, manueller Sync (Button und Pull-to-Refresh)
 - Offline-first: verschlüsselter IndexedDB-Cache und Offline-Warteschlange für Aktionen
 - Export der Serverkonfiguration, Speicherverbrauch pro Konto in den Einstellungen
-- Verschlüsselte Backups mit Restore (inkl. Restore-Test in CI), getesteter Upgrade-Pfad mit `scripts/upgrade.sh`
+- Verschlüsselte Backups mit Restore (inkl. nächtlichem Restore-Test), getesteter Upgrade-Pfad mit `scripts/upgrade.sh`
 - Periodische Cleanup-Jobs für verwaiste Nachrichten, Dateien, Uploads und alte Jobs
 - Strukturierte Logs, `/api/health` und optionale Prometheus-Metriken
 - Lasttest-Harness `pnpm loadtest` (viele Konten, große Postfächer) mit Markdown-Bericht; Methode, erste Messwerte und Anleitung für den Raspberry Pi in [docs/operations/load-test.md](docs/operations/load-test.md)
