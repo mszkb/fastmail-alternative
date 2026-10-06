@@ -6,13 +6,20 @@ declare(strict_types=1);
 // runs the job loop continuously and writes a heartbeat file
 // (WORKER_HEARTBEAT_FILE, default /tmp/worker-heartbeat) after each pass.
 // Holds the runner lock while working, so a cron call at the same time
-// returns at once. IMAP IDLE follows with the mail sync port (#103).
+// returns at once. With IMAP_IDLE (default on) it also keeps one IDLE
+// connection per account on the INBOX (Fma\Jobs\IdleManager): PHP is
+// single-threaded, so short runner passes alternate with stream_select
+// over all IDLE sockets.
 
 require __DIR__ . '/../vendor/autoload.php';
 
 $config = Fma\Config::load();
 $logger = new Fma\Log\Logger('worker', $config->get('LOG_LEVEL', 'info'));
-$runner = Fma\Jobs\Bootstrap::runner($config, $logger);
+$db = new Fma\Db\Database($config);
+$runner = Fma\Jobs\Bootstrap::runner($config, $logger, $db);
+$idle = Fma\Jobs\IdleManager::enabled($config)
+    ? new Fma\Jobs\IdleManager($db, new Fma\Jobs\JobQueue($db), $config, $logger)
+    : null;
 $heartbeat = $config->get('WORKER_HEARTBEAT_FILE', '/tmp/worker-heartbeat');
 $stop = false;
 if (function_exists('pcntl_async_signals')) {
@@ -24,12 +31,16 @@ if (function_exists('pcntl_async_signals')) {
         });
     }
 }
-$logger->info('worker started');
+$logger->info('worker started', ['imapIdle' => $idle !== null]);
 while (!$stop) {
     try {
-        $result = $runner->runOnce(30.0);
+        // Short budget with IDLE, so notifications are not left waiting long.
+        $result = $runner->runOnce($idle !== null ? 10.0 : 30.0);
         @file_put_contents($heartbeat, (string) time());
-        if ($result['done'] + $result['failed'] === 0) {
+        $wait = $result['done'] + $result['failed'] === 0 ? 2.0 : 0.0;
+        if ($idle !== null) {
+            $idle->poll($wait);
+        } elseif ($wait > 0) {
             sleep(2);
         }
     } catch (Throwable $e) {
@@ -37,3 +48,4 @@ while (!$stop) {
         sleep(5);
     }
 }
+$idle?->stop();

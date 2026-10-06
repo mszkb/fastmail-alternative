@@ -103,4 +103,36 @@ final class MailSocket
     {
         @fclose($this->stream);
     }
+
+    /** @return resource the underlying stream, for stream_select (IMAP IDLE) */
+    public function stream()
+    {
+        return $this->stream;
+    }
+
+    /**
+     * Non-blocking read of everything available right now (including data
+     * PHP already buffered); '' when nothing is pending. EOF throws.
+     */
+    public function readAvailable(): string
+    {
+        stream_set_blocking($this->stream, false);
+        try {
+            $data = '';
+            while (true) {
+                $chunk = @fread($this->stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                $data .= $chunk;
+            }
+            if ($data === '' && feof($this->stream)) {
+                throw new MailException('ECONNRESET', 'connection lost');
+            }
+
+            return $data;
+        } finally {
+            stream_set_blocking($this->stream, true);
+        }
+    }
 }

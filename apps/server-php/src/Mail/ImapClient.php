@@ -334,4 +334,39 @@ final class ImapClient
             $untagged[] = $line;
         }
     }
+
+    // --- IMAP IDLE (RFC 2177) for the long-running worker (Jobs\IdleManager) ---
+
+    /** @return resource the connection's stream, for stream_select */
+    public function stream()
+    {
+        return $this->socket->stream();
+    }
+
+    /** Sends IDLE without waiting for the continuation; returns its tag. */
+    public function sendIdle(): string
+    {
+        $tag = 'A' . (++$this->tag);
+        $this->socket->write("{$tag} IDLE\r\n");
+
+        return $tag;
+    }
+
+    /** Ends IDLE; the tagged completion arrives via readAvailable(). */
+    public function sendDone(): void
+    {
+        $this->socket->write("DONE\r\n");
+    }
+
+    /** Non-blocking: raw data available now ('' if none); EOF throws ECONNRESET. */
+    public function readAvailable(): string
+    {
+        return $this->socket->readAvailable();
+    }
+
+    /** Closes the connection without LOGOUT. */
+    public function disconnect(): void
+    {
+        $this->socket->close();
+    }
 }

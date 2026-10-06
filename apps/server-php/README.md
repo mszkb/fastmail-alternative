@@ -1,6 +1,6 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – portiert sind Grundgerüst, Verschlüsselung, Schema, Auth, Konten/Identitäten, Lese-API inkl. Suche, Mail-Sync (`folder_sync`, `message_sync`, `message_action`), Web Push, Aufräumen/Export, Job-Queue mit Cron, Backup/Restore und der PostgreSQL-Import. Ebenso Senden, Entwürfe und Uploads. Es fehlen u. a. IMAP IDLE im Dauer-Worker und die Umstellung (#110); Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – portiert sind Grundgerüst, Verschlüsselung, Schema, Auth, Konten/Identitäten, Lese-API inkl. Suche, Mail-Sync (`folder_sync`, `message_sync`, `message_action`), Web Push, Aufräumen/Export, Job-Queue mit Cron, Backup/Restore und der PostgreSQL-Import. Ebenso Senden, Entwürfe und Uploads. Ebenso IMAP IDLE im Dauer-Worker. Es fehlt u. a. die Umstellung (#110); Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Aufbau
 
@@ -45,10 +45,15 @@ Ein Runner arbeitet die `job`-Tabelle ab (ADR-0013); es läuft immer nur einer (
 | Web-Cron (nur URL) | `https://…/cron.php` mit `Authorization: Bearer <CRON_TOKEN>` oder `?token=<CRON_TOKEN>`; ohne `CRON_TOKEN` 404 |
 | Dauer-Worker (VPS) | `php bin/worker.php` – Schleife statt Cron, Heartbeat-Datei `WORKER_HEARTBEAT_FILE`                             |
 
-| Variable                   | Standard | Zweck                                                                                        |
-| -------------------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `CRON_TIME_BUDGET_SECONDS` | `50`     | Laufzeit je Cron-Aufruf; neue Jobs starten nur mit ≥ 5 s Rest. Unter dem Hoster-Limit halten |
-| `CRON_TOKEN`               | leer     | Geheimnis für den Web-Cron (`public/cron.php`); leer = Web-Cron aus                          |
+**Dauer-Worker mit IMAP IDLE:** `bin/worker.php` arbeitet die Jobs in kurzen Durchläufen (10 s Budget) ab und hält dazwischen je aktivem Konto eine IDLE-Verbindung auf den Posteingang (`src/Jobs/IdleManager.php`). PHP ist single-threaded, daher werden alle IDLE-Sockets per `stream_select` (bis 2 s) zwischen den Runner-Durchläufen bedient. Meldet der Server eine Änderung (`EXISTS`, `EXPUNGE`, `FETCH`), wird nur ein `message_sync` für den Posteingang eingeplant (dedupliziert, entprellt per `SYNC_MIN_INTERVAL_SECONDS`); der Abgleich selbst bleibt im Job, der periodische Sync bleibt Rückfallebene. IDLE wird nach 25 min neu gestartet (Grenze 29 min, RFC 2177); abgebrochene Verbindungen bauen sich mit exponentiellem Backoff (5 s bis 30 min, Jitter) neu auf, Anmeldefehler warten das Maximum. Konten mit `disabled`, `auth_error` oder offenem Backoff (`next_retry_at`) bekommen keine Verbindung; gelöschte oder deaktivierte Konten werden beim Abgleich (jede Minute) getrennt. Logs enthalten nur Konto-IDs und Fehlercodes. Ohne Dauer-Worker (nur Cron) gibt es kein IDLE.
+
+| Variable                    | Standard | Zweck                                                                                        |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `CRON_TIME_BUDGET_SECONDS`  | `50`     | Laufzeit je Cron-Aufruf; neue Jobs starten nur mit ≥ 5 s Rest. Unter dem Hoster-Limit halten |
+| `CRON_TOKEN`                | leer     | Geheimnis für den Web-Cron (`public/cron.php`); leer = Web-Cron aus                          |
+| `IMAP_IDLE`                 | `1`      | `0` schaltet IMAP IDLE im Dauer-Worker ab (dann nur periodischer Sync)                       |
+| `IMAP_IDLE_MAX_CONNECTIONS` | `50`     | Obergrenze gleichzeitiger IDLE-Verbindungen (ältere Konten zuerst)                           |
+| `SYNC_MIN_INTERVAL_SECONDS` | `10`     | Mindestabstand IDLE-ausgelöster Syncs je Ordner; `0` = ohne Entprellung                      |
 
 ## Entwicklung
 
