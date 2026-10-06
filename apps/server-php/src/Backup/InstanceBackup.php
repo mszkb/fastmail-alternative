@@ -432,14 +432,17 @@ final class InstanceBackup
     {
         $rows = Database::run(
             $this->pdo,
-            'SELECT column_name, data_type, is_generated FROM information_schema.columns
+            // EXTRA holds "STORED GENERATED"/"VIRTUAL GENERATED" on MySQL and MariaDB alike
+            // (MySQL also has "DEFAULT_GENERATED" for expression defaults, which are real
+            // columns); IS_GENERATED exists on MariaDB only.
+            'SELECT column_name, data_type, extra FROM information_schema.columns
              WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position',
             [$table],
         )->fetchAll(\PDO::FETCH_NUM);
         $columns = [];
         foreach ($rows as $row) {
             /** @var array{0: string, 1: string, 2: string} $row */
-            if (strtoupper((string) $row[2]) !== 'NEVER') {
+            if (preg_match('/\b(STORED|VIRTUAL|PERSISTENT) GENERATED\b/i', (string) $row[2]) === 1) {
                 continue;
             }
             $columns[] = ['name' => (string) $row[0], 'binary' => \in_array(strtolower((string) $row[1]), self::BINARY_TYPES, true)];

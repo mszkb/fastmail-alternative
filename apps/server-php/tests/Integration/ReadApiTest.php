@@ -226,7 +226,8 @@ final class ReadApiTest extends DatabaseTestCase
         self::assertCount(2, $payloads);
         $move = json_decode((string) $payloads[1], true);
         \assert(\is_array($move));
-        self::assertSame(['operation' => 'move', 'folderId' => $inbox, 'uidvalidity' => '1', 'items' => [['uid' => 7, 'locationId' => $move['items'][0]['locationId'], 'messageId' => $id]], 'targetFolderId' => $archive], $move);
+        // assertEquals: MySQL's JSON type does not keep the key order.
+        self::assertEquals(['operation' => 'move', 'folderId' => $inbox, 'uidvalidity' => '1', 'items' => [['uid' => 7, 'locationId' => $move['items'][0]['locationId'], 'messageId' => $id]], 'targetFolderId' => $archive], $move);
     }
 
     public function testHtmlAndAttachments(): void

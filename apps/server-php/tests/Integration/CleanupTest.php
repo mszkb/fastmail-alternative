@@ -431,7 +431,8 @@ final class CleanupTest extends DatabaseTestCase
             "SELECT payload, run_at > UTC_TIMESTAMP(6) + INTERVAL 1 HOUR AS is_delayed FROM job WHERE type = 'account_cleanup'",
         )->fetchAll();
         self::assertCount(1, $rows);
-        self::assertSame(['accountId' => $deleted, 'pass' => 2], json_decode((string) $rows[0]['payload'], true));
+        // MySQL's JSON type does not keep the key order.
+        self::assertEquals(['accountId' => $deleted, 'pass' => 2], json_decode((string) $rows[0]['payload'], true));
         self::assertSame(1, (int) $rows[0]['is_delayed']);
 
         // Second pass: late files are removed, no further pass.

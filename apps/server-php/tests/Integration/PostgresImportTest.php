@@ -94,7 +94,7 @@ final class PostgresImportTest extends DatabaseTestCase
         $q = $this->column(...);
         self::assertSame('Me@Example.org', $q('SELECT email FROM `user` WHERE email_lower = ?', ['me@example.org']));
         self::assertSame(hash('sha256', 't', true), $q('SELECT token_hash FROM session'));
-        self::assertSame('["IMAP4REV1","IDLE"]', $q('SELECT capabilities FROM mail_account'));
+        self::assertSame(['IMAP4REV1', 'IDLE'], json_decode((string) $q('SELECT capabilities FROM mail_account'), true));
         self::assertSame('INBOX/Über', $q('SELECT path FROM folder'));
         self::assertSame('2026-10-01 10:34:56.789000', $q('SELECT received_at FROM message WHERE id = ?', [$ids[0]]));
         self::assertSame(['<r1@x>', '<r2-0@x>'], json_decode((string) $q('SELECT `references` FROM message WHERE id = ?', [$ids[0]]), true));
