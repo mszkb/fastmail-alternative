@@ -11,3 +11,5 @@ apps/server-php/vendor
 apps/server-php/composer.lock
 # Generated test vectors (written by Node and PHP, see apps/server-php/tests/fixtures)
 apps/server-php/tests/fixtures/*.json
+# Generated from docs/api/parts by packages/contract-tests/scripts/build-openapi.mjs
+docs/api/openapi.yaml

@@ -1,0 +1,1024 @@
+paths:
+  # ---------------------------------------------------------------- system
+  /api/health:
+    get:
+      operationId: getHealth
+      tags: [system]
+      summary: Liveness/readiness check
+      description: Reports `ok` only when the database is reachable.
+      security: []
+      responses:
+        '200':
+          description: API and database are up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+        '503':
+          description: Database unreachable (`status` is `degraded`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+
+  /api/metrics:
+    get:
+      operationId: getMetrics
+      tags: [system]
+      summary: Prometheus metrics
+      description: |
+        Disabled (404) unless `METRICS_TOKEN` is configured. Requires
+        `Authorization: Bearer <METRICS_TOKEN>`; no session needed.
+      security:
+        - metricsToken: []
+      responses:
+        '200':
+          description: Metrics in the Prometheus text exposition format (version 0.0.4)
+          content:
+            text/plain:
+              schema: { type: string }
+        '401':
+          description: Missing or wrong metrics token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '404':
+          description: Metrics endpoint disabled (no `METRICS_TOKEN`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  # ------------------------------------------------------------------ auth
+  /api/auth/status:
+    get:
+      operationId: getAuthStatus
+      tags: [auth]
+      summary: Setup and login state
+      description: |
+        Public. When a valid session cookie is sent and its token is older
+        than 24 h, the token is rotated and a new `fma_session` cookie is set.
+      security: []
+      responses:
+        '200':
+          description: Current state
+          headers:
+            Set-Cookie:
+              description: Only sent when the session token was rotated; same attributes as on login.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthStatus' }
+
+  /api/auth/setup:
+    post:
+      operationId: setupUser
+      tags: [auth]
+      summary: Create the single user (first run)
+      description: |
+        Only possible while no user exists and only with the setup code
+        (`SETUP_TOKEN` or the code written to the api log). Creates the
+        user, a device and a session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetupRequest' }
+      responses:
+        '200':
+          description: User created and logged in
+          headers:
+            Set-Cookie:
+              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP)'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        '400':
+          description: Invalid email or password (10 to 200 characters)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '403':
+          description: Setup already completed, invalid setup code, or cross-origin request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Log in with email and password
+      description: |
+        Creates a new device and session. A still valid session of this
+        browser is ended. After 5 failed attempts within 15 minutes the
+        client IP is locked out for 15 minutes (429).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP)'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        '401':
+          description: Invalid email or password (also for malformed input)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429':
+          description: Login lockout or rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the next attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  /api/auth/password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change the password
+      description: |
+        Requires the current password (same lockout as login). Revokes all
+        other devices (their sessions and push subscriptions) and rotates
+        the current session token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordChangeRequest' }
+      responses:
+        '204':
+          description: Password changed
+          headers:
+            Set-Cookie:
+              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP)'
+              schema: { type: string }
+        '400':
+          description: New password must have 10 to 200 characters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Current password is incorrect, or cross-origin request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429':
+          description: Lockout after failed attempts or rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the next attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  /api/auth/session:
+    delete:
+      operationId: logout
+      tags: [auth]
+      summary: Log out (end the current session)
+      description: |
+        Deletes the session. If the device has no sessions left, its push
+        subscriptions are removed as well.
+      responses:
+        '204':
+          description: Logged out; the session cookie is cleared
+          headers:
+            Set-Cookie:
+              description: Clears `fma_session` (expired cookie).
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/auth/devices:
+    get:
+      operationId: listDevices
+      tags: [auth]
+      summary: List logged-in devices
+      description: Non-revoked devices; the current device comes first, then by last activity.
+      responses:
+        '200':
+          description: Devices of the user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/devices/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      operationId: revokeDevice
+      tags: [auth]
+      summary: Revoke a device
+      description: Ends all sessions of the device and removes its push subscriptions.
+      responses:
+        '204':
+          description: Device revoked
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The current device cannot be revoked (log out instead)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  # -------------------------------------------------------------- settings
+  /api/settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get user settings
+      responses:
+        '200':
+          description: Current settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update user settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserSettings' }
+      responses:
+        '200':
+          description: Settings after the update
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserSettings' }
+        '400':
+          description: '`unifiedInbox` missing or not a boolean'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ------------------------------------------------------------------ push
+  /api/push/vapid-public-key:
+    get:
+      operationId: getVapidPublicKey
+      tags: [push]
+      summary: Get the instance's VAPID public key
+      responses:
+        '200':
+          description: VAPID public key, or null when the instance has none
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VapidKeyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/push/subscriptions:
+    get:
+      operationId: listPushSubscriptions
+      tags: [push]
+      summary: List push subscriptions
+      description: Active subscriptions of non-revoked devices, current device first. Never returns endpoints or keys.
+      responses:
+        '200':
+          description: Subscriptions of the user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PushSubscriptionListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createPushSubscription
+      tags: [push]
+      summary: Register this browser's push subscription
+      description: |
+        Stores the subscription for the current device. Upsert by endpoint:
+        an endpoint already known for this user moves to the current device
+        and is re-enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushSubscriptionRequest' }
+      responses:
+        '201':
+          description: Subscription stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PushSubscriptionCreated' }
+        '400':
+          description: Invalid endpoint (not https, private host, too long) or invalid keys
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: The endpoint belongs to another user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+    delete:
+      operationId: deletePushSubscriptionByEndpoint
+      tags: [push]
+      summary: Unsubscribe this browser (by endpoint)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushUnsubscribeRequest' }
+      responses:
+        '204':
+          description: Subscription removed
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/push/subscriptions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      operationId: deletePushSubscription
+      tags: [push]
+      summary: Remove a push subscription (device management)
+      responses:
+        '204':
+          description: Subscription removed
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # --------------------------------------------------------------- storage
+  /api/storage:
+    get:
+      operationId: getStorage
+      tags: [storage]
+      summary: Storage usage of all accounts
+      responses:
+        '200':
+          description: Usage per account (in account order) plus the total
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StorageResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/accounts/{id}/storage:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: getAccountStorage
+      tags: [storage]
+      summary: Storage usage of one account
+      responses:
+        '200':
+          description: Usage of the account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountStorage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------- config
+  /api/export/config:
+    get:
+      operationId: exportConfig
+      tags: [config]
+      summary: Download the server configuration
+      description: |
+        Accounts (host, port, user name), identities, manual folder mappings
+        and settings as versioned JSON. Never contains passwords, OAuth
+        tokens, keys or mail content.
+      responses:
+        '200':
+          description: Configuration file (pretty-printed JSON, served as attachment)
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="fma-config-YYYY-MM-DD.json"`'
+              schema: { type: string }
+            Cache-Control:
+              description: '`no-store`'
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigExport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/import/config:
+    post:
+      operationId: importConfig
+      tags: [config]
+      summary: Import a server configuration
+      description: |
+        Creates the accounts in one transaction with empty credentials:
+        status `auth_error`, code `CREDENTIALS_REQUIRED`, until the password
+        is entered. Accounts whose address already exists are skipped. Body
+        limit 2 MiB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigImportRequest' }
+      responses:
+        '200':
+          description: Import result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigImportResponse' }
+        '400':
+          description: Not a config file of this app, unsupported version, or invalid account data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Maximum number of accounts (20) reached; nothing was imported
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '413':
+          description: Body larger than 2 MiB
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  # ------------------------------------------------------------------ sync
+  /api/sync:
+    post:
+      operationId: syncAllAccounts
+      tags: [accounts]
+      summary: Request a sync of all accounts
+      description: |
+        Enqueues a folder sync for every account where allowed. Accounts
+        that are skipped (including rate-limited ones) are only reported;
+        the request itself always succeeds.
+      responses:
+        '200':
+          description: One result per account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncAllResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/accounts/{id}/sync:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      operationId: syncAccount
+      tags: [accounts]
+      summary: Request a sync of one account
+      description: |
+        Enqueues a folder sync unless the account is disabled, needs new
+        credentials, is in backoff, already has a sync queued/running, or
+        the last sync was requested less than 30 seconds ago.
+      responses:
+        '200':
+          description: Nothing enqueued; `reason` says why (never `rate_limited`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncRequestResult' }
+        '202':
+          description: Folder sync enqueued for the worker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncRequestResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429':
+          description: |
+            Last sync requested less than 30 s ago (body: SyncRequestResult
+            with reason `rate_limited`, Retry-After 30), or the global rate
+            limit was exceeded (body: ErrorMessage).
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the next attempt
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SyncRequestResult'
+                  - $ref: '#/components/schemas/ErrorMessage'
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        service:
+          type: string
+          enum: [api, worker, web]
+        version:
+          type: string
+          description: '`APP_VERSION` of the running build'
+        checks:
+          type: object
+          required: [database]
+          properties:
+            database:
+              type: string
+              enum: [ok, down]
+
+    AuthStatus:
+      type: object
+      required: [needsSetup, authenticated]
+      properties:
+        needsSetup:
+          type: boolean
+          description: No user exists yet; the client shows the setup page.
+        authenticated:
+          type: boolean
+        email:
+          type: string
+          format: email
+          description: Present only when authenticated.
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Trimmed and lower-cased before use.
+        password:
+          type: string
+          minLength: 10
+          maxLength: 200
+        deviceName:
+          type: string
+          maxLength: 100
+          default: Browser
+          description: Longer values are truncated; empty becomes `Browser`.
+        platform:
+          type: string
+          enum: [ios_pwa, android_pwa, desktop]
+          default: desktop
+          description: Unknown values are treated as `desktop`.
+
+    SetupRequest:
+      allOf:
+        - $ref: '#/components/schemas/LoginRequest'
+        - type: object
+          required: [setupCode]
+          properties:
+            setupCode:
+              type: string
+              maxLength: 200
+              description: Case-insensitive; spaces and dashes are ignored.
+
+    AuthSessionResponse:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    PasswordChangeRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        newPassword:
+          type: string
+          minLength: 10
+          maxLength: 200
+
+    DeviceInfo:
+      type: object
+      required: [id, name, platform, lastSeenAt, isCurrent]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [ios_pwa, android_pwa, desktop]
+        lastSeenAt:
+          type: [string, 'null']
+          format: date-time
+        isCurrent:
+          type: boolean
+          description: The device making the request.
+
+    DeviceListResponse:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items: { $ref: '#/components/schemas/DeviceInfo' }
+
+    UserSettings:
+      type: object
+      required: [unifiedInbox]
+      properties:
+        unifiedInbox:
+          type: boolean
+          description: Unified inbox across all accounts (opt-in, default off).
+
+    VapidKeyResponse:
+      type: object
+      required: [publicKey]
+      properties:
+        publicKey:
+          type: [string, 'null']
+          description: Base64url VAPID public key; null when not configured.
+
+    PushSubscriptionRequest:
+      type: object
+      description: The browser's PushSubscription JSON.
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: https URL on a public host, without credentials.
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+=*$'
+              description: Base64url uncompressed P-256 public key (65 bytes, leading 0x04).
+            auth:
+              type: string
+              pattern: '^[A-Za-z0-9_-]+=*$'
+              description: Base64url auth secret (16 bytes).
+
+    PushSubscriptionCreated:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          format: uuid
+
+    PushUnsubscribeRequest:
+      type: object
+      required: [endpoint]
+      properties:
+        endpoint:
+          type: string
+          description: Endpoint of the subscription to remove.
+
+    PushSubscriptionInfo:
+      type: object
+      required:
+        [id, deviceId, deviceName, platform, isCurrentDevice, pushService, createdAt, lastSuccessAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        deviceId:
+          type: string
+          format: uuid
+        deviceName:
+          type: string
+        platform:
+          type: string
+          enum: [ios_pwa, android_pwa, desktop]
+        isCurrentDevice:
+          type: boolean
+        pushService:
+          type: string
+          description: Host of the push service (e.g. web.push.apple.com), display only.
+        createdAt:
+          type: string
+          format: date-time
+        lastSuccessAt:
+          type: [string, 'null']
+          format: date-time
+
+    PushSubscriptionListResponse:
+      type: object
+      required: [subscriptions]
+      properties:
+        subscriptions:
+          type: array
+          items: { $ref: '#/components/schemas/PushSubscriptionInfo' }
+
+    AccountStorage:
+      type: object
+      required:
+        [
+          accountId,
+          messageCount,
+          storedMessageCount,
+          messageBytes,
+          uploadCount,
+          uploadBytes,
+          totalBytes,
+        ]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        messageCount:
+          type: integer
+          minimum: 0
+          description: All synced messages (with or without stored body).
+        storedMessageCount:
+          type: integer
+          minimum: 0
+          description: Messages whose encrypted raw source is stored.
+        messageBytes:
+          type: integer
+          minimum: 0
+          description: Approximate bytes of stored raw messages (provider size).
+        uploadCount:
+          type: integer
+          minimum: 0
+          description: Pending uploads (compose, drafts, outbox).
+        uploadBytes:
+          type: integer
+          minimum: 0
+        totalBytes:
+          type: integer
+          minimum: 0
+          description: messageBytes + uploadBytes
+
+    StorageResponse:
+      type: object
+      required: [accounts, totalBytes]
+      properties:
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/AccountStorage' }
+        totalBytes:
+          type: integer
+          minimum: 0
+
+    ConfigServer:
+      type: object
+      description: Host, port and user name only - never a password.
+      required: [host, port, user]
+      properties:
+        host:
+          type: string
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        user:
+          type: string
+          maxLength: 320
+
+    ConfigFolderMapping:
+      type: object
+      required: [path, delimiter]
+      properties:
+        path:
+          type: string
+          maxLength: 1000
+          description: IMAP path; must not be INBOX.
+        delimiter:
+          type: [string, 'null']
+          maxLength: 4
+
+    ConfigFolderRoles:
+      type: object
+      description: Manual folder mapping, role -> IMAP folder.
+      additionalProperties: false
+      properties:
+        sent: { $ref: '#/components/schemas/ConfigFolderMapping' }
+        drafts: { $ref: '#/components/schemas/ConfigFolderMapping' }
+        trash: { $ref: '#/components/schemas/ConfigFolderMapping' }
+        archive: { $ref: '#/components/schemas/ConfigFolderMapping' }
+        junk: { $ref: '#/components/schemas/ConfigFolderMapping' }
+
+    ConfigExportIdentity:
+      type: object
+      required: [name, emailAddress, signature, isDefault]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        emailAddress:
+          type: string
+          format: email
+          maxLength: 254
+        signature:
+          type: [string, 'null']
+          maxLength: 10000
+        isDefault:
+          type: boolean
+
+    ConfigExportAccount:
+      type: object
+      required:
+        [
+          displayName,
+          emailAddress,
+          sortOrder,
+          credentialKind,
+          syncSince,
+          imap,
+          smtp,
+          identities,
+          folderRoles,
+        ]
+      properties:
+        displayName:
+          type: string
+          maxLength: 100
+        emailAddress:
+          type: string
+          format: email
+          maxLength: 254
+        sortOrder:
+          type: integer
+          minimum: -1000000
+          maximum: 1000000
+        credentialKind:
+          type: string
+          enum: [password, oauth2]
+        syncSince:
+          type: [string, 'null']
+          format: date-time
+          description: Initial sync limit; null = everything.
+        imap: { $ref: '#/components/schemas/ConfigServer' }
+        smtp: { $ref: '#/components/schemas/ConfigServer' }
+        identities:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ConfigExportIdentity' }
+        folderRoles: { $ref: '#/components/schemas/ConfigFolderRoles' }
+
+    ConfigExport:
+      type: object
+      required: [format, version, exportedAt, accounts, settings]
+      properties:
+        format:
+          type: string
+          const: fma-config
+        version:
+          type: integer
+          const: 1
+        exportedAt:
+          type: string
+          format: date-time
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigExportAccount' }
+        settings:
+          type: object
+          additionalProperties: false
+          description: Reserved for server-side user settings (none yet).
+
+    ConfigImportRequest:
+      type: object
+      description: |
+        A file from GET /api/export/config. Validation is lenient: only the
+        fields listed as required must be present; missing optional fields
+        get defaults (displayName = emailAddress, sortOrder 0, credentialKind
+        `password`, smtp.user = imap.user). `exportedAt` and `settings` are
+        ignored. IMAP/SMTP ports must be allowed by the server
+        (`MAIL_EXTRA_PORTS`).
+      required: [format, version, accounts]
+      properties:
+        format:
+          type: string
+          const: fma-config
+        version:
+          type: integer
+          minimum: 1
+          maximum: 1
+          description: Versions up to the current one are accepted.
+        exportedAt:
+          type: string
+        accounts:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [emailAddress, imap, smtp]
+            properties:
+              displayName:
+                type: string
+                maxLength: 100
+              emailAddress:
+                type: string
+                format: email
+                maxLength: 254
+              sortOrder:
+                type: integer
+                description: Clamped to +-1000000.
+              credentialKind:
+                type: string
+                enum: [password, oauth2]
+              syncSince:
+                type: [string, 'null']
+                format: date-time
+              imap:
+                allOf:
+                  - $ref: '#/components/schemas/ConfigServer'
+                  - properties:
+                      user: { minLength: 1 }
+              smtp:
+                type: object
+                required: [host, port]
+                properties:
+                  host:
+                    type: string
+                    maxLength: 253
+                  port:
+                    type: integer
+                    minimum: 1
+                    maximum: 65535
+                  user:
+                    type: string
+                    maxLength: 320
+              identities:
+                type: array
+                maxItems: 20
+                items:
+                  type: object
+                  required: [emailAddress]
+                  properties:
+                    name:
+                      type: string
+                      maxLength: 100
+                    emailAddress:
+                      type: string
+                      format: email
+                      maxLength: 254
+                    signature:
+                      type: [string, 'null']
+                      maxLength: 10000
+                    isDefault:
+                      type: boolean
+              folderRoles: { $ref: '#/components/schemas/ConfigFolderRoles' }
+        settings:
+          type: object
+
+    ConfigImportResponse:
+      type: object
+      required: [imported, skipped]
+      properties:
+        imported:
+          type: array
+          description: Email addresses of created accounts; all need their password before the first sync.
+          items: { type: string, format: email }
+        skipped:
+          type: array
+          description: Email addresses skipped because an account with them already exists.
+          items: { type: string, format: email }
+
+    SyncSkipReason:
+      type: string
+      enum: [disabled, auth_error, backoff, pending, rate_limited]
+
+    SyncRequestResult:
+      type: object
+      required: [accountId, queued, reason]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        queued:
+          type: boolean
+        reason:
+          description: Why no job was enqueued; null when queued.
+          oneOf:
+            - $ref: '#/components/schemas/SyncSkipReason'
+            - type: 'null'
+
+    SyncAllResponse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items: { $ref: '#/components/schemas/SyncRequestResult' }
