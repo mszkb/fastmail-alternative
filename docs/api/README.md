@@ -44,4 +44,4 @@ WORKER_CMD='sleep 3; exec php apps/server-php/bin/worker.php' \
 GREENMAIL_HOST=127.0.0.1 pnpm --filter @fma/e2e e2e
 ```
 
-Stand 2026-10-06: alle 12 Playwright-Tests grün gegen PHP-API, PHP-Worker (inkl. IMAP IDLE) und MariaDB 10.11 – die PWA läuft unverändert. `sleep 3` lässt die Migrationen der API vor dem Worker laufen.
+Stand 2026-10-06: alle 12 Playwright-Tests grün gegen PHP-API, PHP-Worker (inkl. IMAP IDLE) und MariaDB 10.11 sowie MySQL 8.0 – die PWA läuft unverändert. `sleep 3` lässt die Migrationen der API vor dem Worker laufen.
