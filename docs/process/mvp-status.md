@@ -32,4 +32,4 @@ Die Bewertung stützt sich auf Code und Tests im Repository, nicht nur auf die S
 5. **Log-Stichprobe im Echtbetrieb** (Kriterium 8): Logs von api/worker auf dem Pi nach mehreren Tagen auf Betreffzeilen, Adressen und Provider-Fehlertexte durchsehen.
 6. ~~**Offene Security-Findings aus 6.1**~~ erledigt: Push-DNS-Rebinding, Port-Allowlist, `pnpm audit` in CI und `COOKIE_SECURE` ([ASVS-Bericht](../security/asvs-l2.md)).
 7. **Roadmap-Restpunkte bereinigen:** 0.5 (Provider-Matrix) gegen echte Konten prüfen. 1.2 (CI, grün auf `main`) und 0.6 (UX-Flows) sind erledigt.
-8. ~~**Optional:** End-to-End-Test (Browser) für „neue Mail erscheint ohne Reload“~~ erledigt: Playwright-Suite läuft in CI (#74).
+8. ~~**Optional:** End-to-End-Test (Browser) für „neue Mail erscheint ohne Reload“~~ erledigt: Playwright-Suite läuft nächtlich auf der Gitea-Instanz (`msz/gitea-workflows`, #74).
