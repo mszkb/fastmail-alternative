@@ -16,8 +16,13 @@ use Fma\Http\Middleware\RateLimit;
 use Fma\Http\Middleware\RequestLog;
 use Fma\Http\Middleware\RequireAuth;
 use Fma\Http\Middleware\SecurityHeaders;
+use Fma\Jobs\JobQueue;
 use Fma\Log\Logger;
+use Fma\Mail\ConnectionTester;
+use Fma\Mail\SocketConnectionTester;
+use Fma\Routes\AccountRoutes;
 use Fma\Routes\AuthRoutes;
+use Fma\Routes\IdentityRoutes;
 use Fma\Security\LoginLockout;
 use Fma\Security\RateLimiter;
 use Fma\Security\RateLimitRule;
@@ -40,6 +45,7 @@ final class App
 {
     /**
      * @param list<RateLimitRule>|null $rateLimits defaults to RateLimitRule::defaults()
+     * @param ConnectionTester|null $tester IMAP/SMTP connection test; tests inject a fake
      *
      * @return SlimApp<\Psr\Container\ContainerInterface|null>
      */
@@ -48,6 +54,7 @@ final class App
         ?Database $db = null,
         ?Logger $logger = null,
         ?array $rateLimits = null,
+        ?ConnectionTester $tester = null,
     ): SlimApp {
         $db ??= new Database($config);
         $logger ??= new Logger('api', $config->get('LOG_LEVEL', 'info'));
@@ -72,6 +79,9 @@ final class App
         $requireAuth = new RequireAuth($authenticator, $responses);
         (new AuthRoutes($db, $sessions, $authenticator, $cookie, new SetupCode($config, $db, $logger), new LoginLockout($db), $logger))
             ->register($app, $requireAuth);
+        $jobs = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
+        (new AccountRoutes($db, $config, $tester ?? new SocketConnectionTester($config, $logger), $jobs))->register($app, $requireAuth);
+        (new IdentityRoutes($db))->register($app, $requireAuth);
 
         // Slim runs the middleware added last first.
         $app->addRoutingMiddleware();

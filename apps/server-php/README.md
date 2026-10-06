@@ -1,6 +1,6 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99), Datenbankschema (#98), `/api/auth/*` (#100) sowie Job-Queue und Cron-Runner (#102, noch ohne portierte Job-Typen).
+Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – bisher: Grundgerüst (#97), Verschlüsselung (#99), Datenbankschema (#98), `/api/auth/*` (#100), Konten und Identitäten mit Verbindungstest (#101), Import aus PostgreSQL (#108) sowie Job-Queue und Cron-Runner (#102, noch ohne portierte Job-Typen).
 
 ## Aufbau
 
