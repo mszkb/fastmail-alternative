@@ -27,6 +27,14 @@ Datenbank: `DATABASE_URL=mysql://user:passwort@host:3306/datenbank` oder `DB_HOS
 
 Solange kein Benutzer existiert, verlangt `POST /api/auth/setup` einen Setup-Code: `SETUP_TOKEN` aus der Konfiguration oder – ohne diesen – ein zufälliger Code, der beim ersten Aufruf der App einmal ins PHP-Fehlerlog geschrieben wird. Wer das Log nicht lesen kann, erzeugt einen neuen Code mit `php bin/setup-code.php`. Gespeichert wird nur sein SHA-256.
 
+## Einrichtungs-Check
+
+`php bin/check.php` prüft PHP-Version, Extensions (Pflicht: openssl, pdo_mysql, mbstring, json, hash, iconv; Argon2id), `MASTER_KEY` (gesetzt und gültig, Wert wird nie ausgegeben), Datenbankversion (MySQL ≥ 8.0.1 / MariaDB ≥ 10.6 wegen `SKIP LOCKED`), Schreibrechte für `MAIL_DATA_DIR` und – als Warnung – ausgehende Verbindungen zu IMAP 993 / SMTP 465/587. Exit-Code 0, wenn alle Pflichtprüfungen bestehen. Die Browser-Variante für Webspace ohne Shell folgt mit dem Installer (#109).
+
+## Docker (Vorschau)
+
+`Dockerfile` baut ein PHP-FPM-Image (Kontext `apps/server-php`), das beim Start migriert; derselbe Container startet mit `php bin/worker.php` den Dauer-Worker. Die Compose-Einbindung (caddy → php-fpm per FastCGI, MariaDB) folgt mit #109/#110.
+
 ## Hintergrundjobs (Cron)
 
 Ein Runner arbeitet die `job`-Tabelle ab (ADR-0013); es läuft immer nur einer (`GET_LOCK`), Jobs laufen nacheinander. Nur Job-Typen mit portiertem Handler werden abgeholt, alle anderen bleiben in der Warteschlange.
