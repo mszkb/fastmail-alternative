@@ -39,7 +39,7 @@ final class FolderRoles
         $taken = [];
         $sorted = $folders;
         // Prefer top-level/shorter paths, then alphabetical (byte order, deterministic).
-        usort($sorted, static fn (array $a, array $b): int => (mb_strlen($a['path']) <=> mb_strlen($b['path'])) ?: strcmp($a['path'], $b['path']));
+        usort($sorted, static fn(array $a, array $b): int => (mb_strlen($a['path']) <=> mb_strlen($b['path'])) ?: strcmp($a['path'], $b['path']));
 
         foreach ($sorted as $folder) {
             if (strtoupper($folder['path']) === 'INBOX') {
@@ -81,7 +81,7 @@ final class FolderRoles
             [$accountId],
         )->fetchAll();
         $roles = self::resolve(array_map(
-            static fn (array $row): array => ['path' => $row['path'], 'detected' => $row['special_use_detected'], 'override' => $row['special_use_override']],
+            static fn(array $row): array => ['path' => $row['path'], 'detected' => $row['special_use_detected'], 'override' => $row['special_use_override']],
             $rows,
         ));
         foreach ($rows as $row) {

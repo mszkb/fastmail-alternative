@@ -89,6 +89,10 @@ final class App
         (new Routes\SettingsRoutes($db))->register($app, $requireAuth);
         (new Routes\StorageRoutes($db))->register($app, $requireAuth);
         (new Routes\SyncRoutes($db, $jobs))->register($app, $requireAuth);
+        (new Routes\FolderRoutes($db, $jobs))->register($app, $requireAuth);
+        (new Routes\MessageRoutes($db, $config, $logger))->register($app, $requireAuth);
+        (new Routes\MessageActionRoutes($db, $jobs))->register($app, $requireAuth);
+        (new Routes\MessageContentRoutes($db, $config, new Mail\RawStorage($config, $logger), $logger))->register($app, $requireAuth);
 
         // Slim runs the middleware added last first.
         $app->addRoutingMiddleware();
