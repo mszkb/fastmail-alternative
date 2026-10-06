@@ -20,9 +20,11 @@ use Fma\Jobs\JobQueue;
 use Fma\Log\Logger;
 use Fma\Mail\ConnectionTester;
 use Fma\Mail\SocketConnectionTester;
+use Fma\Push\Subscriptions;
 use Fma\Routes\AccountRoutes;
 use Fma\Routes\AuthRoutes;
 use Fma\Routes\IdentityRoutes;
+use Fma\Routes\PushRoutes;
 use Fma\Security\LoginLockout;
 use Fma\Security\RateLimiter;
 use Fma\Security\RateLimitRule;
@@ -82,6 +84,7 @@ final class App
         $jobs = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
         (new AccountRoutes($db, $config, $tester ?? new SocketConnectionTester($config, $logger), $jobs))->register($app, $requireAuth);
         (new IdentityRoutes($db))->register($app, $requireAuth);
+        (new PushRoutes($config, new Subscriptions($db, $config)))->register($app, $requireAuth);
 
         // Slim runs the middleware added last first.
         $app->addRoutingMiddleware();
