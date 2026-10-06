@@ -15,3 +15,9 @@ auditConfig:
   ignoreGhsas:
     - GHSA-86w9-cpqp-85rv # node-forge via listhen (nuxt dev server certs)
     - GHSA-vfj7-8cjw-p6xm # braces via micromatch (nitropack globbing)
+    # simple-git via @nuxt/devtools (dev server only). Fixed in simple-git 4,
+    # which devtools 3.x does not allow yet (^3.36).
+    - GHSA-x6jw-m9v5-85vh
+    - GHSA-v5rq-49vh-5v5c
+    - GHSA-858h-whjf-mvg5
+    - GHSA-g4wm-2vf7-vfgr
