@@ -29,7 +29,7 @@ Claude committet im Lauf nur. Push, PR, Merge und Labels setzt ausschließlich d
 - Branch `agent/issue-<n>`, ein Issue pro PR, PR-Text = Abschlussbericht (`REPORT.md`) + `Closes #<n>`.
 - Unklare, widersprüchliche oder prinzipienwidrige Aufträge: Rückfrage in `QUESTION.md` statt raten.
 - Keine neuen Runtime-Abhängigkeiten und nichts aus `Proposed`-ADRs ohne Rückfrage.
-- Lokales Gate vor dem Push: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`. Dieselben Prüfungen sind die einzigen Required Checks der CI auf `main`. E2E-, Docker- und weitere langsame Tests laufen nur nächtlich um 22:00 auf der Gitea-Instanz der NAS (`msz/gitea-workflows`, klont direkt von GitHub; das Fehler-Issue liegt im Gitea-Mirror dieses Repos). Schlägt die Nacht fehl, öffnet der Workflow dort das Issue „🌙 Nightly failed“ und schließt es selbst, sobald es wieder grün ist.
+- Lokales Gate vor dem Push: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`. Dieselben Prüfungen sind die einzigen Required Checks der CI auf `main`. E2E-, Docker- und weitere langsame Tests laufen nur nächtlich um 22:00 auf der Gitea-Instanz der NAS (`msz/gitea-workflows`, klont direkt von GitHub; das Fehler-Issue liegt im Gitea-Mirror dieses Repos). Schlägt die Nacht fehl, öffnet der Workflow dort das Issue „🌙 Nightly failed“ und schließt es selbst, sobald es wieder grün ist.
 
 ## Sicherheitsgrenzen
 
