@@ -105,7 +105,7 @@ Ohne Dauerprozess gibt es keinen gemeinsamen Speicher zwischen Requests. Deshalb
 
 - Quelle ist die Umgebung **oder** eine `config.php` **außerhalb des Webroots** (Shared Hosting kennt oft keine Umgebungsvariablen). Umgebung hat Vorrang.
 - Webroot ist nur `apps/server-php/public` (bzw. beim Shared-Hosting-Paket ein Unterordner); `config.php`, `vendor/`, `src/` und `bin/` liegen darüber.
-- Der Installer (#109) schreibt `config.php` mit Rechten `0600`, prüft, dass sie per HTTP **nicht** erreichbar ist, und weist darauf hin, den `MASTER_KEY` getrennt zu sichern.
+- Der Installer (#109) schreibt **keine** Secrets: Er zeigt eine `config.php`-Vorlage mit frischem `MASTER_KEY` zum Kopieren (außerhalb des Webroots, Rechte `0600`), prüft, dass `config.php` nicht unter dem Webroot liegt, und weist darauf hin, den `MASTER_KEY` getrennt zu sichern. Nach der Ersteinrichtung ist er gesperrt (404).
 - Der `MASTER_KEY` landet nie in der Datenbank, in Logs oder in Fehlermeldungen (Prinzipien 5–6).
 
 ### Verschlüsselung

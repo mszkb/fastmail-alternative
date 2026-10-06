@@ -12,6 +12,7 @@ Doku für alle, die eine eigene Instanz betreiben. In dieser Reihenfolge lesen:
 
 Außerdem:
 
+- [Installation mit dem PHP-Backend (Vorschau)](installation-php.md) – Webspace per FTP + Cron oder Docker mit MariaDB ([ADR-0013](../adr/0013-php-backend.md))
 - [Systemanforderungen](system-requirements.md) – gemessener Ressourcenverbrauch, Hardware-Empfehlung
 - [Lasttest](load-test.md) – viele Konten, große Postfächer: Methode, Messwerte, Ausführung auf dem Pi
 - [Umzug auf einen neuen Server](migration.md) – vollständig per Backup oder per Konfigurations-Export

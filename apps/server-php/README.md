@@ -29,11 +29,11 @@ Solange kein Benutzer existiert, verlangt `POST /api/auth/setup` einen Setup-Cod
 
 ## Einrichtungs-Check
 
-`php bin/check.php` prüft PHP-Version, Extensions (Pflicht: openssl, pdo_mysql, mbstring, json, hash, iconv; Argon2id), `MASTER_KEY` (gesetzt und gültig, Wert wird nie ausgegeben), Datenbankversion (MySQL ≥ 8.0.1 / MariaDB ≥ 10.6 wegen `SKIP LOCKED`), Schreibrechte für `MAIL_DATA_DIR` und – als Warnung – ausgehende Verbindungen zu IMAP 993 / SMTP 465/587. Exit-Code 0, wenn alle Pflichtprüfungen bestehen. Die Browser-Variante für Webspace ohne Shell folgt mit dem Installer (#109).
+`php bin/check.php` prüft PHP-Version, Extensions (Pflicht: openssl, pdo_mysql, mbstring, json, hash, iconv; Argon2id), `MASTER_KEY` (gesetzt und gültig, Wert wird nie ausgegeben), Datenbankversion (MySQL ≥ 8.0.1 / MariaDB ≥ 10.6 wegen `SKIP LOCKED`), Schreibrechte für `MAIL_DATA_DIR` und – als Warnung – ausgehende Verbindungen zu IMAP 993 / SMTP 465/587. Exit-Code 0, wenn alle Pflichtprüfungen bestehen. Für Webspace ohne Shell zeigt `public/install.php` dieselben Prüfungen im Browser, schlägt eine `config.php` mit frischem `MASTER_KEY` vor (wird nie gespeichert), wendet Migrationen an und gibt nach Eingabe des `MASTER_KEY` einen Setup-Code aus; sobald ein Benutzer existiert, antwortet er mit 404 (`src/Install/Installer.php`). Anleitung und Paketaufbau: [`docs/operations/installation-php.md`](../../docs/operations/installation-php.md).
 
 ## Docker (Vorschau)
 
-`Dockerfile` baut ein PHP-FPM-Image (Kontext `apps/server-php`), das beim Start migriert; derselbe Container startet mit `php bin/worker.php` den Dauer-Worker. Die Compose-Einbindung (caddy → php-fpm per FastCGI, MariaDB) folgt mit #109/#110.
+`Dockerfile` baut ein PHP-FPM-Image (Kontext `apps/server-php`), das beim Start migriert; derselbe Container startet mit `php bin/worker.php` den Dauer-Worker. Compose-Vorschau mit caddy → php-fpm per FastCGI, Worker und MariaDB: `docker-compose.php.yml` und `Caddyfile.php` im Repo-Root. Das Shared-Hosting-ZIP baut `scripts/build-php-release.sh`.
 
 ## Hintergrundjobs (Cron)
 
