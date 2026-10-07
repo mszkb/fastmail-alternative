@@ -190,6 +190,9 @@ final class MessageSyncJob implements JobHandler
 
         $progress->report('expunge', $folderId);
         $this->reconcile($pdo, $accountId, $folderId, $serverUidvalidity, $serverUids, $serverFlags);
+        // Phase boundary: a stop during listing/reconcile ends the run here,
+        // even when there is nothing new to fetch.
+        $cancelled = $progress->cancelled();
 
         $knownUids = array_map('intval', Database::run($pdo, 'SELECT uid FROM message_location WHERE folder_id = ? AND uidvalidity = ?', [$folderId, $serverUidvalidity])->fetchAll(\PDO::FETCH_COLUMN));
         $known = array_flip($knownUids);
@@ -223,14 +226,13 @@ final class MessageSyncJob implements JobHandler
         $isIncremental = $dbUidvalidity !== null && $dbUidvalidity === $serverUidvalidity;
 
         $newUnseen = 0;
-        $complete = true;
-        $cancelled = false;
+        $complete = !$cancelled;
         $hmacKey = Envelope::deriveHmacKey($ctx->dek, 'thread');
         $seen = [];
         $total = \count($targets) + \count($older);
         $done = 0;
         $progress->report('headers', $folderId, 0, $total);
-        foreach (array_chunk([...$targets, ...$older], self::FETCH_BATCH) as $batch) {
+        foreach ($cancelled ? [] : array_chunk([...$targets, ...$older], self::FETCH_BATCH) as $batch) {
             if ($deadline->expired()) {
                 $complete = false;
                 break;
