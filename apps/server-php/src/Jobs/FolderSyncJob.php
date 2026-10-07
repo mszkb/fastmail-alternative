@@ -21,6 +21,10 @@ use Fma\Mail\TransportPolicy;
  * by the next cleanup run) and resolves the effective roles. Chains one
  * message_sync per selectable folder. folder.uidvalidity is written by
  * message_sync only.
+ *
+ * Progress (#119): phase 'folders' with done/total mailboxes. A cancel
+ * request stops it between two mailboxes (IMAP logout, no folder removal,
+ * nothing chained); folders upserted so far stay, the next run continues.
  */
 final class FolderSyncJob implements JobHandler
 {
@@ -37,6 +41,10 @@ final class FolderSyncJob implements JobHandler
             throw new \RuntimeException('folder_sync job without account_id');
         }
         $pdo = $this->db->pdo();
+        $progress = $this->queue->progress($job->id);
+        if ($progress->cancelled()) {
+            throw new JobCancelledException();
+        }
         $account = AccountContext::load($pdo, $job->accountId, $this->config->get('MASTER_KEY'));
         try {
             $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $account->imap);
@@ -47,7 +55,12 @@ final class FolderSyncJob implements JobHandler
             $mailboxes = $client->list();
             $selectable = array_values(array_filter($mailboxes, self::isSelectable(...)));
             $detected = FolderDetection::detect($selectable);
-            foreach ($mailboxes as $mailbox) {
+            $progress->report('folders', null, 0, \count($mailboxes));
+            foreach ($mailboxes as $index => $mailbox) {
+                if ($progress->cancelled()) {
+                    throw new JobCancelledException();
+                }
+                $progress->report('folders', null, $index, \count($mailboxes));
                 $isSelectable = self::isSelectable($mailbox);
                 $status = $isSelectable ? $client->status($mailbox['path']) : ['uidNext' => null, 'unseen' => null];
                 Database::run(
@@ -83,8 +96,14 @@ final class FolderSyncJob implements JobHandler
             throw $e;
         }
         $folders = Database::run($pdo, 'SELECT id FROM folder WHERE account_id = ? AND selectable', [$job->accountId])->fetchAll(\PDO::FETCH_COLUMN);
-        foreach ($folders as $folderId) {
-            $this->queue->enqueueMessageSync($job->accountId, (string) $folderId);
+        $accountId = $job->accountId;
+        $chained = $this->queue->chainUnlessCancelled($job, function () use ($folders, $accountId): void {
+            foreach ($folders as $folderId) {
+                $this->queue->enqueueMessageSync($accountId, (string) $folderId);
+            }
+        });
+        if (!$chained) {
+            throw new JobCancelledException();
         }
 
         return true;

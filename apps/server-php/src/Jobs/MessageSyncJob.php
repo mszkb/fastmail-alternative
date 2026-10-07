@@ -38,6 +38,14 @@ use ZBateson\MailMimeParser\MailMimeParser;
  * folder's uidvalidity/highestmodseq unchanged (the next run continues as
  * the same kind of run) and enqueues a follow-up message_sync.
  *
+ * Progress and cancellation (#119): phases 'flags' (listing), 'expunge'
+ * (reconcile), 'headers' (new messages incl. their bodies, done/total) and
+ * 'bodies' (bodies missing from earlier runs, done/total), written via
+ * SyncProgress. A cancel request is checked between two stored messages and
+ * ends the run like an expired deadline (uidvalidity/highestmodseq stay, so
+ * the next run continues without duplicates), but without a follow-up job;
+ * the job then ends as 'cancelled'.
+ *
  * Metadata backfill (migration 0007 in Node): rows with an outdated
  * metadata_version (e.g. imported from PostgreSQL) get addresses, Reply-To
  * and threading headers re-derived from the stored raw mail, else from IMAP.
@@ -93,6 +101,10 @@ final class MessageSyncJob implements JobHandler
             return false;
         }
 
+        $progress = $this->queue->progress($job->id);
+        if ($progress->cancelled()) {
+            throw new JobCancelledException();
+        }
         $ctx = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
         try {
             $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $ctx->imap);
@@ -100,8 +112,9 @@ final class MessageSyncJob implements JobHandler
             throw self::accountError($e);
         }
         $newUnseen = 0;
+        $cancelled = false;
         try {
-            $newUnseen = $this->sync($pdo, $ctx, new ImapMailbox($client), $folder, \is_string($syncSince) ? $syncSince : null, $loadOlder, $deadline, $job);
+            [$newUnseen, $cancelled] = $this->sync($pdo, $ctx, new ImapMailbox($client), $folder, \is_string($syncSince) ? $syncSince : null, $loadOlder, $deadline, $job, $progress);
         } catch (MailException $e) {
             throw self::accountError($e);
         } finally {
@@ -122,6 +135,9 @@ final class MessageSyncJob implements JobHandler
         } catch (\Throwable $e) {
             $this->logger->warn('thread assignment failed', ['accountId' => $accountId, 'folderId' => $folderId, 'error' => $e::class]);
         }
+        if ($cancelled) {
+            throw new JobCancelledException();
+        }
 
         return true;
     }
@@ -129,12 +145,13 @@ final class MessageSyncJob implements JobHandler
     /**
      * @param array{id: string, path: string, uidvalidity: int|string|null, highestmodseq: int|string|null, last_synced_at: ?string, special_use: ?string, selectable: int|string} $folder
      *
-     * @return int new unseen messages of an incremental run
+     * @return array{0: int, 1: bool} new unseen messages of an incremental run, whether it stopped on a cancel request
      */
-    private function sync(\PDO $pdo, AccountContext $ctx, ImapMailbox $mailbox, array $folder, ?string $syncSince, bool $loadOlder, Deadline $deadline, Job $job): int
+    private function sync(\PDO $pdo, AccountContext $ctx, ImapMailbox $mailbox, array $folder, ?string $syncSince, bool $loadOlder, Deadline $deadline, Job $job, SyncProgress $progress): array
     {
         $accountId = $ctx->accountId;
         $folderId = $folder['id'];
+        $progress->report('flags', $folderId);
         $selected = $mailbox->examine($folder['path']);
         $serverUidvalidity = $selected['uidValidity'];
         $dbUidvalidity = $folder['uidvalidity'] === null ? null : (int) $folder['uidvalidity'];
@@ -171,6 +188,7 @@ final class MessageSyncJob implements JobHandler
         }
         $serverUids = array_flip($allUids);
 
+        $progress->report('expunge', $folderId);
         $this->reconcile($pdo, $accountId, $folderId, $serverUidvalidity, $serverUids, $serverFlags);
 
         $knownUids = array_map('intval', Database::run($pdo, 'SELECT uid FROM message_location WHERE folder_id = ? AND uidvalidity = ?', [$folderId, $serverUidvalidity])->fetchAll(\PDO::FETCH_COLUMN));
@@ -206,8 +224,12 @@ final class MessageSyncJob implements JobHandler
 
         $newUnseen = 0;
         $complete = true;
+        $cancelled = false;
         $hmacKey = Envelope::deriveHmacKey($ctx->dek, 'thread');
         $seen = [];
+        $total = \count($targets) + \count($older);
+        $done = 0;
+        $progress->report('headers', $folderId, 0, $total);
         foreach (array_chunk([...$targets, ...$older], self::FETCH_BATCH) as $batch) {
             if ($deadline->expired()) {
                 $complete = false;
@@ -218,10 +240,17 @@ final class MessageSyncJob implements JobHandler
                     $complete = false;
                     break 2;
                 }
+                // Between two stored messages: each one is stored completely or not at all.
+                if ($progress->cancelled()) {
+                    $complete = false;
+                    $cancelled = true;
+                    break 2;
+                }
                 $isNew = $this->storeMessage($pdo, $ctx, $mailbox, $hmacKey, $folderId, $serverUidvalidity, $message, $seen);
                 if ($isNew && $isIncremental && $highestSynced > 0 && $message['uid'] > $highestSynced && !\in_array('\\Seen', $message['flags'], true)) {
                     ++$newUnseen;
                 }
+                $progress->report('headers', $folderId, ++$done, $total);
             }
         }
 
@@ -235,15 +264,22 @@ final class MessageSyncJob implements JobHandler
                  GROUP BY ml.message_id',
                 [$folderId, $serverUidvalidity],
             )->fetchAll();
-            foreach ($missing as $row) {
+            $progress->report('bodies', $folderId, 0, \count($missing));
+            foreach ($missing as $index => $row) {
                 /** @var array{message_id: string, uid: int|string} $row */
                 if ($deadline->expired()) {
                     $complete = false;
                     break;
                 }
+                if ($progress->cancelled()) {
+                    $complete = false;
+                    $cancelled = true;
+                    break;
+                }
                 if (isset($serverUids[(int) $row['uid']])) {
                     $this->downloadBody($pdo, $ctx, $mailbox, $row['message_id'], (int) $row['uid'], null);
                 }
+                $progress->report('bodies', $folderId, $index + 1, \count($missing));
             }
         }
 
@@ -277,12 +313,20 @@ final class MessageSyncJob implements JobHandler
             );
         } else {
             Database::run($pdo, "UPDATE folder SET {$unread} WHERE id = ?", [$folderId, '\\Seen', $folderId]);
-            // The running job blocks enqueueMessageSync(); enqueue the continuation directly.
-            $this->queue->enqueue('message_sync', $accountId, ['folderId' => $folderId] + ($older !== [] ? ['loadOlder' => true] : []));
-            $this->logger->info('message sync continues in a follow-up job', ['accountId' => $accountId, 'folderId' => $folderId, 'jobId' => $job->id]);
+            // The running job blocks enqueueMessageSync(); enqueue the continuation directly - not after a cancel request.
+            $continued = !$cancelled && $this->queue->chainUnlessCancelled(
+                $job,
+                fn() => $this->queue->enqueue('message_sync', $accountId, ['folderId' => $folderId] + ($older !== [] ? ['loadOlder' => true] : [])),
+            );
+            if ($continued) {
+                $this->logger->info('message sync continues in a follow-up job', ['accountId' => $accountId, 'folderId' => $folderId, 'jobId' => $job->id]);
+            } else {
+                $cancelled = true;
+                $this->logger->info('message sync stopped on request', ['accountId' => $accountId, 'folderId' => $folderId, 'jobId' => $job->id]);
+            }
         }
 
-        return $newUnseen;
+        return [$newUnseen, $cancelled];
     }
 
     /**
