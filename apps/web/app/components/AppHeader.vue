@@ -6,7 +6,9 @@
 // keyboard shortcuts and the profile menu (settings, logout).
 // Small screens: a menu button opens the side menu with the accounts, and
 // the search icon opens the search as a full-screen layer.
+import { SHORTCUTS, shortcutLabel } from '@fma/shared'
 import { IconHelp, IconMail, IconMenu2, IconSearch, IconX } from '@tabler/icons-vue'
+import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
 
 const props = defineProps<{
   email: string
@@ -29,18 +31,22 @@ const searchInput = ref<HTMLInputElement | null>(null)
 const mobileInput = ref<HTMLInputElement | null>(null)
 const helpButton = ref<HTMLButtonElement | null>(null)
 
-const SHORTCUTS: [string, string][] = [
-  ['1 … 9 / Strg+1 … 9', 'Konto wechseln'],
-  ['r', 'Antworten'],
-  ['a', 'Allen antworten'],
-  ['f', 'Weiterleiten'],
-  ['u', 'Gelesen / ungelesen'],
-  ['s', 'Markieren'],
-  ['e', 'Archivieren'],
-  ['Entf / #', 'Löschen'],
-  ['/', 'Suche'],
-  ['Alt+↑ / Alt+↓', 'Konto in der Leiste verschieben'],
-]
+/** Overview (?): the shortcut table of @fma/shared plus the app-wide keys. */
+const SHORTCUT_GROUPS = computed(() => {
+  const groups = new Map<string, { keys: string[]; label: string }[]>()
+  for (const shortcut of SHORTCUTS) {
+    const list = groups.get(shortcut.group) ?? []
+    list.push({ keys: shortcut.keys.map(shortcutLabel), label: shortcut.label })
+    groups.set(shortcut.group, list)
+  }
+  groups
+    .get('Allgemein')
+    ?.push(
+      { keys: ['1 … 9'], label: 'Konto wechseln (Strg+1 … 9 in der installierten App)' },
+      { keys: ['Alt+↑', 'Alt+↓'], label: 'Konto in der Leiste verschieben' },
+    )
+  return [...groups.entries()]
+})
 
 function submit(): void {
   const q = query.value.trim()
@@ -63,13 +69,19 @@ function closeHelp(): void {
 /** "/" focuses the search (outside of input fields). */
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && helpOpen.value) {
+    event.preventDefault()
     closeHelp()
     return
   }
-  if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return
-  const target = event.target as HTMLElement | null
-  if (target?.closest('input, textarea, select, [contenteditable]')) return
+  if (!shortcutsEnabled.value || event.ctrlKey || event.metaKey || event.altKey) return
+  if (event.key !== '/' && event.key !== '?') return
+  if (isTypingTarget(event.target)) return
+  if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return
   event.preventDefault()
+  if (event.key === '?') {
+    helpOpen.value = !helpOpen.value
+    return
+  }
   if (searchInput.value && searchInput.value.offsetParent !== null) searchInput.value.focus()
   else void openSearch()
 }
@@ -171,14 +183,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <IconX :size="20" aria-hidden="true" />
         </button>
       </div>
-      <dl>
-        <template v-for="[keys, action] in SHORTCUTS" :key="keys">
-          <dt>
-            <kbd>{{ keys }}</kbd>
-          </dt>
-          <dd>{{ action }}</dd>
-        </template>
-      </dl>
+      <p v-if="!shortcutsEnabled" class="hint">
+        Tastenkürzel sind auf diesem Gerät ausgeschaltet (Einstellungen → Tastenkürzel).
+      </p>
+      <section v-for="[group, entries] in SHORTCUT_GROUPS" :key="group">
+        <h3>{{ group }}</h3>
+        <dl>
+          <template v-for="entry in entries" :key="entry.label">
+            <dt>
+              <template v-for="(key, index) in entry.keys" :key="key">
+                <span v-if="index > 0"> / </span><kbd>{{ key }}</kbd>
+              </template>
+            </dt>
+            <dd>{{ entry.label }}</dd>
+          </template>
+        </dl>
+      </section>
     </div>
   </header>
 </template>
@@ -329,6 +349,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .help-head h2 {
   margin: 0;
   font-size: 1rem;
+}
+
+.help-panel {
+  max-height: min(36rem, calc(100vh - 5rem));
+  overflow-y: auto;
+}
+
+.help-panel h3 {
+  margin: 0.75rem 0 0.35rem;
+  color: var(--fma-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .help-panel dl {

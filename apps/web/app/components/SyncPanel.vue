@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="root" class="sync-status" @keydown.esc="close(true)">
+  <div ref="root" class="sync-status" @keydown.esc.prevent="close(true)">
     <button
       ref="toggleButton"
       type="button"

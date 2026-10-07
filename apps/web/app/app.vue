@@ -69,6 +69,7 @@ import {
   replayQueue,
   resetOfflineState,
 } from '~/utils/offline-queue'
+import { setShortcutsEnabled, shortcutsEnabled } from '~/utils/shortcuts-setting'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -518,6 +519,14 @@ async function openSettings(): Promise<void> {
 }
 
 const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** Settings: keyboard shortcuts on/off (#115, per device). */
+function onShortcutsToggle(event: Event): void {
+  const input = event.target as HTMLInputElement
+  setShortcutsEnabled(input.checked)
+  // Saved at once: the toggle never counts as unsaved input (swipe back).
+  fieldBaseline.set(input, { value: input.value, checked: input.checked })
+}
 
 /** First steps: a section of the settings (push, install guide). */
 async function openSettingsSection(id: 'push' | 'install'): Promise<void> {
@@ -992,6 +1001,18 @@ onBeforeUnmount(() => {
               Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Konten“ in der
               Kontoleiste die Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem
               Konto; geantwortet wird immer aus dem Konto der Nachricht. Nur online verfügbar.
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>Tastenkürzel</h2>
+            <label class="checkbox">
+              <input type="checkbox" :checked="shortcutsEnabled" @change="onShortcutsToggle" />
+              Tastenkürzel verwenden (j/k, r, e, # …)
+            </label>
+            <p class="hint">
+              Gilt für dieses Gerät. Die Übersicht öffnet <kbd>?</kbd> oder das Hilfe-Symbol oben
+              rechts; in Eingabefeldern sind Kürzel immer aus.
             </p>
           </div>
 

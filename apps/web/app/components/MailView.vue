@@ -65,6 +65,9 @@ import {
   overlayPendingActions,
   parseSearchQuery,
   searchQueryString,
+  GO_TO_ROLE,
+  ShortcutMatcher,
+  moveCursor,
   syncProgressText,
   syncStatusFromAccounts,
 } from '@fma/shared'
@@ -100,6 +103,7 @@ import {
   notifyUnauthorized,
   offlineState,
 } from '~/utils/offline-queue'
+import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
   Partial<
@@ -632,6 +636,7 @@ function hitFolderLabel(message: MessageListItem): string {
 
 async function selectFolder(id: string): Promise<void> {
   resetSearch()
+  cursorId.value = ''
   folderId.value = id
   olderHint.value = ''
   messages.value = []
@@ -736,6 +741,7 @@ async function loadOlder(): Promise<void> {
 }
 
 async function openMessage(id: string): Promise<void> {
+  cursorId.value = id
   const request = ++detailRequest
   selectedId.value = id
   mobilePane.value = 'detail'
@@ -1059,17 +1065,44 @@ function onMoveSelect(event: Event): void {
   if (target && detail.value) void runAction('move', [detail.value.id], target)
 }
 
-function isTyping(event: KeyboardEvent): boolean {
-  const element = event.target as HTMLElement | null
-  if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return true
-  return !!element?.isContentEditable
+// Keyboard shortcuts (#115, table in @fma/shared): j/k move the cursor in
+// the list (and open the next message when one is open), Enter/o open,
+// Esc/u back, e/y archive, # delete, r/a/f reply/reply all/forward, c new
+// mail, s/! flag, Shift+I/Shift+U read/unread, "g" + letter a folder by its
+// role; 1-9 (and Ctrl+1-9 in the installed PWA) switch the account. "/" and
+// "?" belong to the header. Inactive while typing, inside dialogs/menus and
+// when switched off in the settings (per device).
+const matcher = new ShortcutMatcher()
+/** Keyboard cursor in the list (j/k). */
+const cursorId = ref('')
+
+async function moveListCursor(step: 1 | -1): Promise<void> {
+  const ids = visibleMessages.value.map((m) => m.id)
+  const next = moveCursor(ids, cursorId.value || selectedId.value, step)
+  if (!next) return
+  cursorId.value = next
+  if (selectedId.value && next !== selectedId.value) await openMessage(next)
+  await nextTick()
+  document
+    .querySelector(`.messages [data-id="${CSS.escape(next)}"]`)
+    ?.scrollIntoView({ block: 'nearest' })
 }
 
-// Keyboard shortcuts (ignored while typing): 1-9 / Ctrl+1-9 switch the
-// account (Ctrl+digit only reaches the page in the installed PWA; browsers
-// use it for tabs), the rest acts on the open message.
+/** Archive/delete from the keyboard: the cursor (and an open message) moves on. */
+async function removeWithKeyboard(action: 'archive' | 'delete', id: string): Promise<void> {
+  const ids = visibleMessages.value.map((m) => m.id)
+  const index = ids.indexOf(id)
+  const following = ids[index + 1] ?? ids[index - 1] ?? ''
+  const wasOpen = selectedId.value === id
+  await runAction(action, [id])
+  cursorId.value = following
+  if (wasOpen && following) await openMessage(following)
+}
+
 function onKeydown(event: KeyboardEvent): void {
-  if (isTyping(event)) return
+  if (!shortcutsEnabled.value || event.defaultPrevented || isTypingTarget(event.target)) return
+  if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"]')) return
+  if (compose.value) return
   if (/^[1-9]$/.test(event.key) && !event.altKey && !event.shiftKey) {
     const account = props.accounts[Number(event.key) - 1]
     if (account) {
@@ -1078,32 +1111,59 @@ function onKeydown(event: KeyboardEvent): void {
     }
     return
   }
-  if (!detail.value || compose.value || event.ctrlKey || event.metaKey || event.altKey) return
-  const id = detail.value.id
-  switch (event.key) {
-    case 'u':
-      void runAction(detail.value.flags.seen ? 'unread' : 'read', [id])
+  const action = matcher.handle(event)
+  if (action === 'pending') {
+    event.preventDefault()
+    return
+  }
+  // "/" and "?" are handled by the header.
+  if (action === null || action === 'search' || action === 'help') return
+  const role = GO_TO_ROLE[action]
+  if (role) {
+    const folder = folders.value.find((f) => f.specialUse === role && f.selectable)
+    if (folder) void selectFolder(folder.id)
+    event.preventDefault()
+    return
+  }
+  const targetId = detail.value?.id ?? cursorId.value
+  const target = visibleMessages.value.find((m) => m.id === targetId) ?? detail.value
+  switch (action) {
+    case 'next':
+    case 'previous':
+      void moveListCursor(action === 'next' ? 1 : -1)
       break
-    case 's':
-      void runAction(detail.value.flags.flagged ? 'unflag' : 'flag', [id])
+    case 'open':
+      if (!cursorId.value || detail.value?.id === cursorId.value) return
+      void openMessage(cursorId.value)
       break
-    case 'e':
-      if (archiveFolder.value && actionFolder.value?.specialUse !== 'archive') {
-        void runAction('archive', [id])
-      }
+    case 'back':
+      if (!goBack()) return
       break
-    case '#':
-    case 'Delete':
-      void runAction('delete', [id])
+    case 'compose':
+      void openCompose('new')
       break
-    case 'r':
-      void openCompose('reply')
+    case 'reply':
+    case 'replyAll':
+    case 'forward':
+      if (!detail.value) return
+      void openCompose(action)
       break
-    case 'a':
-      void openCompose('replyAll')
+    case 'archive':
+      if (!target || !archiveFolder.value || actionFolder.value?.specialUse === 'archive') return
+      void removeWithKeyboard('archive', target.id)
       break
-    case 'f':
-      void openCompose('forward')
+    case 'delete':
+      if (!target) return
+      void removeWithKeyboard('delete', target.id)
+      break
+    case 'flag':
+      if (!target) return
+      void runAction(target.flags.flagged ? 'unflag' : 'flag', [target.id])
+      break
+    case 'markRead':
+    case 'markUnread':
+      if (!target) return
+      void runAction(action === 'markRead' ? 'read' : 'unread', [target.id])
       break
     default:
       return
@@ -1111,11 +1171,6 @@ function onKeydown(event: KeyboardEvent): void {
   event.preventDefault()
 }
 
-/**
- * Swipe back (4.9): one step back inside the mail view. Returns false when
- * there is nothing to go back to here. With an open composer the swipe is
- * swallowed (true) so a draft is never closed by accident.
- */
 function goBack(): boolean {
   if (compose.value) return true
   if (mobilePane.value !== 'detail' && !selectedId.value) return false
@@ -1158,6 +1213,8 @@ function closeDetail(): void {
 
 watch(accountId, (id) => {
   resetSearch()
+  cursorId.value = ''
+  matcher.reset()
   Object.assign(searchForm, { q: '', from: '', subject: '', since: '', before: '' })
   // New scope: abort and ignore everything still in flight for the previous
   // account; its selection, thread and compose state are dropped.
@@ -1428,7 +1485,12 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="item"
-            :class="{ unread: !message.flags.seen, active: message.id === selectedId }"
+            :class="{
+              unread: !message.flags.seen,
+              active: message.id === selectedId,
+              cursor: message.id === cursorId && message.id !== selectedId,
+            }"
+            :data-id="message.id"
             @click="openMessage(message.id)"
           >
             <span class="row">
@@ -1512,7 +1574,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="secondary"
-            title="Tastenkürzel: u"
+            title="Tastenkürzel: Shift+I / Shift+U"
             @click="runAction(detail.flags.seen ? 'unread' : 'read', [detail.id])"
           >
             {{ detail.flags.seen ? 'Als ungelesen markieren' : 'Als gelesen markieren' }}
@@ -1521,7 +1583,7 @@ onBeforeUnmount(() => {
             type="button"
             class="secondary"
             :class="{ 'is-flagged': detail.flags.flagged }"
-            title="Tastenkürzel: s"
+            title="Tastenkürzel: s / !"
             @click="runAction(detail.flags.flagged ? 'unflag' : 'flag', [detail.id])"
           >
             {{ detail.flags.flagged ? 'Markierung entfernen' : 'Markieren' }}
@@ -1530,7 +1592,7 @@ onBeforeUnmount(() => {
             v-if="archiveFolder && actionFolder?.specialUse !== 'archive'"
             type="button"
             class="secondary"
-            title="Tastenkürzel: e"
+            title="Tastenkürzel: e / y"
             @click="runAction('archive', [detail.id])"
           >
             Archivieren
@@ -1789,6 +1851,11 @@ h2 {
   .refresh.spinning span {
     animation: none;
   }
+}
+
+.item.cursor {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .sync-progress {

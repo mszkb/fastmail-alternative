@@ -24,6 +24,7 @@ export * from './push'
 export * from './redact'
 export * from './request-scope'
 export * from './search'
+export * from './shortcuts'
 export * from './storage'
 export * from './threading'
 
