@@ -96,7 +96,10 @@ test('reply in the reading pane, suggestions, undo send', async ({ browser }) =>
   await list.getByRole('button', { name: /Hallo 3/ }).click()
   await page.keyboard.press('r')
   const compose = page.getByRole('dialog', { name: 'Antworten' })
-  // In the reading pane: no modal overlay, the list stays usable.
+  // Below the conversation in the reading pane: no modal overlay, the list stays usable.
+  await expect(
+    page.getByRole('region', { name: 'Nachricht', exact: true }).getByRole('dialog'),
+  ).toHaveCount(1)
   await expect(compose).toHaveAttribute('aria-modal', 'false')
   await expect(list).toBeVisible()
 

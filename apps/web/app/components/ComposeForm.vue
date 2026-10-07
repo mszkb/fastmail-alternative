@@ -62,6 +62,8 @@ const props = defineProps<{
   knownPeople?: MailPerson[]
   /** Shown in the reading pane instead of as an overlay (wide screens). */
   inPane?: boolean
+  /** Shown below the conversation (a reply in the reading pane). */
+  inline?: boolean
 }>()
 const emit = defineEmits<{
   close: []
@@ -671,12 +673,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="compose-backdrop" :class="{ 'in-pane': inPane }" @keydown="onKeydown">
+  <div
+    class="compose-backdrop"
+    :class="{ 'in-pane': inPane && !inline, inline }"
+    @keydown="onKeydown"
+  >
     <form
       class="compose"
       :class="{ dragging }"
       role="dialog"
-      :aria-modal="inPane ? 'false' : 'true'"
+      :aria-modal="inPane || inline ? 'false' : 'true'"
       :aria-label="title"
       @submit.prevent="send"
       @dragover="onDragOver"
@@ -973,6 +979,25 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   margin: 0;
   font-weight: 600;
+}
+
+/* Reply below the conversation (#116). */
+@media (min-width: 761px) {
+  .compose-backdrop.inline {
+    position: static;
+    inset: auto;
+    display: block;
+    margin-top: 1rem;
+    padding: 0;
+    background: none;
+  }
+
+  .compose-backdrop.inline .compose {
+    width: 100%;
+    height: min(30rem, 70vh);
+    border: 1px solid var(--fma-border);
+    box-shadow: none;
+  }
 }
 
 /* Reading pane (#116): in the grid area of the message, no overlay. */

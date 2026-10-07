@@ -203,6 +203,8 @@ const compose = ref<{
   saved?: Draft
   /** Forward: the original, whose attachments the form takes over (5.3). */
   forwardOf?: string
+  /** Shown below the conversation in the reading pane (#116). */
+  inline?: boolean
 } | null>(null)
 const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
 // Search (5.1): criteria of the form and the shown result (null = folder view).
@@ -488,11 +490,21 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   // Switched accounts meanwhile: never open a draft for the previous one.
   if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
+  // Replies on wide screens with a reading pane: below the conversation.
+  const inline =
+    mode !== 'new' &&
+    layout.readingPane !== 'off' &&
+    window.matchMedia('(min-width: 761px)').matches
   compose.value = {
     accountId: account,
     identities: list,
     draft: createDraft(mode, list, original),
+    inline,
     ...(mode === 'forward' && original ? { forwardOf: original.id } : {}),
+  }
+  if (inline) {
+    await nextTick()
+    document.getElementById('compose-inline-slot')?.scrollIntoView({ block: 'nearest' })
   }
 }
 
@@ -2022,23 +2034,28 @@ onBeforeUnmount(() => {
         </div>
       </article>
       <p v-else class="hint empty">Keine Nachricht ausgewählt.</p>
+      <!-- Replies open here, below the conversation (#116) -->
+      <div id="compose-inline-slot" />
     </section>
 
-    <ComposeForm
-      v-if="compose"
-      ref="composeForm"
-      :key="composeKey"
-      :account-id="compose.accountId"
-      :identities="compose.identities"
-      :draft="compose.draft"
-      :saved="compose.saved"
-      :forward-of="compose.forwardOf"
-      :known-people="knownPeople"
-      :in-pane="layout.readingPane !== 'off'"
-      @queued="onQueued"
-      @drafts-changed="draftList?.reload()"
-      @close="compose = null"
-    />
+    <Teleport to="#compose-inline-slot" defer :disabled="!compose?.inline">
+      <ComposeForm
+        v-if="compose"
+        ref="composeForm"
+        :key="composeKey"
+        :account-id="compose.accountId"
+        :identities="compose.identities"
+        :draft="compose.draft"
+        :saved="compose.saved"
+        :forward-of="compose.forwardOf"
+        :known-people="knownPeople"
+        :in-pane="layout.readingPane !== 'off'"
+        :inline="compose.inline"
+        @queued="onQueued"
+        @drafts-changed="draftList?.reload()"
+        @close="compose = null"
+      />
+    </Teleport>
   </div>
 </template>
 
