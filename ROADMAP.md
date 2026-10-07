@@ -22,6 +22,7 @@ Epic #111 (vertraute Oberfläche), Stand im Sammelbranch `feature/epic-111-batch
 
 - 🟨 **#117** Anbieter-Vorlagen in „Konto hinzufügen“ (Fastmail mit App-Passwort u. a.) und Karte „Erste Schritte“ – offen: Verbindungstest mit echtem Fastmail-Konto
 - 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – offen: Playwright-Lauf (`keyboard.spec.ts`)
+- 🟨 **#113** Layout: Lesebereich rechts/unten/aus, Spaltenbreiten per Ziehen oder Pfeiltasten (gemerkt pro Gerät), Rollen-Symbole an Ordnern; Konten links in der Kontoleiste (#120) – offen: Playwright-Lauf (`layout.spec.ts`)
 - 🟨 **#112** Design-Tokens (Farben, Abstände, Schrift, Dichte), Hell/Dunkel/System und Kompakt/Normal pro Gerät, [UX-Leitfaden](docs/product/ux-guide.md) – offen: feste `rem`-Abstände älterer Komponenten auf die Abstands-Tokens umstellen
 - 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – offen: Playwright-Lauf (`multi-select.spec.ts`)
 

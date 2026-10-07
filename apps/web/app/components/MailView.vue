@@ -67,6 +67,10 @@ import {
   searchQueryString,
   groupByDate,
   selectRange,
+  LAYOUT_LIMITS,
+  READING_PANE_CHOICES,
+  clampLayoutSize,
+  parseLayout,
   GO_TO_ROLE,
   ShortcutMatcher,
   moveCursor,
@@ -76,6 +80,8 @@ import {
 import type {
   AccountSummary,
   AccountSyncStatus,
+  MailLayout,
+  ReadingPane,
   AccountSyncState,
   ComposeDraft,
   ComposeIdentity,
@@ -106,9 +112,18 @@ import {
   offlineState,
 } from '~/utils/offline-queue'
 import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
+import type { Component } from 'vue'
 import {
+  IconAlertOctagon,
   IconArchive,
   IconArrowBackUp,
+  IconFilePencil,
+  IconFolder,
+  IconInbox,
+  IconLayoutColumns,
+  IconLayoutList,
+  IconLayoutRows,
+  IconSend,
   IconFlag,
   IconFlagFilled,
   IconMail,
@@ -1087,6 +1102,83 @@ function onMoveSelect(event: Event): void {
 // "?" belong to the header. Inactive while typing, inside dialogs/menus and
 // when switched off in the settings (per device).
 const matcher = new ShortcutMatcher()
+// Layout (#113): reading pane right/below/off and the dragged column sizes,
+// per device. Wide screens only; phones keep the stacked list -> message.
+const LAYOUT_KEY = 'fma.mail.layout'
+const layout = reactive<MailLayout>(parseLayout(readLayout()))
+const PANE_ICONS: Record<ReadingPane, Component> = {
+  right: IconLayoutColumns,
+  bottom: IconLayoutRows,
+  off: IconLayoutList,
+}
+const ROLE_ICONS: Record<string, Component> = {
+  inbox: IconInbox,
+  sent: IconSend,
+  drafts: IconFilePencil,
+  archive: IconArchive,
+  junk: IconAlertOctagon,
+  trash: IconTrash,
+}
+
+function readLayout(): string | null {
+  try {
+    return localStorage.getItem(LAYOUT_KEY)
+  } catch {
+    return null
+  }
+}
+
+function saveLayout(): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(toRaw(layout)))
+  } catch {
+    // Private mode: only for this session.
+  }
+}
+
+function setReadingPane(pane: ReadingPane): void {
+  layout.readingPane = pane
+  saveLayout()
+}
+
+function folderIcon(folder: FolderSummary): Component {
+  return (folder.specialUse && ROLE_ICONS[folder.specialUse]) || IconFolder
+}
+
+type SizeKey = 'folderWidth' | 'listWidth' | 'listHeight'
+
+/** Drag a column border: pointer capture keeps the moves on the handle. */
+function startResize(event: PointerEvent, key: SizeKey): void {
+  const handle = event.currentTarget as HTMLElement
+  handle.setPointerCapture(event.pointerId)
+  const vertical = key === 'listHeight'
+  const start = vertical ? event.clientY : event.clientX
+  const initial = layout[key]
+  const move = (e: PointerEvent) => {
+    layout[key] = clampLayoutSize(key, initial + (vertical ? e.clientY : e.clientX) - start)
+  }
+  const stop = () => {
+    handle.removeEventListener('pointermove', move)
+    handle.removeEventListener('pointerup', stop)
+    handle.removeEventListener('pointercancel', stop)
+    saveLayout()
+  }
+  handle.addEventListener('pointermove', move)
+  handle.addEventListener('pointerup', stop)
+  handle.addEventListener('pointercancel', stop)
+  event.preventDefault()
+}
+
+/** Arrow keys move a focused column border by 16 px. */
+function resizeWithKeys(event: KeyboardEvent, key: SizeKey): void {
+  const back = key === 'listHeight' ? 'ArrowUp' : 'ArrowLeft'
+  const forward = key === 'listHeight' ? 'ArrowDown' : 'ArrowRight'
+  if (event.key !== back && event.key !== forward) return
+  event.preventDefault()
+  layout[key] = clampLayoutSize(key, layout[key] + (event.key === forward ? 16 : -16))
+  saveLayout()
+}
+
 /** Keyboard cursor in the list (j/k). */
 const cursorId = ref('')
 
@@ -1393,7 +1485,51 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mail" :class="`pane-${mobilePane}`">
+  <div
+    class="mail"
+    :class="[
+      `pane-${mobilePane}`,
+      `reading-${layout.readingPane}`,
+      { 'has-detail': !!selectedId || detailLoading },
+    ]"
+    :style="{
+      '--folders-w': `${layout.folderWidth}px`,
+      '--list-w': `${layout.listWidth}px`,
+      '--list-h': `${layout.listHeight}px`,
+    }"
+  >
+    <!-- Column borders, dragged with the mouse or moved with the arrow keys (#113) -->
+    <div
+      class="resizer resizer-folders"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Breite der Ordnerspalte"
+      tabindex="0"
+      :aria-valuenow="layout.folderWidth"
+      :aria-valuemin="LAYOUT_LIMITS.folderWidth.min"
+      :aria-valuemax="LAYOUT_LIMITS.folderWidth.max"
+      @pointerdown="startResize($event, 'folderWidth')"
+      @keydown="resizeWithKeys($event, 'folderWidth')"
+    />
+    <div
+      v-if="layout.readingPane !== 'off'"
+      class="resizer resizer-list"
+      role="separator"
+      :aria-orientation="layout.readingPane === 'bottom' ? 'horizontal' : 'vertical'"
+      :aria-label="
+        layout.readingPane === 'bottom'
+          ? 'Höhe der Nachrichtenliste'
+          : 'Breite der Nachrichtenliste'
+      "
+      tabindex="0"
+      :aria-valuenow="layout.readingPane === 'bottom' ? layout.listHeight : layout.listWidth"
+      @pointerdown="
+        startResize($event, layout.readingPane === 'bottom' ? 'listHeight' : 'listWidth')
+      "
+      @keydown="
+        resizeWithKeys($event, layout.readingPane === 'bottom' ? 'listHeight' : 'listWidth')
+      "
+    />
     <aside class="sidebar">
       <button type="button" class="primary compose-button" @click="openCompose('new')">
         Neue E-Mail
@@ -1409,6 +1545,7 @@ onBeforeUnmount(() => {
           :disabled="!folder.selectable"
           @click="selectFolder(folder.id)"
         >
+          <component :is="folderIcon(folder)" class="folder-icon" :size="16" aria-hidden="true" />
           <span class="folder-name">{{ folderLabel(folder) }}</span>
           <span v-if="folder.unreadCount > 0" class="count">{{ folder.unreadCount }}</span>
         </button>
@@ -1450,6 +1587,19 @@ onBeforeUnmount(() => {
         <h2 class="desktop-title">
           {{ search ? 'Suchergebnisse' : currentFolder ? folderLabel(currentFolder) : 'Ordner' }}
         </h2>
+        <span class="pane-switch" role="group" aria-label="Lesebereich">
+          <button
+            v-for="choice in READING_PANE_CHOICES"
+            :key="choice.value"
+            type="button"
+            :aria-pressed="layout.readingPane === choice.value ? 'true' : 'false'"
+            :aria-label="choice.label"
+            :title="choice.label"
+            @click="setReadingPane(choice.value)"
+          >
+            <component :is="PANE_ICONS[choice.value]" :size="18" aria-hidden="true" />
+          </button>
+        </span>
         <button
           v-if="accountId"
           type="button"
@@ -1879,8 +2029,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mail {
+  position: relative;
   display: grid;
-  grid-template-columns: 14rem minmax(18rem, 26rem) 1fr;
+  grid-template-columns: var(--folders-w, 14rem) var(--list-w, 25rem) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'side list detail';
   height: 100%;
   min-height: 0;
   background: var(--color-base-100);
@@ -1975,6 +2128,9 @@ button.primary {
 }
 
 .folder-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2098,6 +2254,10 @@ h2 {
 .message-row:hover,
 .message-row:hover .item {
   background: var(--color-base-200);
+}
+
+.message-row:has(.item.active) {
+  background: var(--fma-primary-soft);
 }
 
 .message-row.selected,
@@ -2293,6 +2453,125 @@ button.secondary {
 .detail {
   padding: 1rem 1.5rem;
   overflow-y: auto;
+}
+
+.sidebar {
+  grid-area: side;
+}
+
+.list {
+  grid-area: list;
+}
+
+.detail {
+  grid-area: detail;
+}
+
+/* Layout (#113), wide screens: reading pane below the list or off. */
+.mail.reading-bottom {
+  grid-template-columns: var(--folders-w, 14rem) minmax(0, 1fr);
+  grid-template-rows: var(--list-h, 20rem) minmax(0, 1fr);
+  grid-template-areas:
+    'side list'
+    'side detail';
+}
+
+.mail.reading-bottom .list {
+  border-right: none;
+  border-bottom: 1px solid var(--color-base-300);
+}
+
+.mail.reading-off {
+  grid-template-columns: var(--folders-w, 14rem) minmax(0, 1fr);
+  grid-template-areas: 'side list';
+}
+
+.mail.reading-off .detail {
+  display: none;
+}
+
+/* Without a reading pane, an open message takes the place of the list. */
+.mail.reading-off.has-detail {
+  grid-template-areas: 'side detail';
+}
+
+.mail.reading-off.has-detail .list {
+  display: none;
+}
+
+.mail.reading-off.has-detail .detail {
+  display: block;
+}
+
+.mail.reading-off.has-detail .back {
+  display: inline-block;
+}
+
+.resizer {
+  z-index: 3;
+  background: transparent;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: var(--color-primary);
+  outline: none;
+}
+
+.resizer-folders,
+.resizer-list {
+  justify-self: end;
+  width: 5px;
+  margin-right: -3px;
+  cursor: col-resize;
+}
+
+.resizer-folders {
+  grid-area: side;
+}
+
+.resizer-list {
+  grid-area: list;
+}
+
+.mail.reading-bottom .resizer-list {
+  align-self: end;
+  justify-self: stretch;
+  width: auto;
+  height: 5px;
+  margin: 0 0 -3px;
+  cursor: row-resize;
+}
+
+.pane-switch {
+  display: inline-flex;
+  gap: 0.1rem;
+  margin-left: auto;
+}
+
+.pane-switch button {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--fma-muted);
+}
+
+.pane-switch button[aria-pressed='true'] {
+  background: var(--fma-primary-soft);
+  color: var(--color-primary);
+}
+
+.folder-icon {
+  flex-shrink: 0;
+  margin-right: 0.45rem;
+  color: var(--fma-muted);
+}
+
+.folder.active .folder-icon {
+  color: inherit;
 }
 
 .back {
@@ -2519,6 +2798,11 @@ button.secondary {
 
 /* Mobile: account + folder pickers above the list, list -> detail navigation. */
 @media (max-width: 760px) {
+  .resizer,
+  .pane-switch {
+    display: none;
+  }
+
   /* 16px avoids the automatic zoom on focus in iOS Safari. */
   .search input {
     font-size: 16px;
