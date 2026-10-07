@@ -165,7 +165,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="card push">
+  <div id="push" class="card push">
     <h2>Benachrichtigungen</h2>
     <p class="hint">
       Hinweis bei neuen E-Mails im Posteingang – ohne Betreff, Absender oder Inhalt. Die App lädt

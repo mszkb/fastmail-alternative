@@ -74,6 +74,13 @@ function onKeydown(event: KeyboardEvent): void {
   else void openSearch()
 }
 
+/** Opens the keyboard help (e.g. from the first steps). */
+function openHelp(): void {
+  helpOpen.value = true
+}
+
+defineExpose({ openHelp })
+
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>

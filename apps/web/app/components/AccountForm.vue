@@ -2,7 +2,17 @@
 // Account form with live connection test: create (roadmap 2.1) and edit
 // (roadmap 3.1, `account` prop). Stored credentials are never sent to the
 // client; in edit mode empty user/password fields keep the stored values.
-import { SYNC_SINCE_CHOICES, syncSinceFromDays } from '@fma/shared'
+// Provider presets (#117): picking a provider (or typing an address of a
+// known domain) fills server, ports and user name and shows how to get the
+// password the provider expects (e.g. an app password at Fastmail).
+import {
+  PROVIDER_PRESETS,
+  SYNC_SINCE_CHOICES,
+  presetById,
+  presetFields,
+  presetForAddress,
+  syncSinceFromDays,
+} from '@fma/shared'
 
 interface EditableAccount {
   id: string
@@ -56,6 +66,41 @@ function chosenSyncSince(): string | null | undefined {
   if (syncChoice.value === 'keep') return undefined
   if (syncChoice.value === 'all') return null
   return syncSinceFromDays(Number(syncChoice.value))
+}
+
+// Provider preset ('' = own server); only offered when adding an account.
+const presetId = ref('')
+const preset = computed(() => (presetId.value ? presetById(presetId.value) : undefined))
+// A provider (or "Eigener Server") was picked by hand: no auto-detection.
+let presetChosenByUser = false
+
+function applyPreset(): void {
+  const chosen = preset.value
+  if (!chosen) return
+  const fields = presetFields(chosen, emailAddress.value)
+  imapHost.value = fields.imapHost
+  imapPort.value = fields.imapPort
+  smtpHost.value = fields.smtpHost
+  smtpPort.value = fields.smtpPort
+  if (fields.user) imapUser.value = fields.user
+  samePassword.value = true
+}
+
+function onPresetChange(): void {
+  presetChosenByUser = true
+  applyPreset()
+}
+
+/** Known address domain: suggest its preset once, unless chosen by hand. */
+function onAddressChange(): void {
+  if (editing.value) return
+  const detected = presetForAddress(emailAddress.value)
+  if (detected && !presetChosenByUser && presetId.value !== detected.id) {
+    presetId.value = detected.id
+    applyPreset()
+  } else if (preset.value && (!imapUser.value || imapUser.value.includes('@'))) {
+    imapUser.value = emailAddress.value.trim()
+  }
 }
 
 const busy = ref(false)
@@ -204,6 +249,8 @@ async function submit(): Promise<void> {
     smtpUser.value = ''
     smtpPassword.value = ''
     syncChoice.value = 'all'
+    presetId.value = ''
+    presetChosenByUser = false
     emit('created')
   } catch {
     error.value = 'API nicht erreichbar.'
@@ -226,8 +273,31 @@ async function submit(): Promise<void> {
 
     <label v-if="!editing"
       >E-Mail-Adresse des Kontos
-      <input v-model="emailAddress" type="email" required placeholder="ich@provider.de" />
+      <input
+        v-model="emailAddress"
+        type="email"
+        required
+        placeholder="ich@provider.de"
+        @change="onAddressChange"
+      />
     </label>
+    <label v-if="!editing"
+      >Anbieter
+      <select v-model="presetId" @change="onPresetChange">
+        <option value="">Eigener Server (Daten selbst eingeben)</option>
+        <option v-for="option in PROVIDER_PRESETS" :key="option.id" :value="option.id">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+    <p
+      v-if="!editing && preset"
+      class="preset-hint"
+      :class="{ blocked: preset.auth === 'oauth-only' }"
+      role="note"
+    >
+      {{ preset.hint }}
+    </p>
     <label
       >{{ editing ? 'Anzeigename' : 'Anzeigename (optional)' }}
       <input v-model="displayName" type="text" placeholder="z. B. Privat" :required="editing" />
@@ -324,6 +394,20 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
+.preset-hint {
+  margin: -0.25rem 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0.25rem;
+  background: var(--fma-primary-soft);
+  font-size: 0.85rem;
+}
+
+.preset-hint.blocked {
+  border-left-color: var(--color-error);
+  background: var(--fma-error-soft);
+}
+
 .form {
   display: block;
   padding: 1rem 1.25rem;

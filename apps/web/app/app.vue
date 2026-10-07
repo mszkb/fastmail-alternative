@@ -517,6 +517,16 @@ async function openSettings(): Promise<void> {
   document.querySelector<HTMLElement>('.settings h1')?.focus()
 }
 
+const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** First steps: a section of the settings (push, install guide). */
+async function openSettingsSection(id: 'push' | 'install'): Promise<void> {
+  menuOpen.value = false
+  section.value = 'settings'
+  await nextTick()
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+}
+
 /** "+" in the account bar: the form in the settings. */
 async function addAccount(): Promise<void> {
   menuOpen.value = false
@@ -829,6 +839,7 @@ onBeforeUnmount(() => {
   <!-- App frame (#120): header across the full width, account bar on the left -->
   <div v-if="view === 'app'" class="app-frame" :class="{ 'menu-open': menuOpen }">
     <AppHeader
+      ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
         activeAccountName ? `In ${activeAccountName} suchen …` : 'Kein Konto verbunden'
@@ -909,9 +920,14 @@ onBeforeUnmount(() => {
             @sync-requested="onManualSync"
             @cancel-sync="onCancelSync"
           />
-          <div v-else class="card empty-state">
+          <div v-else class="empty-state">
             <p>Noch kein E-Mail-Konto verbunden.</p>
-            <button type="button" @click="addAccount">Konto hinzufügen</button>
+            <GettingStarted
+              :has-accounts="false"
+              @add-account="addAccount"
+              @open="openSettingsSection"
+              @shortcuts="appHeader?.openHelp()"
+            />
           </div>
         </template>
 
@@ -923,6 +939,12 @@ onBeforeUnmount(() => {
           <p class="hint">
             Angemeldet als <strong>{{ currentEmail }}</strong>
           </p>
+          <GettingStarted
+            :has-accounts="accounts.length > 0"
+            @add-account="addAccount"
+            @open="openSettingsSection"
+            @shortcuts="appHeader?.openHelp()"
+          />
 
           <AccountList
             v-model:edit="editAccountId"
