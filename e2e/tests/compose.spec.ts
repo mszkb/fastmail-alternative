@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ACCOUNT_A, ACCOUNT_B, MAILBOX_B, openAccount } from './helpers'
+import { ACCOUNT_A, ACCOUNT_B, escapeRegExp, MAILBOX_B, openAccount } from './helpers'
 
 test('saves a draft with attachment and reopens it', async ({ page }) => {
   const subject = `Entwurf ${process.env.E2E_RUN}`
@@ -77,4 +77,51 @@ test('forwards a message with its attachment and inline image', async ({ page })
   const attachments = page.getByRole('region', { name: 'Anhänge' })
   await expect(attachments.getByText('rechnung.pdf')).toBeVisible()
   await expect(attachments.getByText('logo.png')).toBeVisible()
+})
+
+// Composer (#116): in the reading pane on a wide screen, recipient
+// suggestions from known addresses, undo send within the window.
+test('reply in the reading pane, suggestions, undo send', async ({ browser }) => {
+  const context = await browser.newContext({
+    storageState: '.auth/state.json',
+    viewport: { width: 1280, height: 800 },
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  await page
+    .getByRole('navigation', { name: 'Konten' })
+    .getByRole('button', { name: new RegExp(`^${escapeRegExp(ACCOUNT_A)},`) })
+    .click()
+  const list = page.getByRole('region', { name: 'Nachrichten' })
+  await list.getByRole('button', { name: /Hallo 3/ }).click()
+  await page.keyboard.press('r')
+  const compose = page.getByRole('dialog', { name: 'Antworten' })
+  // In the reading pane: no modal overlay, the list stays usable.
+  await expect(compose).toHaveAttribute('aria-modal', 'false')
+  await expect(list).toBeVisible()
+
+  // Suggestion from the loaded messages (sender Alice).
+  const cc = compose.getByRole('button', { name: 'Cc/Bcc' })
+  await cc.click()
+  const ccField = compose.getByLabel('Cc', { exact: true })
+  await ccField.fill('ali')
+  await expect(compose.getByRole('option', { name: /alice@example\.org/ })).toBeVisible()
+  await ccField.press('Enter')
+  await expect(ccField).toHaveValue(/alice@example\.org>?, $/)
+  await ccField.fill('')
+
+  // Undo send: the form stays, nothing is sent.
+  await compose.getByLabel('Nachricht').fill('Antwort mit Rückgängig')
+  await compose.getByRole('button', { name: 'Senden' }).click()
+  await expect(
+    compose.getByRole('status').filter({ hasText: /Wird in \d+ s gesendet/ }),
+  ).toBeVisible()
+  await compose.getByRole('button', { name: 'Rückgängig' }).click()
+  await expect(compose.getByLabel('Nachricht')).toHaveValue('Antwort mit Rückgängig')
+  await expect(compose.getByRole('button', { name: 'Senden' })).toBeVisible()
+
+  // Ctrl+Enter sends after the window.
+  await compose.getByLabel('Nachricht').press('Control+Enter')
+  await expect(compose).toBeHidden({ timeout: 20_000 })
+  await context.close()
 })

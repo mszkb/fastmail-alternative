@@ -36,6 +36,8 @@ import {
   ForegroundSyncPolicy,
   SwipeBack,
   sortOrderUpdates,
+  UNDO_SEND_CHOICES,
+  parseUndoSendSeconds,
   DENSITY_CHOICES,
   THEME_CHOICES,
   parseDensity,
@@ -75,6 +77,7 @@ import {
 } from '~/utils/offline-queue'
 import { setShortcutsEnabled, shortcutsEnabled } from '~/utils/shortcuts-setting'
 import { densityChoice, setAppearance, themeChoice } from '~/utils/appearance'
+import { setUndoSendSeconds, undoSendSeconds } from '~/utils/undo-send'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -536,6 +539,12 @@ function onAppearanceChange(event: Event): void {
   form?.querySelectorAll<HTMLInputElement>('input').forEach((field) => {
     fieldBaseline.set(field, { value: field.value, checked: field.checked })
   })
+}
+
+/** Settings: undo-send window (#116, per device). */
+function onUndoSendChange(event: Event): void {
+  const select = event.target as HTMLSelectElement
+  setUndoSendSeconds(parseUndoSendSeconds(select.value))
 }
 
 /** Settings: keyboard shortcuts on/off (#115, per device). */
@@ -1057,6 +1066,22 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="card">
+            <h2>Verfassen</h2>
+            <label class="field-inline"
+              >Senden rückgängig machen
+              <select :value="undoSendSeconds" @change="onUndoSendChange">
+                <option v-for="seconds in UNDO_SEND_CHOICES" :key="seconds" :value="seconds">
+                  {{ seconds === 0 ? 'Aus' : `${seconds} Sekunden` }}
+                </option>
+              </select>
+            </label>
+            <p class="hint">
+              So lange wartet die App nach „Senden“, bevor die Nachricht an den Server geht; in
+              dieser Zeit holt „Rückgängig“ sie zurück in den Editor. Gilt für dieses Gerät.
+            </p>
+          </div>
+
+          <div class="card">
             <h2>Tastenkürzel</h2>
             <label class="checkbox">
               <input type="checkbox" :checked="shortcutsEnabled" @change="onShortcutsToggle" />
@@ -1251,6 +1276,21 @@ onBeforeUnmount(() => {
 
 .settings-head h1:focus {
   outline: none;
+}
+
+.field-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.field-inline select {
+  padding: 0.35rem;
+  border: 1px solid var(--fma-border-strong);
+  border-radius: 0.375rem;
+  font: inherit;
 }
 
 .choices {

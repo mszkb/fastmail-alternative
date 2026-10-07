@@ -67,6 +67,7 @@ import {
   searchQueryString,
   groupByDate,
   selectRange,
+  uniquePeople,
   LAYOUT_LIMITS,
   READING_PANE_CHOICES,
   clampLayoutSize,
@@ -1179,6 +1180,18 @@ function resizeWithKeys(event: KeyboardEvent, key: SizeKey): void {
   saveLayout()
 }
 
+/**
+ * Addresses for the recipient suggestions (#116): senders and recipients
+ * of the loaded list and the open conversation of the active account.
+ */
+const knownPeople = computed(() =>
+  uniquePeople([
+    ...messages.value.map((m) => m.from),
+    ...(thread.value?.messages ?? []).flatMap((m) => [m.from, ...m.to, ...m.cc]),
+    ...(detail.value ? [detail.value.from, ...detail.value.to, ...detail.value.cc] : []),
+  ]),
+)
+
 /** Keyboard cursor in the list (j/k). */
 const cursorId = ref('')
 
@@ -2020,6 +2033,8 @@ onBeforeUnmount(() => {
       :draft="compose.draft"
       :saved="compose.saved"
       :forward-of="compose.forwardOf"
+      :known-people="knownPeople"
+      :in-pane="layout.readingPane !== 'off'"
       @queued="onQueued"
       @drafts-changed="draftList?.reload()"
       @close="compose = null"
