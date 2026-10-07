@@ -391,6 +391,8 @@ async function syncNow(force = false): Promise<void> {
  */
 function onManualSync(): void {
   syncPolicy.trigger(true)
+  // Show the new sync at once, even before the account list reports it.
+  if (syncStatusSupported.value !== false) void loadSyncStatus()
   void loadAccounts()
 }
 
