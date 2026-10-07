@@ -1342,6 +1342,10 @@ function onKeydown(event: KeyboardEvent): void {
       void moveListCursor(action === 'next' ? 1 : -1)
       break
     case 'open':
+      // Enter on a focused button or link activates that control instead.
+      if ((event.target as HTMLElement | null)?.closest?.('button, a, summary, [role="button"]')) {
+        return
+      }
       if (!cursorId.value || detail.value?.id === cursorId.value) return
       void openMessage(cursorId.value)
       break
