@@ -24,6 +24,7 @@ export type ShortcutAction =
   | 'flag'
   | 'markRead'
   | 'markUnread'
+  | 'select'
   | 'help'
   | 'goInbox'
   | 'goArchive'
@@ -58,6 +59,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   },
   { keys: ['I'], action: 'markRead', label: 'Als gelesen markieren', group: 'Nachricht' },
   { keys: ['U'], action: 'markUnread', label: 'Als ungelesen markieren', group: 'Nachricht' },
+  { keys: ['x'], action: 'select', label: 'Auswählen (Mehrfachauswahl)', group: 'Nachricht' },
   { keys: ['g i'], action: 'goInbox', label: 'Posteingang', group: 'Ordner' },
   { keys: ['g a'], action: 'goArchive', label: 'Archiv', group: 'Ordner' },
   { keys: ['g s'], action: 'goSent', label: 'Gesendet', group: 'Ordner' },

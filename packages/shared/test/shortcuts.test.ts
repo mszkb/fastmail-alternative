@@ -18,7 +18,8 @@ describe('ShortcutMatcher', () => {
     expect(m.handle({ key: 'U' })).toBe('markUnread')
     expect(m.handle({ key: 'c' })).toBe('compose')
     expect(m.handle({ key: '?' })).toBe('help')
-    expect(m.handle({ key: 'x' })).toBeNull()
+    expect(m.handle({ key: 'x' })).toBe('select')
+    expect(m.handle({ key: 'z' })).toBeNull()
   })
 
   it('ignores keys with Ctrl, Cmd or Alt', () => {
@@ -35,7 +36,7 @@ describe('ShortcutMatcher', () => {
     now = 500
     expect(m.handle({ key: 'i' })).toBe('goInbox')
     expect(m.handle({ key: 'g' })).toBe('pending')
-    expect(m.handle({ key: 'x' })).toBeNull()
+    expect(m.handle({ key: 'z' })).toBeNull()
     // The key after an unknown sequence is a normal key again.
     expect(m.handle({ key: 'r' })).toBe('reply')
     expect(m.handle({ key: 'g' })).toBe('pending')

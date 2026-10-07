@@ -65,6 +65,8 @@ import {
   overlayPendingActions,
   parseSearchQuery,
   searchQueryString,
+  groupByDate,
+  selectRange,
   GO_TO_ROLE,
   ShortcutMatcher,
   moveCursor,
@@ -104,6 +106,16 @@ import {
   offlineState,
 } from '~/utils/offline-queue'
 import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
+import {
+  IconArchive,
+  IconArrowBackUp,
+  IconFlag,
+  IconFlagFilled,
+  IconMail,
+  IconMailOpened,
+  IconPaperclip,
+  IconTrash,
+} from '@tabler/icons-vue'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
   Partial<
@@ -579,6 +591,7 @@ function resetSearch(): void {
 
 /** Searches the active account at the provider; the hits replace the list. */
 async function runSearch(): Promise<void> {
+  clearSelection()
   const query = parseSearchQuery({
     q: searchForm.q,
     from: searchForm.from,
@@ -637,6 +650,7 @@ function hitFolderLabel(message: MessageListItem): string {
 async function selectFolder(id: string): Promise<void> {
   resetSearch()
   cursorId.value = ''
+  clearSelection()
   folderId.value = id
   olderHint.value = ''
   messages.value = []
@@ -1076,6 +1090,84 @@ const matcher = new ShortcutMatcher()
 /** Keyboard cursor in the list (j/k). */
 const cursorId = ref('')
 
+// Multiple selection (#114): checkbox, Shift-click for a range, Ctrl/Cmd-
+// click and "x" toggle; bulk actions go through runAction (one request,
+// queued offline like single actions). Not in search results (hits may
+// live in different folders). Cleared on folder/account switch.
+const selected = ref(new Set<string>())
+let selectionAnchor = ''
+const canArchive = computed(
+  () => !!archiveFolder.value && actionFolder.value?.specialUse !== 'archive',
+)
+const selectionFlagged = computed(() =>
+  visibleMessages.value.some((m) => selected.value.has(m.id) && m.flags.flagged),
+)
+/** Date groups of the folder view; search results stay one plain list. */
+const groupedMessages = computed(() =>
+  search.value
+    ? [{ label: '', messages: visibleMessages.value }]
+    : groupByDate(visibleMessages.value),
+)
+
+function toggleSelected(id: string, range: boolean): void {
+  const next = new Set(selected.value)
+  if (range && selectionAnchor) {
+    const ids = selectRange(
+      visibleMessages.value.map((m) => m.id),
+      selectionAnchor,
+      id,
+    )
+    const add = !next.has(id)
+    for (const rangeId of ids) {
+      if (add) next.add(rangeId)
+      else next.delete(rangeId)
+    }
+  } else if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  selectionAnchor = id
+  selected.value = next
+}
+
+function onSelectClick(event: MouseEvent, id: string): void {
+  toggleSelected(id, event.shiftKey)
+}
+
+/** Shift- or Ctrl/Cmd-click on a row selects instead of opening. */
+function onItemClick(event: MouseEvent, id: string): void {
+  if (!search.value && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    toggleSelected(id, event.shiftKey)
+    return
+  }
+  void openMessage(id)
+}
+
+function clearSelection(): void {
+  selected.value = new Set()
+  selectionAnchor = ''
+}
+
+async function bulkAction(
+  action: 'archive' | 'delete' | 'read' | 'unread' | 'flag',
+): Promise<void> {
+  const ids = visibleMessages.value.filter((m) => selected.value.has(m.id)).map((m) => m.id)
+  if (ids.length === 0) return
+  const resolved = action === 'flag' ? (selectionFlagged.value ? 'unflag' : 'flag') : action
+  clearSelection()
+  await runAction(resolved, ids)
+}
+
+// Messages that left the list (moved, synced away) leave the selection.
+watch(visibleMessages, (list) => {
+  if (selected.value.size === 0) return
+  const ids = new Set(list.map((m) => m.id))
+  const kept = [...selected.value].filter((id) => ids.has(id))
+  if (kept.length !== selected.value.size) selected.value = new Set(kept)
+})
+
 async function moveListCursor(step: 1 | -1): Promise<void> {
   const ids = visibleMessages.value.map((m) => m.id)
   const next = moveCursor(ids, cursorId.value || selectedId.value, step)
@@ -1137,7 +1229,8 @@ function onKeydown(event: KeyboardEvent): void {
       void openMessage(cursorId.value)
       break
     case 'back':
-      if (!goBack()) return
+      if (selected.value.size > 0) clearSelection()
+      else if (!goBack()) return
       break
     case 'compose':
       void openCompose('new')
@@ -1160,6 +1253,12 @@ function onKeydown(event: KeyboardEvent): void {
       if (!target) return
       void runAction(target.flags.flagged ? 'unflag' : 'flag', [target.id])
       break
+    case 'select': {
+      const id = cursorId.value || selectedId.value
+      if (!id || search.value) return
+      toggleSelected(id, false)
+      break
+    }
     case 'markRead':
     case 'markUnread':
       if (!target) return
@@ -1214,6 +1313,7 @@ function closeDetail(): void {
 watch(accountId, (id) => {
   resetSearch()
   cursorId.value = ''
+  clearSelection()
   matcher.reset()
   Object.assign(searchForm, { q: '', from: '', subject: '', since: '', before: '' })
   // New scope: abort and ignore everything still in flight for the previous
@@ -1480,43 +1580,141 @@ onBeforeUnmount(() => {
         Noch keine Ordner synchronisiert &ndash; der Abgleich läuft im Hintergrund.
       </p>
 
+      <div v-if="selected.size > 0" class="selection-bar" role="toolbar" aria-label="Auswahl">
+        <span class="selection-count" role="status">{{ selected.size }} ausgewählt</span>
+        <button v-if="canArchive" type="button" class="secondary" @click="bulkAction('archive')">
+          <IconArchive :size="16" aria-hidden="true" /> Archivieren
+        </button>
+        <button type="button" class="secondary danger" @click="bulkAction('delete')">
+          <IconTrash :size="16" aria-hidden="true" />
+          {{ inTrash ? 'Endgültig löschen' : 'Löschen' }}
+        </button>
+        <button type="button" class="secondary" @click="bulkAction('read')">Gelesen</button>
+        <button type="button" class="secondary" @click="bulkAction('unread')">Ungelesen</button>
+        <button type="button" class="secondary" @click="bulkAction('flag')">
+          <IconFlag :size="16" aria-hidden="true" />
+          {{ selectionFlagged ? 'Markierung entfernen' : 'Markieren' }}
+        </button>
+        <button type="button" class="link" @click="clearSelection">Auswahl aufheben</button>
+      </div>
+
       <ul class="messages">
-        <li v-for="message in visibleMessages" :key="message.id">
-          <button
-            type="button"
-            class="item"
-            :class="{
-              unread: !message.flags.seen,
-              active: message.id === selectedId,
-              cursor: message.id === cursorId && message.id !== selectedId,
-            }"
-            :data-id="message.id"
-            @click="openMessage(message.id)"
+        <template v-for="group in groupedMessages" :key="`${group.label}-${group.messages[0]?.id}`">
+          <li v-if="group.label" class="date-group" role="presentation">{{ group.label }}</li>
+          <li
+            v-for="message in group.messages"
+            :key="message.id"
+            class="message-row"
+            :class="{ selected: selected.has(message.id), selectable: !search }"
           >
-            <span class="row">
-              <span class="from">{{ personLabel(message.from) }}</span>
-              <span class="date">{{ shortDate(message.date) }}</span>
-            </span>
-            <span class="row">
-              <span class="subject">{{ message.subject || '(kein Betreff)' }}</span>
-              <span class="icons">
-                <span
-                  v-if="message.threadCount > 1"
-                  class="thread-count"
-                  :title="`${message.threadCount} Nachrichten in der Unterhaltung`"
-                  >{{ message.threadCount }}</span
-                >
-                <span v-if="message.flags.answered" title="Beantwortet">&#8617;</span>
-                <span v-if="message.hasAttachments" title="Anhang">&#128206;</span>
-                <span v-if="message.flags.flagged" class="flagged" title="Markiert">&#9873;</span>
+            <input
+              v-if="!search"
+              type="checkbox"
+              class="select"
+              :checked="selected.has(message.id)"
+              :aria-label="`Auswählen: ${message.subject || '(kein Betreff)'}`"
+              @click="onSelectClick($event, message.id)"
+            />
+            <button
+              type="button"
+              class="item"
+              :class="{
+                unread: !message.flags.seen,
+                active: message.id === selectedId,
+                cursor: message.id === cursorId && message.id !== selectedId,
+              }"
+              :data-id="message.id"
+              @click="onItemClick($event, message.id)"
+            >
+              <span class="row">
+                <span class="from">{{ personLabel(message.from) }}</span>
+                <span class="date">{{ shortDate(message.date) }}</span>
               </span>
+              <span class="row">
+                <span class="subject">{{ message.subject || '(kein Betreff)' }}</span>
+                <span class="icons">
+                  <span
+                    v-if="message.threadCount > 1"
+                    class="thread-count"
+                    :title="`${message.threadCount} Nachrichten in der Unterhaltung`"
+                    >{{ message.threadCount }}</span
+                  >
+                  <IconArrowBackUp
+                    v-if="message.flags.answered"
+                    :size="14"
+                    aria-label="Beantwortet"
+                    role="img"
+                  />
+                  <IconPaperclip
+                    v-if="message.hasAttachments"
+                    :size="14"
+                    aria-label="Anhang"
+                    role="img"
+                  />
+                  <IconFlagFilled
+                    v-if="message.flags.flagged"
+                    class="flagged"
+                    :size="14"
+                    aria-label="Markiert"
+                    role="img"
+                  />
+                </span>
+              </span>
+              <span class="snippet">
+                <span v-if="search" class="hit-folder">{{ hitFolderLabel(message) }}</span>
+                {{ message.snippet }}
+              </span>
+            </button>
+            <!-- Quick actions on hover (mouse); keyboard users have the shortcuts and the toolbar. -->
+            <span v-if="!search" class="hover-actions">
+              <button
+                v-if="canArchive"
+                type="button"
+                tabindex="-1"
+                title="Archivieren (e)"
+                aria-label="Archivieren"
+                @click="runAction('archive', [message.id])"
+              >
+                <IconArchive :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                title="Löschen (#)"
+                aria-label="Löschen"
+                @click="runAction('delete', [message.id])"
+              >
+                <IconTrash :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                :title="
+                  message.flags.seen
+                    ? 'Als ungelesen markieren (Shift+U)'
+                    : 'Als gelesen markieren (Shift+I)'
+                "
+                :aria-label="
+                  message.flags.seen ? 'Als ungelesen markieren' : 'Als gelesen markieren'
+                "
+                @click="runAction(message.flags.seen ? 'unread' : 'read', [message.id])"
+              >
+                <IconMail v-if="message.flags.seen" :size="18" aria-hidden="true" />
+                <IconMailOpened v-else :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                :title="message.flags.flagged ? 'Markierung entfernen (s)' : 'Markieren (s)'"
+                :aria-label="message.flags.flagged ? 'Markierung entfernen' : 'Markieren'"
+                @click="runAction(message.flags.flagged ? 'unflag' : 'flag', [message.id])"
+              >
+                <IconFlagFilled v-if="message.flags.flagged" :size="18" aria-hidden="true" />
+                <IconFlag v-else :size="18" aria-hidden="true" />
+              </button>
             </span>
-            <span class="snippet">
-              <span v-if="search" class="hit-folder">{{ hitFolderLabel(message) }}</span>
-              {{ message.snippet }}
-            </span>
-          </button>
-        </li>
+          </li>
+        </template>
       </ul>
 
       <div v-if="nextCursor" ref="sentinel" class="more">
@@ -1884,6 +2082,111 @@ h2 {
   padding: 0;
 }
 
+.message-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-base-200);
+}
+
+.message-row .item {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.message-row:hover,
+.message-row:hover .item {
+  background: var(--color-base-200);
+}
+
+.message-row.selected,
+.message-row.selected .item {
+  background: var(--fma-primary-soft);
+}
+
+.select {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1rem;
+  height: 1rem;
+  margin: 0 -0.5rem 0 0.75rem;
+  accent-color: var(--color-primary);
+}
+
+.date-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.35rem 1rem;
+  border-bottom: 1px solid var(--color-base-200);
+  background: var(--color-base-200);
+  color: var(--fma-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Quick actions appear over the date/icons of the row on hover. */
+.hover-actions {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  display: none;
+  gap: 0.15rem;
+  padding: 0.1rem;
+  border-radius: 0.375rem;
+  background: var(--color-base-100);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+}
+
+.hover-actions button {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--fma-muted);
+}
+
+.hover-actions button:hover {
+  background: var(--color-base-200);
+  color: var(--color-base-content);
+}
+
+@media (hover: hover) {
+  .message-row.selectable:hover .hover-actions {
+    display: inline-flex;
+  }
+}
+
+.selection-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--fma-border);
+  background: var(--fma-primary-soft);
+}
+
+.selection-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.selection-count {
+  margin-right: auto;
+  font-weight: 600;
+}
+
 .item {
   display: block;
   width: 100%;
@@ -1941,9 +2244,16 @@ h2 {
 
 .date,
 .icons {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
+  gap: 0.2rem;
   font-size: 0.75rem;
   color: var(--fma-muted);
+}
+
+.selection-bar button.danger {
+  color: var(--color-error);
 }
 
 .flagged {
