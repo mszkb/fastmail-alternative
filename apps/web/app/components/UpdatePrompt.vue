@@ -89,11 +89,11 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   z-index: 100;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   max-width: 24rem;
   margin: 0 auto;
-  padding: 0.6rem 0.75rem 0.6rem 1rem;
-  border-radius: 0.5rem;
+  padding: 0.6rem var(--fma-space-3) 0.6rem var(--fma-space-4);
+  border-radius: var(--fma-radius-box);
   background: var(--color-neutral);
   color: var(--color-neutral-content);
   font-family: system-ui, sans-serif;
@@ -108,7 +108,7 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
 .update button {
   padding: 0.35rem 0.8rem;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -116,7 +116,7 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
 }
 
 .update button.dismiss {
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem var(--fma-space-2);
   background: transparent;
 }
 </style>

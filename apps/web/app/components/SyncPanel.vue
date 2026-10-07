@@ -389,9 +389,9 @@ onBeforeUnmount(() => {
   width: min(22rem, calc(100vw - 2rem));
   max-height: 70vh;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-100);
   box-shadow: 0 6px 24px rgb(0 0 0 / 18%);
   text-align: left;
@@ -400,8 +400,8 @@ onBeforeUnmount(() => {
 .sync-panel header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  gap: var(--fma-space-2);
+  margin-bottom: var(--fma-space-2);
 }
 
 .sync-panel h3 {
@@ -426,7 +426,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.25rem 0.5rem;
+  gap: var(--fma-space-1) var(--fma-space-2);
 }
 
 .state {
@@ -441,15 +441,15 @@ onBeforeUnmount(() => {
 
 .progress-text,
 .meta {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-1) 0 0;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 0.75rem;
+  gap: 0 var(--fma-space-3);
   color: var(--fma-muted);
 }
 
@@ -492,7 +492,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-top: 0.5rem;
+  margin-top: var(--fma-space-2);
 }
 
 .actions:empty {
@@ -500,13 +500,13 @@ onBeforeUnmount(() => {
 }
 
 .sync-panel button {
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem var(--fma-space-3);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   cursor: pointer;
 }
 
@@ -522,7 +522,7 @@ onBeforeUnmount(() => {
 }
 
 .sync-panel button.close {
-  padding: 0.1rem 0.5rem;
+  padding: 0.1rem var(--fma-space-2);
   background: transparent;
   color: var(--fma-muted);
   font-size: 1.2rem;

@@ -24,7 +24,7 @@ Epic #111 (vertraute Oberfläche), Stand im Sammelbranch `feature/epic-111-batch
 - 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – offen: Playwright-Lauf (`keyboard.spec.ts`)
 - 🟨 **#116** Verfassen: Antwort direkt unter der Nachricht, neue Mail im Lesebereich (breit) bzw. Vollbild (Handy), Empfänger-Vorschläge aus bekannten Adressen, Anhänge per Drag & Drop, Rückgängig-Senden-Fenster (vor dem Outbox-Request, pro Gerät); Absenderwahl, Cc/Bcc, Autosave-Status und `Strg/⌘+Enter` gab es schon – offen: Playwright-Lauf
 - 🟨 **#113** Layout: Lesebereich rechts/unten/aus, Spaltenbreiten per Ziehen oder Pfeiltasten (gemerkt pro Gerät), Rollen-Symbole an Ordnern; Konten links in der Kontoleiste (#120) – offen: Playwright-Lauf (`layout.spec.ts`)
-- 🟨 **#112** Design-Tokens (Farben, Abstände, Schrift, Dichte), Hell/Dunkel/System und Kompakt/Normal pro Gerät, [UX-Leitfaden](docs/product/ux-guide.md) – offen: feste `rem`-Abstände älterer Komponenten auf die Abstands-Tokens umstellen
+- 🟨 **#112** Design-Tokens (Farben, Abstände, Schrift, Dichte), Hell/Dunkel/System und Kompakt/Normal pro Gerät, [UX-Leitfaden](docs/product/ux-guide.md); alle Komponenten nutzen die Abstands-, Schrift- und Radius-Tokens
 - 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – offen: Playwright-Lauf (`multi-select.spec.ts`)
 
 ## Milestones

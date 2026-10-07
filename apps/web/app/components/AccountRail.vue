@@ -229,9 +229,9 @@ function onKeydown(event: KeyboardEvent, id: string): void {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   min-height: 0;
-  padding: 0.5rem 0.4rem;
+  padding: var(--fma-space-2) 0.4rem;
   overflow-y: auto;
   background: var(--color-base-200);
 }
@@ -270,7 +270,7 @@ function onKeydown(event: KeyboardEvent, id: string): void {
   align-items: center;
   gap: 0.6rem;
   width: 100%;
-  padding: 0.25rem;
+  padding: var(--fma-space-1);
   border: none;
   border-radius: 0.75rem;
   background: transparent;
@@ -412,7 +412,7 @@ function onKeydown(event: KeyboardEvent, id: string): void {
 .address {
   overflow: hidden;
   color: var(--fma-muted);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -422,7 +422,7 @@ function onKeydown(event: KeyboardEvent, id: string): void {
   display: inline-flex;
   padding: 0.4rem;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: transparent;
   color: var(--fma-muted);
 }

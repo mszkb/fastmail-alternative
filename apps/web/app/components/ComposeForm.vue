@@ -927,10 +927,10 @@ onBeforeUnmount(() => {
   right: 0;
   z-index: 5;
   margin: 0.15rem 0 0;
-  padding: 0.25rem;
+  padding: var(--fma-space-1);
   list-style: none;
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   box-shadow: var(--fma-shadow);
 }
@@ -938,8 +938,8 @@ onBeforeUnmount(() => {
 .suggestions li {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 0.5rem;
-  padding: 0.35rem 0.5rem;
+  gap: 0 var(--fma-space-2);
+  padding: 0.35rem var(--fma-space-2);
   border-radius: 0.25rem;
   cursor: pointer;
   font-size: 0.9rem;
@@ -976,7 +976,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   margin: 0;
   font-weight: 600;
 }
@@ -987,7 +987,7 @@ onBeforeUnmount(() => {
     position: static;
     inset: auto;
     display: block;
-    margin-top: 1rem;
+    margin-top: var(--fma-space-4);
     padding: 0;
     background: none;
   }
@@ -1026,7 +1026,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  padding: var(--fma-space-5);
   background: rgb(0 0 0 / 35%);
 }
 
@@ -1036,7 +1036,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   width: min(48rem, 100%);
   height: min(44rem, 100%);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-100);
   box-shadow: 0 10px 40px rgb(0 0 0 / 25%);
   overflow: hidden;
@@ -1046,8 +1046,8 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
+  gap: var(--fma-space-3);
+  padding: 0.6rem var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
   background: var(--color-base-200);
 }
@@ -1064,14 +1064,14 @@ h2 {
 }
 
 .conflict {
-  padding: 0.6rem 1rem;
+  padding: 0.6rem var(--fma-space-4);
   border-bottom: 1px solid var(--fma-warning-border);
   background: var(--fma-warning-soft);
   font-size: 0.9rem;
 }
 
 .conflict p {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--fma-space-2);
 }
 
 button.icon {
@@ -1084,7 +1084,7 @@ button.icon {
 }
 
 .fields {
-  padding: 0.25rem 1rem;
+  padding: var(--fma-space-1) var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -1092,7 +1092,7 @@ button.icon {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   padding: 0.3rem 0;
   border-bottom: 1px solid var(--color-base-200);
 }
@@ -1103,7 +1103,7 @@ button.icon {
 
 .field > span {
   flex: 0 0 4rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -1113,7 +1113,7 @@ button.icon {
   min-width: 0;
   padding: 0.35rem 0.4rem;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   font: inherit;
 }
@@ -1129,7 +1129,7 @@ button.link {
   background: transparent;
   color: var(--color-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   cursor: pointer;
 }
 
@@ -1141,11 +1141,11 @@ button.link {
 
 textarea {
   flex: 1;
-  padding: 0.75rem 1rem;
+  padding: var(--fma-space-3) var(--fma-space-4);
   border: none;
   resize: none;
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fma-text-md);
   line-height: 1.5;
 }
 
@@ -1154,14 +1154,14 @@ textarea:focus {
 }
 
 .compose-footer {
-  padding: 0.6rem 1rem;
+  padding: 0.6rem var(--fma-space-4);
   border-top: 1px solid var(--color-base-300);
 }
 
 .buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .attachments {
@@ -1170,14 +1170,14 @@ textarea:focus {
   align-items: flex-start;
   gap: 0.35rem;
   /* Same horizontal inset as the fields and the message text. */
-  padding: 0.4rem 1rem;
-  font-size: 0.85rem;
+  padding: 0.4rem var(--fma-space-4);
+  font-size: var(--fma-text-sm);
 }
 
 .attachments ul {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--fma-space-1);
   width: 100%;
   margin: 0;
   padding: 0;
@@ -1187,7 +1187,7 @@ textarea:focus {
 .attachments li {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   min-width: 0;
 }
 
@@ -1205,9 +1205,9 @@ textarea:focus {
 
 button.primary,
 button.secondary {
-  padding: 0.45rem 1rem;
+  padding: 0.45rem var(--fma-space-4);
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
   cursor: pointer;
 }
@@ -1228,8 +1228,8 @@ button:disabled {
 }
 
 .error {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-2);
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 

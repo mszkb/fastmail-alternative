@@ -61,10 +61,10 @@ watch(() => props.messageId, load, { immediate: true })
 
 <style scoped>
 .attachments {
-  margin-top: 0.75rem;
-  padding-top: 0.5rem;
+  margin-top: var(--fma-space-3);
+  padding-top: var(--fma-space-2);
   border-top: 1px solid var(--color-base-300);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 ul {
@@ -80,7 +80,7 @@ li {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.25rem 0.75rem;
+  gap: var(--fma-space-1) var(--fma-space-3);
 }
 
 .name {

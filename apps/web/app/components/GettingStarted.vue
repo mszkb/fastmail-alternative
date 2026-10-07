@@ -100,10 +100,10 @@ const visible = computed(() => !props.hasAccounts || !dismissed.value)
 
 <style scoped>
 .getting-started {
-  margin-bottom: 1rem;
-  padding: 1rem 1.25rem;
+  margin-bottom: var(--fma-space-4);
+  padding: var(--fma-space-4) 1.25rem;
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
@@ -114,7 +114,7 @@ const visible = computed(() => !props.hasAccounts || !dismissed.value)
 }
 
 .head h2 {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--fma-space-2);
 }
 
 ol {
@@ -126,7 +126,7 @@ ol {
 li {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   padding: 0.6rem 0;
   border-top: 1px solid var(--fma-border);
 }
@@ -153,13 +153,13 @@ li.done .icon {
   flex: 1;
   flex-direction: column;
   min-width: 0;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .text strong {
   color: var(--color-base-content);
-  font-size: 0.95rem;
+  font-size: var(--fma-text-md);
 }
 
 li.done strong {
@@ -168,13 +168,13 @@ li.done strong {
 
 button {
   flex-shrink: 0;
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem var(--fma-space-3);
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 button.secondary {

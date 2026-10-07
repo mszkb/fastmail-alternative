@@ -1253,25 +1253,25 @@ onBeforeUnmount(() => {
 .app-main > .notices,
 .app-main > .message,
 .app-main > .empty-state {
-  margin: 0.75rem 1rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
 }
 
 .settings {
   width: 100%;
   max-width: 48rem;
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--fma-space-4);
 }
 
 .settings-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--fma-space-4);
 }
 
 .settings-head h1 {
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--fma-space-1);
 }
 
 .settings-head h1:focus {
@@ -1282,29 +1282,29 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  gap: var(--fma-space-2);
+  margin-bottom: var(--fma-space-2);
 }
 
 .field-inline select {
   padding: 0.35rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
 .choices {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  margin: 0 0 0.5rem;
+  gap: var(--fma-space-1) var(--fma-space-4);
+  margin: 0 0 var(--fma-space-2);
   padding: 0;
   border: none;
 }
 
 .choices legend {
   width: 100%;
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--fma-space-1);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -1328,7 +1328,7 @@ onBeforeUnmount(() => {
 .side-menu {
   width: min(20rem, 85vw);
   height: 100%;
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   overflow-y: auto;
   background: var(--color-base-100);
   box-shadow: var(--fma-shadow);
@@ -1353,7 +1353,7 @@ onBeforeUnmount(() => {
   }
 
   .app-main {
-    padding-top: 0.5rem;
+    padding-top: var(--fma-space-2);
     overflow: visible;
   }
 }
@@ -1361,7 +1361,7 @@ onBeforeUnmount(() => {
 .shell {
   max-width: 28rem;
   margin: 3rem auto;
-  padding: 0 1rem;
+  padding: 0 var(--fma-space-4);
   font-family: system-ui, sans-serif;
   color: var(--color-base-content);
 }
@@ -1378,7 +1378,7 @@ onBeforeUnmount(() => {
 
 .notices {
   list-style: none;
-  margin: 0 0 1rem;
+  margin: 0 0 var(--fma-space-4);
   padding: 0;
 }
 
@@ -1386,12 +1386,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   margin-bottom: 0.4rem;
 }
 
 button.link {
-  padding: 0.2rem 0.5rem;
+  padding: 0.2rem var(--fma-space-2);
   background: transparent;
   color: var(--color-success);
   font-weight: 600;
@@ -1399,51 +1399,51 @@ button.link {
 
 .card {
   display: block;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .checkbox {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .form label {
   display: block;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
   font-size: 0.9rem;
 }
 
 .form input {
   display: block;
   width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
+  margin-top: var(--fma-space-1);
+  padding: var(--fma-space-2);
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   box-sizing: border-box;
   font: inherit;
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -1465,8 +1465,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-2) 0;
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -1480,7 +1480,7 @@ button:disabled {
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--color-base-300);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -1490,8 +1490,8 @@ button:disabled {
 }
 
 .message {
-  padding: 0.75rem 1rem;
-  border-radius: 0.375rem;
+  padding: var(--fma-space-3) var(--fma-space-4);
+  border-radius: var(--fma-radius);
   font-size: 0.9rem;
 }
 

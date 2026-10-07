@@ -395,12 +395,12 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .preset-hint {
-  margin: -0.25rem 0 0.75rem;
-  padding: 0.5rem 0.75rem;
+  margin: -0.25rem 0 var(--fma-space-3);
+  padding: var(--fma-space-2) var(--fma-space-3);
   border-left: 3px solid var(--color-primary);
   border-radius: 0.25rem;
   background: var(--fma-primary-soft);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .preset-hint.blocked {
@@ -410,33 +410,33 @@ async function submit(): Promise<void> {
 
 .form {
   display: block;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .form.embedded {
   width: 100%;
-  margin: 0.5rem 0 0;
+  margin: var(--fma-space-2) 0 0;
   background: var(--color-base-100);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .sync-hint {
   display: block;
-  margin: 0.25rem 0 0;
+  margin: var(--fma-space-1) 0 0;
 }
 
 label {
@@ -449,26 +449,26 @@ input,
 select {
   display: block;
   width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
+  margin-top: var(--fma-space-1);
+  padding: var(--fma-space-2);
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   box-sizing: border-box;
   font: inherit;
 }
 
 fieldset {
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
-  margin: 0 0 0.75rem;
-  padding: 0.75rem;
+  border-radius: var(--fma-radius);
+  margin: 0 0 var(--fma-space-3);
+  padding: var(--fma-space-3);
 }
 
 legend {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--fma-muted);
-  padding: 0 0.25rem;
+  padding: 0 var(--fma-space-1);
 }
 
 .row {
@@ -496,9 +496,9 @@ legend {
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -507,7 +507,7 @@ button {
 
 .buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 button.secondary {
@@ -521,9 +521,9 @@ button:disabled {
 }
 
 .msg {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem 1rem;
-  border-radius: 0.375rem;
+  margin: var(--fma-space-3) 0 0;
+  padding: var(--fma-space-3) var(--fma-space-4);
+  border-radius: var(--fma-radius);
   font-size: 0.9rem;
 }
 

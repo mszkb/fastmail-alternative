@@ -148,9 +148,9 @@ watch(
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 1rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
+  gap: var(--fma-space-2) var(--fma-space-4);
+  margin-bottom: var(--fma-space-2);
+  font-size: var(--fma-text-sm);
 }
 
 .remote-banner {
@@ -198,15 +198,15 @@ watch(
 .body {
   margin: 0;
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fma-text-md);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .hint {
-  margin: 0.75rem 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) 0;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 </style>

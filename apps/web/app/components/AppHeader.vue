@@ -208,9 +208,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   min-height: 3.25rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--fma-space-3);
   border-bottom: 1px solid var(--fma-border);
   background: var(--color-base-100);
 }
@@ -230,7 +230,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   justify-content: center;
   width: 1.9rem;
   height: 1.9rem;
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-primary);
   color: var(--color-primary-content);
 }
@@ -253,7 +253,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 .search input {
   width: 100%;
-  padding: 0.45rem 0.75rem 0.45rem 2.2rem;
+  padding: 0.45rem var(--fma-space-3) 0.45rem 2.2rem;
   border: 1px solid var(--fma-border);
   border-radius: 999px;
   background: var(--color-base-200);
@@ -279,7 +279,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   justify-content: center;
   padding: 0.4rem;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: transparent;
   color: var(--fma-muted);
 }
@@ -302,28 +302,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   position: fixed;
   inset: 0;
   z-index: 60;
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   background: var(--color-base-100);
 }
 
 .search-layer-form {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .search-layer input {
   flex: 1;
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   /* 16px avoids the automatic zoom on focus in iOS Safari. */
   font-size: 16px;
 }
 
 .hint {
-  margin: 0.75rem 0.25rem;
+  margin: var(--fma-space-3) var(--fma-space-1);
   color: var(--fma-muted);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .help-panel {
@@ -332,9 +332,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   right: 0.75rem;
   z-index: 50;
   width: min(22rem, calc(100vw - 1.5rem));
-  padding: 0.75rem 1rem;
+  padding: var(--fma-space-3) var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-100);
   box-shadow: var(--fma-shadow);
 }
@@ -343,7 +343,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--fma-space-2);
 }
 
 .help-head h2 {
@@ -357,9 +357,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 
 .help-panel h3 {
-  margin: 0.75rem 0 0.35rem;
+  margin: var(--fma-space-3) 0 0.35rem;
   color: var(--fma-muted);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -367,9 +367,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .help-panel dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.35rem 0.75rem;
+  gap: 0.35rem var(--fma-space-3);
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .help-panel dd {

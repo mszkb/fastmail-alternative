@@ -2079,7 +2079,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar {
-  padding: 0.75rem 0.5rem;
+  padding: var(--fma-space-3) var(--fma-space-2);
   background: var(--color-base-200);
 }
 
@@ -2087,7 +2087,7 @@ select {
   width: 100%;
   padding: 0.45rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   font: inherit;
 }
@@ -2097,26 +2097,26 @@ select {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
-  margin: 0.75rem 1rem;
-  padding: 0.6rem 0.75rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  padding: 0.6rem var(--fma-space-3);
   border: 1px solid var(--fma-warning-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--fma-warning-soft);
   color: var(--fma-warning-text);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .account-status button.secondary {
-  padding: 0.25rem 0.6rem;
+  padding: var(--fma-space-1) 0.6rem;
   border-color: var(--fma-warning-text);
   color: var(--fma-warning-text);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 button.primary {
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -2125,7 +2125,7 @@ button.primary {
 
 .compose-button {
   width: 100%;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
 }
 
 .folder {
@@ -2135,7 +2135,7 @@ button.primary {
   width: 100%;
   padding: var(--fma-folder-py) 0.6rem;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -2174,7 +2174,7 @@ button.primary {
   border-radius: 999px;
   background: var(--color-primary);
   color: var(--color-primary-content);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
 }
 
 .list-header {
@@ -2182,15 +2182,15 @@ button.primary {
   top: 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-3) var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
   background: var(--color-base-100);
 }
 
 h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--fma-text-lg);
 }
 
 .mobile-folders {
@@ -2209,7 +2209,7 @@ h2 {
   height: 2.25rem;
   padding: 0;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   color: var(--color-base-content);
   font-size: 1.15rem;
@@ -2245,14 +2245,14 @@ h2 {
 }
 
 .sync-progress {
-  margin: 0.5rem 1rem;
+  margin: var(--fma-space-2) var(--fma-space-4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sync-notice {
-  margin: 0.5rem 1rem;
+  margin: var(--fma-space-2) var(--fma-space-4);
 }
 
 .pull-indicator {
@@ -2261,7 +2261,7 @@ h2 {
   justify-content: center;
   overflow: hidden;
   color: var(--fma-muted);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .messages {
@@ -2302,7 +2302,7 @@ h2 {
   align-self: center;
   width: 1rem;
   height: 1rem;
-  margin: 0 -0.5rem 0 0.75rem;
+  margin: 0 -0.5rem 0 var(--fma-space-3);
   accent-color: var(--color-primary);
 }
 
@@ -2310,11 +2310,11 @@ h2 {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 0.35rem 1rem;
+  padding: 0.35rem var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-200);
   background: var(--color-base-200);
   color: var(--fma-muted);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -2328,7 +2328,7 @@ h2 {
   display: none;
   gap: 0.15rem;
   padding: 0.1rem;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
 }
@@ -2361,7 +2361,7 @@ h2 {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.5rem 0.75rem;
+  padding: var(--fma-space-2) var(--fma-space-3);
   border-bottom: 1px solid var(--fma-border);
   background: var(--fma-primary-soft);
 }
@@ -2370,8 +2370,8 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.85rem;
+  padding: var(--fma-space-1) 0.6rem;
+  font-size: var(--fma-text-sm);
 }
 
 .selection-count {
@@ -2403,7 +2403,7 @@ h2 {
 .row {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .from,
@@ -2440,7 +2440,7 @@ h2 {
   flex-shrink: 0;
   align-items: center;
   gap: 0.2rem;
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -2468,14 +2468,14 @@ h2 {
 }
 
 .more {
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   text-align: center;
 }
 
 button.secondary {
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-primary);
   font: inherit;
@@ -2483,7 +2483,7 @@ button.secondary {
 }
 
 .detail {
-  padding: 1rem 1.5rem;
+  padding: var(--fma-space-4) var(--fma-space-5);
   overflow-y: auto;
 }
 
@@ -2608,11 +2608,11 @@ button.secondary {
 
 .back {
   display: none;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
 }
 
 .search {
-  padding: 0.5rem 0.75rem;
+  padding: var(--fma-space-2) var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -2627,7 +2627,7 @@ button.secondary {
   min-width: 0;
   overflow: hidden;
   color: var(--fma-muted);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2639,9 +2639,9 @@ button.secondary {
 .search input[type='search'] {
   flex: 1;
   min-width: 0;
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem var(--fma-space-2);
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
@@ -2650,7 +2650,7 @@ button.secondary {
   background: transparent;
   color: var(--color-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   cursor: pointer;
 }
 
@@ -2658,8 +2658,8 @@ button.secondary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.4rem 0.6rem;
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
+  margin-top: var(--fma-space-2);
+  font-size: var(--fma-text-sm);
 }
 
 .search-options label {
@@ -2679,7 +2679,7 @@ button.secondary {
 .search-options input[type='date'] {
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
@@ -2690,9 +2690,9 @@ button.secondary {
 
 .search-summary {
   margin: 0;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -2701,7 +2701,7 @@ button.secondary {
   padding: 0 0.3rem;
   border-radius: 0.25rem;
   background: var(--color-base-200);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--color-base-content);
 }
 
@@ -2710,13 +2710,13 @@ button.secondary {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 1rem;
+  margin-bottom: var(--fma-space-4);
 }
 
 .toolbar button.secondary,
 .toolbar button.primary {
   padding: 0.3rem 0.65rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .toolbar button.is-flagged {
@@ -2732,13 +2732,13 @@ button.secondary {
 .toolbar .move select {
   width: auto;
   padding: 0.3rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .thread-count {
   display: inline-block;
   min-width: 1.1rem;
-  margin-right: 0.25rem;
+  margin-right: var(--fma-space-1);
   padding: 0 0.3rem;
   border: 1px solid var(--fma-border-strong);
   border-radius: 999px;
@@ -2747,16 +2747,16 @@ button.secondary {
 }
 
 .thread-info {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--fma-space-3);
   font-size: 0.8rem;
   color: var(--fma-muted);
 }
 
 .thread-message.in-thread {
   margin-bottom: 0.6rem;
-  padding: 0.25rem 0.75rem 0.5rem;
+  padding: var(--fma-space-1) var(--fma-space-3) var(--fma-space-2);
   border: 1px solid var(--color-base-300);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
 }
 
 .thread-message.opened {
@@ -2776,22 +2776,22 @@ button.secondary {
 }
 
 .thread-message.in-thread .headers {
-  margin-top: 0.25rem;
+  margin-top: var(--fma-space-1);
 }
 
 .detail-subject {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
   font-size: 1.25rem;
 }
 
 .headers {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.2rem 0.75rem;
-  margin: 0 0 1rem;
-  padding-bottom: 0.75rem;
+  gap: 0.2rem var(--fma-space-3);
+  margin: 0 0 var(--fma-space-4);
+  padding-bottom: var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .headers dt {
@@ -2804,8 +2804,8 @@ button.secondary {
 }
 
 .hint {
-  margin: 0.75rem 1rem;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -2815,8 +2815,8 @@ button.secondary {
 }
 
 .error {
-  margin: 0.75rem 1rem;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 
@@ -2844,12 +2844,12 @@ button.secondary {
     display: block;
     height: auto;
     min-height: 0;
-    padding: 0 0.75rem;
+    padding: 0 var(--fma-space-3);
     overflow: visible;
   }
 
   .sidebar {
-    padding: 0 0 0.5rem;
+    padding: 0 0 var(--fma-space-2);
     border: none;
     background: transparent;
   }
@@ -2869,12 +2869,12 @@ button.secondary {
   }
 
   .list-header {
-    padding: 0 0 0.5rem;
+    padding: 0 0 var(--fma-space-2);
     border: none;
   }
 
   .item {
-    padding: 0.6rem 0.25rem;
+    padding: 0.6rem var(--fma-space-1);
   }
 
   .back {

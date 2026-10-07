@@ -42,5 +42,5 @@ Alle Farben stammen aus den daisyUI-Themes und wenigen abgeleiteten App-Tokens i
 - **Hell/Dunkel:** ohne Auswahl folgt `fma-dark` der Systemeinstellung (`prefers-color-scheme`); die Einstellung „Darstellung“ setzt `data-theme` auf `<html>`.
 - **Dichte:** `data-density="compact"` auf `<html>` verringert die Zeilenabstände und blendet die Vorschauzeile aus.
 - **Kontrast:** Text mindestens WCAG AA (4,5:1) in beiden Themes; Kontofarben werden per Unit-Test gegen weiße Initialen geprüft.
-- **Neue Komponenten:** Farben, Abstände und Schriftgrößen nur über diese Tokens bzw. Tailwind/daisyUI-Klassen. Ältere Komponenten mit festen `rem`-Abständen werden beim nächsten Anfassen umgestellt.
+- **Komponenten:** Farben, Abstände (Stufen 0,25/0,5/0,75/1/1,5 rem), Schriftgrößen und Radien nur über diese Tokens bzw. Tailwind/daisyUI-Klassen. Einzelne Zwischenwerte (z. B. 0,6 rem Zeilenabstand, 1,25 rem Karteninnenabstand) bleiben bewusst lokal, solange sie nur an einer Stelle gelten.
 - HTML-Mails im Lesebereich bleiben hell, weil ihre Farben vom Absender stammen.
