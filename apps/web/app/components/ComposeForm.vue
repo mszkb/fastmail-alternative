@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  background: rgb(15 23 42 / 0.35);
+  background: rgb(0 0 0 / 35%);
 }
 
 .compose {
@@ -701,8 +701,8 @@ onBeforeUnmount(() => {
   width: min(48rem, 100%);
   height: min(44rem, 100%);
   border-radius: 0.5rem;
-  background: #fff;
-  box-shadow: 0 10px 40px rgb(15 23 42 / 0.25);
+  background: var(--color-base-100);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 25%);
   overflow: hidden;
 }
 
@@ -712,8 +712,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid #e4e9ee;
-  background: #f7f9fb;
+  border-bottom: 1px solid var(--color-base-300);
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -724,13 +724,13 @@ h2 {
 .save-state {
   flex: 1;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .conflict {
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid #f0d58c;
-  background: #fff8e1;
+  border-bottom: 1px solid var(--fma-warning-border);
+  background: var(--fma-warning-soft);
   font-size: 0.9rem;
 }
 
@@ -741,7 +741,7 @@ h2 {
 button.icon {
   border: none;
   background: transparent;
-  color: #52606d;
+  color: var(--fma-muted);
   font-size: 1.5rem;
   line-height: 1;
   cursor: pointer;
@@ -749,7 +749,7 @@ button.icon {
 
 .fields {
   padding: 0.25rem 1rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .field {
@@ -757,7 +757,7 @@ button.icon {
   align-items: center;
   gap: 0.5rem;
   padding: 0.3rem 0;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
 }
 
 .field:last-child {
@@ -767,7 +767,7 @@ button.icon {
 .field > span {
   flex: 0 0 4rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .field input,
@@ -783,14 +783,14 @@ button.icon {
 
 .field input:focus,
 .field select:focus {
-  border-color: #b8c2cc;
+  border-color: var(--fma-border-strong);
   outline: none;
 }
 
 button.link {
   border: none;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
@@ -818,7 +818,7 @@ textarea:focus {
 
 .compose-footer {
   padding: 0.6rem 1rem;
-  border-top: 1px solid #e4e9ee;
+  border-top: 1px solid var(--color-base-300);
 }
 
 .buttons {
@@ -863,26 +863,26 @@ textarea:focus {
 
 .attachment-size {
   flex: none;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 button.primary,
 button.secondary {
   padding: 0.45rem 1rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
   font: inherit;
   cursor: pointer;
 }
 
 button.primary {
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
 }
 
 button.secondary {
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
 }
 
 button:disabled {
@@ -893,7 +893,7 @@ button:disabled {
 .error {
   margin: 0 0 0.5rem;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .visually-hidden {

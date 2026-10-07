@@ -161,9 +161,9 @@ async function remove(account: Account): Promise<void> {
 .card {
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -174,7 +174,7 @@ h2 {
 .hint {
   margin: 0;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .accounts {
@@ -190,7 +190,7 @@ h2 {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .accounts li:last-child {
@@ -200,19 +200,19 @@ h2 {
 .mail {
   display: block;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .tag.problem {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .storage {
   width: 100%;
   margin: 0;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .storage-total {
@@ -223,7 +223,7 @@ h2 {
   width: 100%;
   margin: 0;
   font-size: 0.85rem;
-  color: #7c2d12;
+  color: var(--fma-warning-text);
 }
 
 .tag {
@@ -231,24 +231,24 @@ h2 {
   margin-left: 0.4rem;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: #d9f2e4;
+  background: var(--fma-success-soft);
   font-size: 0.75rem;
-  color: #147d46;
+  color: var(--color-success);
 }
 
 button {
   padding: 0.4rem 0.8rem;
-  border: 1px solid #cf1124;
+  border: 1px solid var(--color-error);
   border-radius: 0.375rem;
   background: transparent;
-  color: #cf1124;
+  color: var(--color-error);
   font: inherit;
   cursor: pointer;
 }
 
 button.neutral {
-  border-color: #1273de;
-  color: #1273de;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .actions {
@@ -264,6 +264,6 @@ button:disabled {
 .error {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 </style>

@@ -94,8 +94,8 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   margin: 0 auto;
   padding: 0.6rem 0.75rem 0.6rem 1rem;
   border-radius: 0.5rem;
-  background: #1f2933;
-  color: #fff;
+  background: var(--color-neutral);
+  color: var(--color-neutral-content);
   font-family: system-ui, sans-serif;
   font-size: 0.9rem;
   box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
@@ -109,8 +109,8 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisible
   padding: 0.35rem 0.8rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }

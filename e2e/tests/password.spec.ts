@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { USER } from './helpers'
+import { openSettings, profileButton, USER } from './helpers'
 
 async function changePassword(page: Page, current: string, next: string, confirm = next) {
-  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await openSettings(page)
   const form = page.locator('form', { has: page.getByRole('heading', { name: 'Passwort ändern' }) })
   await form.getByLabel('Aktuelles Passwort').fill(current)
   await form.getByLabel('Neues Passwort (mind. 10 Zeichen)').fill(next)
@@ -20,7 +20,7 @@ test('password change signs out the other session, not this one', async ({ page,
   await otherPage.getByLabel('Passwort', { exact: true }).fill(USER.password)
   await otherPage.getByLabel('Gerätename (optional)').fill('Zweitgerät')
   await otherPage.getByRole('button', { name: 'Anmelden' }).click()
-  await expect(otherPage.getByRole('button', { name: 'Einstellungen' })).toBeVisible()
+  await expect(profileButton(otherPage)).toBeVisible()
 
   await page.goto('/')
   // Negative cases: wrong current password, mismatching confirmation.
@@ -37,7 +37,7 @@ test('password change signs out the other session, not this one', async ({ page,
   await otherPage.reload()
   await expect(otherPage.getByRole('heading', { name: 'Anmeldung' })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Einstellungen' })).toBeVisible()
+  await expect(profileButton(page)).toBeVisible()
 
   // Old password rejected, new one accepted.
   await otherPage.getByLabel('E-Mail').fill(USER.email)
@@ -46,7 +46,7 @@ test('password change signs out the other session, not this one', async ({ page,
   await expect(otherPage.locator('.message.error')).toBeVisible()
   await otherPage.getByLabel('Passwort', { exact: true }).fill('e2e-password-2')
   await otherPage.getByRole('button', { name: 'Anmelden' }).click()
-  await expect(otherPage.getByRole('button', { name: 'Einstellungen' })).toBeVisible()
+  await expect(profileButton(otherPage)).toBeVisible()
   await other.close()
 
   // Back to the original password for later runs against the same stack.

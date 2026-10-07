@@ -49,16 +49,17 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  A[Posteingang Konto A] -- "Seitenleiste (Desktop) / Auswahlliste (Handy) / Taste 1–9 bzw. Strg+1–9" --> B[Posteingang Konto B]
-  B -- "optional: „Alle Posteingänge“" --> C[Gemeinsamer Posteingang]
+  A[Posteingang Konto A] -- "Kontoleiste (Desktop) / Seitenmenü ☰ (Handy) / Taste 1–9 bzw. Strg+1–9" --> B[Posteingang Konto B]
+  B -- "optional: „Alle Konten“ in der Kontoleiste" --> C[Gemeinsamer Posteingang]
   C -- Nachricht öffnen --> D[Ansicht im Ursprungskonto]
 ```
 
 - Konten bleiben getrennt (Prinzip 8). Beim Wechsel schließen Nachricht, Unterhaltung und Verfassen des alten Kontos; laufende Anfragen werden verworfen, damit sich nie Daten zweier Konten mischen.
-- Jedes Konto zeigt seine Ungelesen-Zahl; fehlerhafte Konten ein Abzeichen und ein Banner mit Erklärung und Link zu den Einstellungen.
-- Die Auswahl bleibt pro Gerät gespeichert.
-- „Alle Posteingänge“ ist standardmäßig aus und wird in den Einstellungen eingeschaltet; Antworten gehen immer aus dem Ursprungskonto.
-- Tests: `settings.spec.ts` (gemeinsamer Posteingang), `read.spec.ts`.
+- App-Rahmen (#120): Kopfzeile über die volle Breite (Name, Suche im aktiven Konto, Hilfe, Profil-Menü mit „Einstellungen“ und „Abmelden“), links die Kontoleiste. Jedes Konto ist ein rundes Icon mit Initialen und eigener Farbe, Ungelesen-Zahl als Badge, rotem Punkt bei Fehlern und Sync-Ring; Tooltip mit Name und Adresse; das aktive Konto ist markiert (`aria-current`). Reihenfolge per Drag & Drop oder `Alt+↑/↓`, ausklappbar mit Namen. Fehlerhafte Konten zeigen zusätzlich ein Banner mit Erklärung und Link zu den Einstellungen.
+- Handy: ☰ öffnet das Seitenmenü mit den Konten, die Lupe die Suche als Vollbild.
+- Die Auswahl und die ausgeklappte Leiste bleiben pro Gerät gespeichert.
+- „Alle Konten“ (gemeinsamer Posteingang) ist standardmäßig aus und wird in den Einstellungen eingeschaltet; Antworten gehen immer aus dem Ursprungskonto.
+- Tests: `app-frame.spec.ts`, `settings.spec.ts` (gemeinsamer Posteingang), `read.spec.ts`.
 
 ## 4. Verfassen (neu, Antworten, Weiterleiten)
 

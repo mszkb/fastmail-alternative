@@ -1,3 +1,5 @@
+import tailwindcss from '@tailwindcss/vite'
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-10-02',
   devtools: { enabled: true },
@@ -7,6 +9,10 @@ export default defineNuxtConfig({
   // The service worker (scripts/build-sw.mjs) handles new versions with an
   // update prompt; Nuxt's build manifest polling is not needed.
   experimental: { appManifest: false },
+  // Styling (#120): Tailwind CSS with daisyUI themes (light/dark), see
+  // app/assets/css/main.css; built into a static CSS file (CSP style-src 'self').
+  css: ['~/assets/css/main.css'],
+  vite: { plugins: [tailwindcss()] },
   app: {
     head: {
       htmlAttrs: { lang: 'de' },
@@ -19,7 +25,9 @@ export default defineNuxtConfig({
           content: 'width=device-width, initial-scale=1, viewport-fit=cover',
         },
         { name: 'description', content: 'Self-hosted Mail-Client für mehrere Konten' },
-        { name: 'theme-color', content: '#ffffff' },
+        { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' },
+        { name: 'theme-color', content: '#161b22', media: '(prefers-color-scheme: dark)' },
+        { name: 'color-scheme', content: 'light dark' },
         // iOS home screen app (roadmap 4.1/4.2): standalone, own title.
         { name: 'apple-mobile-web-app-capable', content: 'yes' },
         { name: 'mobile-web-app-capable', content: 'yes' },

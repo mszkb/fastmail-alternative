@@ -109,21 +109,21 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
     >
   >
 
-// unifiedInbox: the opt-in unified inbox (3.7) is switched on; its entry
-// "Alle Posteingänge" then sits above the accounts (emit openUnified).
+// Account bar (#120): the accounts are listed by AccountRail in app.vue,
+// which switches via switchAccount(); `activeAccount` reports the active
+// account and its live INBOX unread count back for the bar's badge.
 // syncStatus/syncCancelSupported (#119): state per account from app.vue;
 // without them (or on a backend without the status endpoint) the state is
 // derived from `syncing` and there is no stop button.
 const props = defineProps<{
   accounts: AccountOption[]
-  unifiedInbox?: boolean
   syncStatus?: AccountSyncStatus[]
   syncCancelSupported?: boolean
 }>()
 const emit = defineEmits<{
   editAccount: [id: string]
   syncRequested: []
-  openUnified: []
+  activeAccount: [id: string, inboxUnread: number | null]
   cancelSync: [accountId: string | null]
 }>()
 
@@ -136,8 +136,6 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   trash: 'Papierkorb',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
-/** Value of the "Alle Posteingänge" entry in the mobile account picker. */
-const UNIFIED_OPTION = '__unified__'
 /** Messages of a folder list kept offline (three pages of 50). */
 const CACHED_LIST_MESSAGES = 150
 const LIST_CACHE_DELAY_MS = 500
@@ -382,14 +380,15 @@ function getJson<T>(path: string): Promise<T> {
   })
 }
 
-/** Unread count shown in the switcher: live folder counts for the active account. */
-function accountUnread(account: AccountOption): number {
-  if (account.id === accountId.value) {
-    const inboxes = folders.value.filter((f) => f.specialUse === 'inbox')
-    if (inboxes.length > 0) return inboxes.reduce((sum, f) => sum + f.unreadCount, 0)
-  }
-  return account.unreadCount ?? 0
-}
+/** Live INBOX unread count of the active account for the account bar; null until known. */
+const activeInboxUnread = computed(() => {
+  const inboxes = folders.value.filter((f) => f.specialUse === 'inbox')
+  return inboxes.length > 0 ? inboxes.reduce((sum, f) => sum + f.unreadCount, 0) : null
+})
+
+watch([accountId, activeInboxUnread], ([id, unread]) => emit('activeAccount', id, unread), {
+  immediate: true,
+})
 
 /**
  * Switches the active account. An open compose form belongs to the previous
@@ -404,16 +403,6 @@ function switchAccount(id: string): boolean {
   compose.value = null
   accountId.value = id
   return true
-}
-
-function onAccountSelect(event: Event): void {
-  const select = event.target as HTMLSelectElement
-  if (select.value === UNIFIED_OPTION) {
-    select.value = accountId.value
-    emit('openUnified')
-    return
-  }
-  if (!switchAccount(select.value)) select.value = accountId.value
 }
 
 function readStoredAccount(): string {
@@ -1149,7 +1138,13 @@ async function openFromUnified(account: string, messageId: string): Promise<void
   await openMessage(messageId)
 }
 
-defineExpose({ goBack, openFromUnified })
+/** Header search (#120): searches the active account like the list's form did. */
+function searchFor(query: string): void {
+  searchForm.q = query
+  void runSearch()
+}
+
+defineExpose({ goBack, openFromUnified, switchAccount, searchFor })
 
 function closeDetail(): void {
   detailRequest++
@@ -1246,50 +1241,6 @@ onBeforeUnmount(() => {
       <button type="button" class="primary compose-button" @click="openCompose('new')">
         Neue E-Mail
       </button>
-      <nav class="accounts" aria-label="Konten">
-        <button v-if="unifiedInbox" type="button" class="account" @click="emit('openUnified')">
-          <span class="account-name">Alle Posteingänge</span>
-        </button>
-        <button
-          v-for="(account, index) in accounts"
-          :key="account.id"
-          type="button"
-          class="account"
-          :class="{ active: account.id === accountId }"
-          :aria-current="account.id === accountId ? 'true' : undefined"
-          :title="`${account.emailAddress}${index < 9 ? ` – Tastenkürzel: ${index + 1}` : ''}`"
-          @click="switchAccount(account.id)"
-        >
-          <span class="account-name">{{ account.displayName }}</span>
-          <span
-            v-if="statusInfo(account)"
-            class="status-badge"
-            :class="account.status"
-            :title="statusInfo(account)!.label"
-            role="img"
-            :aria-label="statusInfo(account)!.label"
-            >!</span
-          >
-          <span
-            v-if="accountUnread(account) > 0"
-            class="count"
-            :aria-label="`${accountUnread(account)} ungelesen`"
-            >{{ accountUnread(account) }}</span
-          >
-        </button>
-      </nav>
-      <!-- Mobile: compact account switcher -->
-      <label class="account-picker">
-        <span class="visually-hidden">Konto</span>
-        <select :value="accountId" @change="onAccountSelect">
-          <option v-if="unifiedInbox" :value="UNIFIED_OPTION">Alle Posteingänge</option>
-          <option v-for="account in accounts" :key="account.id" :value="account.id">
-            {{ account.displayName
-            }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : ''
-            }}{{ statusInfo(account) ? ` – ${statusInfo(account)!.label}` : '' }}
-          </option>
-        </select>
-      </label>
       <nav class="folders" aria-label="Ordner">
         <button
           v-for="folder in folders"
@@ -1380,16 +1331,9 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="syncNotice" class="hint sync-notice" role="status">{{ syncNotice }}</p>
 
-      <form v-if="accountId" class="search" role="search" @submit.prevent="runSearch">
+      <form v-if="accountId" class="search" aria-label="Suchfilter" @submit.prevent="runSearch">
         <div class="search-row">
-          <input
-            v-model="searchForm.q"
-            type="search"
-            enterkeyhint="search"
-            :placeholder="`In ${activeAccount?.displayName ?? 'diesem Konto'} suchen …`"
-            aria-label="Suchbegriff"
-            @keydown.esc.prevent="clearSearch"
-          />
+          <span v-if="searchForm.q" class="search-query">„{{ searchForm.q }}“</span>
           <button
             type="button"
             class="link"
@@ -1425,6 +1369,10 @@ onBeforeUnmount(() => {
           <label>
             <span>Vor dem</span>
             <input v-model="searchForm.before" type="date" />
+          </label>
+          <label>
+            <span>Suchbegriff</span>
+            <input v-model="searchForm.q" type="text" autocomplete="off" />
           </label>
           <label class="check">
             <input v-model="searchForm.onlyFolder" type="checkbox" />
@@ -1672,86 +1620,31 @@ onBeforeUnmount(() => {
 <style scoped>
 .mail {
   display: grid;
-  grid-template-columns: 14rem minmax(18rem, 24rem) 1fr;
-  height: calc(100vh - 7rem);
-  min-height: 24rem;
-  border: 1px solid #d5dde5;
-  border-radius: 0.5rem;
-  background: #fff;
+  grid-template-columns: 14rem minmax(18rem, 26rem) 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-base-100);
   overflow: hidden;
 }
 
 .sidebar,
 .list {
-  border-right: 1px solid #e4e9ee;
+  border-right: 1px solid var(--color-base-300);
   overflow-y: auto;
 }
 
 .sidebar {
   padding: 0.75rem 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 select {
   width: 100%;
   padding: 0.45rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
-  background: #fff;
+  background: var(--color-base-100);
   font: inherit;
-}
-
-.account-picker {
-  display: none;
-  margin-bottom: 0.75rem;
-}
-
-.accounts {
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e4e9ee;
-}
-
-.account {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  border: none;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.account:hover {
-  background: #e4e9ee;
-}
-
-.account.active {
-  background: #1f2933;
-  color: #fff;
-}
-
-.status-badge {
-  flex-shrink: 0;
-  margin-left: auto;
-  margin-right: 0.3rem;
-  padding: 0 0.4rem;
-  border-radius: 999px;
-  background: #b45309;
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.status-badge.auth_error {
-  background: #cf1124;
 }
 
 .account-status {
@@ -1761,32 +1654,26 @@ select {
   gap: 0.35rem;
   margin: 0.75rem 1rem;
   padding: 0.6rem 0.75rem;
-  border: 1px solid #f5c26b;
+  border: 1px solid var(--fma-warning-border);
   border-radius: 0.375rem;
-  background: #fffbeb;
-  color: #7c2d12;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
   font-size: 0.85rem;
 }
 
 .account-status button.secondary {
   padding: 0.25rem 0.6rem;
-  border-color: #7c2d12;
-  color: #7c2d12;
+  border-color: var(--fma-warning-text);
+  color: var(--fma-warning-text);
   font-size: 0.85rem;
-}
-
-.account-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 button.primary {
   padding: 0.45rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
@@ -1813,18 +1700,18 @@ button.primary {
 }
 
 .folder:hover:not(:disabled) {
-  background: #e4e9ee;
+  background: var(--color-base-300);
 }
 
 /* Container without messages (IMAP \Noselect, e.g. "[Gmail]"). */
 .folder:disabled {
-  color: #6b7785;
+  color: var(--fma-muted);
   cursor: default;
 }
 
 .folder.active {
-  background: #dbeafe;
-  color: #0b4f9c;
+  background: var(--fma-primary-soft);
+  color: var(--color-primary);
 }
 
 .folder-name {
@@ -1837,8 +1724,8 @@ button.primary {
   margin-left: 0.4rem;
   padding: 0 0.45rem;
   border-radius: 999px;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font-size: 0.75rem;
 }
 
@@ -1849,8 +1736,8 @@ button.primary {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e4e9ee;
-  background: #fff;
+  border-bottom: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
 }
 
 h2 {
@@ -1873,10 +1760,10 @@ h2 {
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
-  background: #fff;
-  color: #1f2d3d;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
   font-size: 1.15rem;
   line-height: 1;
   cursor: pointer;
@@ -1920,7 +1807,7 @@ h2 {
   align-items: flex-end;
   justify-content: center;
   overflow: hidden;
-  color: #52606d;
+  color: var(--fma-muted);
   font-size: 0.85rem;
 }
 
@@ -1935,7 +1822,7 @@ h2 {
   width: 100%;
   padding: 0.6rem 1rem;
   border: none;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1944,11 +1831,11 @@ h2 {
 }
 
 .item:hover {
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 .item.active {
-  background: #dbeafe;
+  background: var(--fma-primary-soft);
 }
 
 .row {
@@ -1981,7 +1868,7 @@ h2 {
   height: 0.45rem;
   margin-right: 0.4rem;
   border-radius: 50%;
-  background: #1273de;
+  background: var(--color-primary);
   vertical-align: middle;
 }
 
@@ -1989,11 +1876,11 @@ h2 {
 .icons {
   flex-shrink: 0;
   font-size: 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .flagged {
-  color: #cf1124;
+  color: var(--color-error);
 }
 
 .subject {
@@ -2003,7 +1890,7 @@ h2 {
 .snippet {
   display: block;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .more {
@@ -2013,10 +1900,10 @@ h2 {
 
 button.secondary {
   padding: 0.4rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   cursor: pointer;
 }
@@ -2033,7 +1920,7 @@ button.secondary {
 
 .search {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .search-row {
@@ -2042,11 +1929,25 @@ button.secondary {
   gap: 0.35rem;
 }
 
+.search-query {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fma-muted);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-row .link:first-of-type {
+  margin-left: auto;
+}
+
 .search input[type='search'] {
   flex: 1;
   min-width: 0;
   padding: 0.35rem 0.5rem;
-  border: 1px solid #cbd2d9;
+  border: 1px solid var(--fma-border);
   border-radius: 0.375rem;
   font: inherit;
 }
@@ -2054,7 +1955,7 @@ button.secondary {
 .search button.link {
   border: none;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
@@ -2072,7 +1973,7 @@ button.secondary {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .search-options label.check {
@@ -2084,7 +1985,7 @@ button.secondary {
 .search-options input[type='text'],
 .search-options input[type='date'] {
   padding: 0.3rem 0.4rem;
-  border: 1px solid #cbd2d9;
+  border: 1px solid var(--fma-border);
   border-radius: 0.375rem;
   font: inherit;
 }
@@ -2097,18 +1998,18 @@ button.secondary {
 .search-summary {
   margin: 0;
   padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .hit-folder {
   margin-right: 0.35rem;
   padding: 0 0.3rem;
   border-radius: 0.25rem;
-  background: #eef2f6;
+  background: var(--color-base-200);
   font-size: 0.75rem;
-  color: #323f4b;
+  color: var(--color-base-content);
 }
 
 .toolbar {
@@ -2126,13 +2027,13 @@ button.secondary {
 }
 
 .toolbar button.is-flagged {
-  border-color: #cf1124;
-  color: #cf1124;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .toolbar button.danger {
-  border-color: #9b1c1c;
-  color: #9b1c1c;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .toolbar .move select {
@@ -2146,27 +2047,27 @@ button.secondary {
   min-width: 1.1rem;
   margin-right: 0.25rem;
   padding: 0 0.3rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 999px;
-  color: #3e4c59;
+  color: var(--fma-muted);
   text-align: center;
 }
 
 .thread-info {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .thread-message.in-thread {
   margin-bottom: 0.6rem;
   padding: 0.25rem 0.75rem 0.5rem;
-  border: 1px solid #e4e9ee;
+  border: 1px solid var(--color-base-300);
   border-radius: 0.375rem;
 }
 
 .thread-message.opened {
-  border-color: #93c5fd;
+  border-color: var(--fma-primary-soft);
 }
 
 .thread-toggle {
@@ -2196,12 +2097,12 @@ button.secondary {
   gap: 0.2rem 0.75rem;
   margin: 0 0 1rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
   font-size: 0.85rem;
 }
 
 .headers dt {
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .headers dd {
@@ -2212,7 +2113,7 @@ button.secondary {
 .hint {
   margin: 0.75rem 1rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .hint.center,
@@ -2223,7 +2124,7 @@ button.secondary {
 .error {
   margin: 0.75rem 1rem;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .visually-hidden {
@@ -2245,7 +2146,7 @@ button.secondary {
     display: block;
     height: auto;
     min-height: 0;
-    border: none;
+    padding: 0 0.75rem;
     overflow: visible;
   }
 
@@ -2256,13 +2157,11 @@ button.secondary {
   }
 
   .folders,
-  .accounts,
   .desktop-title {
     display: none;
   }
 
-  .mobile-folders,
-  .account-picker {
+  .mobile-folders {
     display: block;
   }
 

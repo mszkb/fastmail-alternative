@@ -328,9 +328,9 @@ async function submit(): Promise<void> {
   display: block;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -341,13 +341,13 @@ h2 {
 .form.embedded {
   width: 100%;
   margin: 0.5rem 0 0;
-  background: #fff;
+  background: var(--color-base-100);
 }
 
 .hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .sync-hint {
@@ -367,14 +367,14 @@ select {
   width: 100%;
   margin-top: 0.25rem;
   padding: 0.5rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
   box-sizing: border-box;
   font: inherit;
 }
 
 fieldset {
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.375rem;
   margin: 0 0 0.75rem;
   padding: 0.75rem;
@@ -383,7 +383,7 @@ fieldset {
 legend {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #52606d;
+  color: var(--fma-muted);
   padding: 0 0.25rem;
 }
 
@@ -415,8 +415,8 @@ button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
@@ -427,8 +427,8 @@ button {
 }
 
 button.secondary {
-  background: #e4e9ee;
-  color: #1f2933;
+  background: var(--color-base-300);
+  color: var(--color-base-content);
 }
 
 button:disabled {
@@ -444,12 +444,12 @@ button:disabled {
 }
 
 .msg.error {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .msg.success {
-  background: #def7ec;
-  color: #046c4e;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 </style>

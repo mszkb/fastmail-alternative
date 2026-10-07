@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   cursor: pointer;
 }
 
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
 
 .track {
   fill: none;
-  stroke: #d5dde5;
+  stroke: var(--fma-border);
   stroke-width: 3;
 }
 
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
 }
 
 .ok {
-  fill: #3ebd93;
+  fill: var(--color-success);
 }
 
 @keyframes sync-spin {
@@ -376,9 +376,9 @@ onBeforeUnmount(() => {
   right: 0.2rem;
   width: 0.55rem;
   height: 0.55rem;
-  border: 2px solid #fff;
+  border: 2px solid var(--color-base-100);
   border-radius: 50%;
-  background: #d64545;
+  background: var(--color-error);
 }
 
 .sync-panel {
@@ -390,10 +390,10 @@ onBeforeUnmount(() => {
   max-height: 70vh;
   overflow-y: auto;
   padding: 0.75rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #fff;
-  box-shadow: 0 6px 24px rgb(15 23 42 / 15%);
+  background: var(--color-base-100);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 18%);
   text-align: left;
 }
 
@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
 
 .sync-panel li {
   padding: 0.6rem 0;
-  border-top: 1px solid #e4e9ee;
+  border-top: 1px solid var(--color-base-300);
 }
 
 .line {
@@ -431,26 +431,26 @@ onBeforeUnmount(() => {
 
 .state {
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .state.error,
 .state.auth_error {
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .progress-text,
 .meta {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
-  color: #3e4c59;
+  color: var(--fma-muted);
 }
 
 .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .bar {
@@ -458,14 +458,14 @@ onBeforeUnmount(() => {
   margin-top: 0.4rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #e4e9ee;
+  background: var(--color-base-300);
 }
 
 .bar span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #1273de;
+  background: var(--color-primary);
   transition: width 0.3s;
 }
 
@@ -503,28 +503,28 @@ onBeforeUnmount(() => {
   padding: 0.35rem 0.75rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
 
 .sync-panel button.secondary {
-  background: #e4e9ee;
-  color: #1f2933;
+  background: var(--color-base-300);
+  color: var(--color-base-content);
 }
 
 .sync-panel button.link {
   background: transparent;
-  color: #046c4e;
+  color: var(--color-success);
   font-weight: 600;
 }
 
 .sync-panel button.close {
   padding: 0.1rem 0.5rem;
   background: transparent;
-  color: #52606d;
+  color: var(--fma-muted);
   font-size: 1.2rem;
 }
 

@@ -63,11 +63,11 @@ onMounted(() => {
   gap: 0.5rem;
   padding: 0.6rem 0.9rem;
   margin-bottom: 1rem;
-  border: 1px solid #b6d4f5;
+  border: 1px solid var(--fma-primary-soft);
   border-radius: 0.5rem;
-  background: #eaf3fd;
+  background: var(--fma-primary-soft);
   font-size: 0.9rem;
-  color: #1f2933;
+  color: var(--color-base-content);
 }
 
 .actions {
@@ -77,16 +77,16 @@ onMounted(() => {
 
 button {
   padding: 0.35rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
 
 button.secondary {
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
 }
 </style>

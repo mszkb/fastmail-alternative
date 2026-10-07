@@ -197,7 +197,7 @@ onMounted(load)
 .identity {
   margin-bottom: 0.75rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .head {
@@ -210,9 +210,9 @@ onMounted(load)
 .tag {
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: #d9f2e4;
+  background: var(--fma-success-soft);
   font-size: 0.75rem;
-  color: #147d46;
+  color: var(--color-success);
 }
 
 label {
@@ -226,7 +226,7 @@ textarea {
   box-sizing: border-box;
   width: 100%;
   padding: 0.45rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
   font: inherit;
   font-size: 0.9rem;
@@ -242,17 +242,17 @@ textarea {
 
 button {
   padding: 0.35rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   cursor: pointer;
 }
 
 button.danger {
-  border-color: #cf1124;
-  color: #cf1124;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 button:disabled {
@@ -262,18 +262,18 @@ button:disabled {
 
 .ok {
   font-size: 0.8rem;
-  color: #18794e;
+  color: var(--color-success);
 }
 
 .hint {
   margin: 0;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .error {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 </style>

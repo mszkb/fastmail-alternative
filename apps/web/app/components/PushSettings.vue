@@ -223,9 +223,9 @@ onMounted(() => {
   display: block;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -236,16 +236,16 @@ h2 {
 .hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .note {
   margin: 0;
   padding: 0.6rem 0.75rem;
   border-radius: 0.375rem;
-  background: #fff8e1;
+  background: var(--fma-warning-soft);
   font-size: 0.9rem;
-  color: #6b4f00;
+  color: var(--fma-warning-text);
 }
 
 .row {
@@ -258,11 +258,11 @@ h2 {
 
 .state {
   font-size: 0.9rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .state.on {
-  color: #147d46;
+  color: var(--color-success);
   font-weight: 600;
 }
 
@@ -270,15 +270,15 @@ button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
 
 button.secondary {
-  background: #e4e9ee;
-  color: #1f2933;
+  background: var(--color-base-300);
+  color: var(--color-base-content);
 }
 
 button:disabled {
@@ -298,7 +298,7 @@ button:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
-  border-top: 1px solid #e4e9ee;
+  border-top: 1px solid var(--color-base-300);
 }
 
 .tag {
@@ -306,19 +306,19 @@ button:disabled {
   margin-left: 0.4rem;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: #e4e9ee;
+  background: var(--color-base-300);
   font-size: 0.75rem;
-  color: #3e4c59;
+  color: var(--fma-muted);
 }
 
 .tag.current {
-  background: #d9f2e4;
-  color: #147d46;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 
 .error {
   margin: 0.75rem 0 0;
   font-size: 0.9rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 </style>

@@ -63,7 +63,7 @@ watch(() => props.messageId, load, { immediate: true })
 .attachments {
   margin-top: 0.75rem;
   padding-top: 0.5rem;
-  border-top: 1px solid #e4e9ee;
+  border-top: 1px solid var(--color-base-300);
   font-size: 0.85rem;
 }
 
@@ -93,15 +93,15 @@ li {
 }
 
 .size {
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 a {
-  color: #1d4ed8;
+  color: var(--color-primary);
 }
 
 .hint {
   margin: 0;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 </style>

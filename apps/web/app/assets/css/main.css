@@ -1,0 +1,145 @@
+/*
+ * Styling (#120): Tailwind CSS v4 with daisyUI v5. Our own themes, no brand
+ * colors of other products: "fma-light" by default, "fma-dark" when the
+ * system prefers dark mode. Components use the daisyUI color variables
+ * (--color-base-100 ... --color-error) and the few app tokens below, so both
+ * themes work everywhere. Design tokens are refined in #112.
+ */
+@import 'tailwindcss';
+
+@plugin 'daisyui' {
+  themes:
+    fma-light --default,
+    fma-dark --prefersdark;
+  logs: false;
+}
+
+@plugin 'daisyui/theme' {
+  name: 'fma-light';
+  default: true;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f5f7fa;
+  --color-base-300: #e3e8ee;
+  --color-base-content: #1f2933;
+  --color-primary: #0f5cb5;
+  --color-primary-content: #ffffff;
+  --color-secondary: #6d3fc0;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0f766e;
+  --color-accent-content: #ffffff;
+  --color-neutral: #2f3b47;
+  --color-neutral-content: #f5f7fa;
+  --color-info: #1d6fd6;
+  --color-info-content: #ffffff;
+  --color-success: #127146;
+  --color-success-content: #ffffff;
+  --color-warning: #c27a06;
+  --color-warning-content: #1f1400;
+  --color-error: #b42318;
+  --color-error-content: #ffffff;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin 'daisyui/theme' {
+  name: 'fma-dark';
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #161b22;
+  --color-base-200: #1d242d;
+  --color-base-300: #2a333e;
+  --color-base-content: #dfe5ec;
+  --color-primary: #5ea2f2;
+  --color-primary-content: #06182c;
+  --color-secondary: #b18cf0;
+  --color-secondary-content: #1a0c33;
+  --color-accent: #3cc3b4;
+  --color-accent-content: #04201d;
+  --color-neutral: #cfd7e0;
+  --color-neutral-content: #161b22;
+  --color-info: #6aaaf5;
+  --color-info-content: #06182c;
+  --color-success: #4cc38a;
+  --color-success-content: #04200f;
+  --color-warning: #e6a73a;
+  --color-warning-content: #231600;
+  --color-error: #f2726a;
+  --color-error-content: #2b0503;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.375rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* App tokens derived from the theme (used by the component styles). */
+:root {
+  --fma-muted: color-mix(in oklab, var(--color-base-content) 68%, var(--color-base-100));
+  --fma-border: color-mix(in oklab, var(--color-base-content) 16%, var(--color-base-100));
+  --fma-border-strong: color-mix(in oklab, var(--color-base-content) 30%, var(--color-base-100));
+  --fma-primary-soft: color-mix(in oklab, var(--color-primary) 14%, var(--color-base-100));
+  --fma-error-soft: color-mix(in oklab, var(--color-error) 13%, var(--color-base-100));
+  --fma-success-soft: color-mix(in oklab, var(--color-success) 14%, var(--color-base-100));
+  --fma-warning-soft: color-mix(in oklab, var(--color-warning) 14%, var(--color-base-100));
+  --fma-warning-border: color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));
+  --fma-warning-text: color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));
+  --fma-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+}
+
+/* Base after Preflight: readable defaults for the existing views. */
+@layer base {
+  html,
+  body {
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+    font-family: system-ui, sans-serif;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  a {
+    color: var(--color-primary);
+    text-decoration: underline;
+  }
+
+  code {
+    font-family: ui-monospace, monospace;
+    font-size: 0.9em;
+  }
+
+  /* Tailwind's Preflight drops the cursor of buttons. */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input,
+  select,
+  textarea {
+    background-color: var(--color-base-100);
+    color: var(--color-base-content);
+  }
+}

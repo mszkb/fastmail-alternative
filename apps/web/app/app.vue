@@ -26,9 +26,16 @@
 // cancel and shows "wird gestoppt" right away. A backend without the
 // endpoint (404, the Node backend) keeps the 4.5 behavior: the state comes
 // from `syncing`, the account list is polled, there is no stop button.
+// App frame (#120): full-width layout with the header (search, help,
+// profile menu with settings and logout) and the account bar on the left
+// (AccountRail): one icon per account, switching accounts is the primary
+// navigation. Small screens get the accounts in a side menu. The bar's
+// width (names shown or not) is remembered per device; the account order
+// is saved as the accounts' sort order.
 import {
   ForegroundSyncPolicy,
   SwipeBack,
+  sortOrderUpdates,
   finishedSyncs,
   hasUnsavedInput,
   isSyncActive,
@@ -118,6 +125,8 @@ let onlyQueuedSince: number | null = null
 const mailView = ref<{
   goBack: () => boolean
   openFromUnified: (accountId: string, messageId: string) => Promise<void>
+  switchAccount: (id: string) => boolean
+  searchFor: (query: string) => void
 } | null>(null)
 const swipe = new SwipeBack()
 const swipeDistance = ref(0)
@@ -436,6 +445,119 @@ function editAccount(id: string): void {
   section.value = 'settings'
 }
 
+// --- App frame (#120) ---
+const RAIL_EXPANDED_KEY = 'fma.frame.railExpanded'
+const activeAccountId = ref('')
+// Live INBOX unread count of the active account (from its folder list).
+const activeInboxUnread = ref<number | null>(null)
+const menuOpen = ref(false)
+
+// Side menu: focus its first entry when it opens.
+watch(menuOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  document.querySelector<HTMLElement>('#side-menu button')?.focus()
+})
+const railExpanded = ref(readRailExpanded())
+
+function readRailExpanded(): boolean {
+  try {
+    return import.meta.client && localStorage.getItem(RAIL_EXPANDED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setRailExpanded(expanded: boolean): void {
+  railExpanded.value = expanded
+  try {
+    localStorage.setItem(RAIL_EXPANDED_KEY, expanded ? '1' : '0')
+  } catch {
+    // Private mode: only for this session.
+  }
+}
+
+const activeAccountName = computed(
+  () => accounts.value.find((a) => a.id === activeAccountId.value)?.displayName ?? '',
+)
+
+/** Accounts for the bar; the active one shows the live INBOX count. */
+const railAccounts = computed(() =>
+  accounts.value.map((a) =>
+    a.id === activeAccountId.value && activeInboxUnread.value !== null
+      ? { ...a, unreadCount: activeInboxUnread.value }
+      : a,
+  ),
+)
+
+function onActiveAccount(id: string, inboxUnread: number | null): void {
+  activeAccountId.value = id
+  activeInboxUnread.value = inboxUnread
+}
+
+/** Account bar / side menu: show the mail of this account. */
+async function selectAccount(id: string): Promise<void> {
+  menuOpen.value = false
+  section.value = 'mail'
+  unifiedOpen.value = false
+  await nextTick()
+  mailView.value?.switchAccount(id)
+}
+
+function openUnifiedInbox(): void {
+  menuOpen.value = false
+  section.value = 'mail'
+  unifiedOpen.value = true
+}
+
+async function openSettings(): Promise<void> {
+  menuOpen.value = false
+  section.value = 'settings'
+  await nextTick()
+  document.querySelector<HTMLElement>('.settings h1')?.focus()
+}
+
+/** "+" in the account bar: the form in the settings. */
+async function addAccount(): Promise<void> {
+  menuOpen.value = false
+  section.value = 'settings'
+  await nextTick()
+  const form = document.getElementById('add-account')
+  form?.scrollIntoView({ behavior: 'smooth' })
+  form?.querySelector<HTMLInputElement>('input')?.focus()
+}
+
+/** Header search: the active account (until the global search, #121). */
+async function onHeaderSearch(query: string): Promise<void> {
+  section.value = 'mail'
+  unifiedOpen.value = false
+  await nextTick()
+  mailView.value?.searchFor(query)
+}
+
+/** Drag and drop in the account bar: show at once, then save the sort order. */
+async function reorderAccounts(ids: string[]): Promise<void> {
+  const previous = accounts.value
+  const updates = sortOrderUpdates(ids, previous)
+  const byId = new Map(previous.map((a) => [a.id, a]))
+  accounts.value = ids
+    .map((id, index) => {
+      const account = byId.get(id)
+      return account ? { ...account, sortOrder: index } : undefined
+    })
+    .filter((a): a is AccountSummary => a !== undefined)
+  try {
+    for (const { id, sortOrder } of updates) {
+      await api(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify({ sortOrder }) })
+    }
+  } catch (err) {
+    error.value =
+      err instanceof Error ? err.message : 'Reihenfolge konnte nicht gespeichert werden.'
+    accounts.value = previous
+  }
+  void loadAccounts()
+}
+
 /** Unread counts and status of all accounts; quiet periodic refresh. */
 function refreshAccounts(): void {
   if (view.value !== 'app' || document.visibilityState !== 'visible') return
@@ -704,7 +826,191 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="shell" :class="{ wide: view === 'app' && section === 'mail' }">
+  <!-- App frame (#120): header across the full width, account bar on the left -->
+  <div v-if="view === 'app'" class="app-frame" :class="{ 'menu-open': menuOpen }">
+    <AppHeader
+      :email="currentEmail"
+      :search-placeholder="
+        activeAccountName ? `In ${activeAccountName} suchen …` : 'Kein Konto verbunden'
+      "
+      :search-disabled="accounts.length === 0 || isOffline"
+      :menu-open="menuOpen"
+      @search="onHeaderSearch"
+      @toggle-menu="menuOpen = !menuOpen"
+      @settings="openSettings"
+      @logout="logout"
+    >
+      <template #status>
+        <span
+          v-if="isOffline"
+          class="tag offline"
+          role="status"
+          title="Keine Verbindung zum Server – angezeigt werden gespeicherte Daten"
+          >Offline</span
+        >
+        <span v-if="pendingCount > 0" class="tag pending" role="status">{{ pendingText }}</span>
+      </template>
+    </AppHeader>
+
+    <div class="app-body">
+      <AccountRail
+        class="desktop-rail"
+        mode="rail"
+        :accounts="railAccounts"
+        :active-account-id="section === 'mail' ? activeAccountId : ''"
+        :statuses="syncStatus"
+        :unified-inbox="unifiedEnabled"
+        :unified-active="section === 'mail' && unifiedEnabled && unifiedOpen"
+        :expanded="railExpanded"
+        @update:expanded="setRailExpanded"
+        @select="selectAccount"
+        @open-unified="openUnifiedInbox"
+        @add="addAccount"
+        @reorder="reorderAccounts"
+      />
+
+      <main class="app-main">
+        <ul v-if="offlineState.notices.length" class="notices">
+          <li v-for="(notice, index) in offlineState.notices" :key="index" class="message info">
+            <span>{{ notice }}</span>
+            <button type="button" class="link" @click="dismissNotice(index)">OK</button>
+          </li>
+        </ul>
+
+        <InstallBanner @guide="showInstallGuide" />
+
+        <!-- Swipe back (4.9): arrow at the left edge follows the finger -->
+        <div
+          v-if="swipeDistance > 0"
+          class="swipe-indicator"
+          :class="{ armed: swipeArmed }"
+          :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
+          aria-hidden="true"
+        >
+          &larr;
+        </div>
+
+        <template v-if="section === 'mail'">
+          <UnifiedInbox
+            v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen"
+            :accounts="accounts"
+            @open="openUnifiedMessage"
+            @back="unifiedOpen = false"
+          />
+          <MailView
+            v-if="accounts.length > 0"
+            v-show="!(unifiedEnabled && unifiedOpen)"
+            ref="mailView"
+            :accounts="accounts"
+            :sync-status="syncStatus"
+            :sync-cancel-supported="syncStatusSupported === true"
+            @active-account="onActiveAccount"
+            @edit-account="editAccount"
+            @sync-requested="onManualSync"
+            @cancel-sync="onCancelSync"
+          />
+          <div v-else class="card empty-state">
+            <p>Noch kein E-Mail-Konto verbunden.</p>
+            <button type="button" @click="addAccount">Konto hinzufügen</button>
+          </div>
+        </template>
+
+        <div v-else class="settings">
+          <div class="settings-head">
+            <h1 tabindex="-1">Einstellungen</h1>
+            <button type="button" class="link" @click="section = 'mail'">Zurück zur Post</button>
+          </div>
+          <p class="hint">
+            Angemeldet als <strong>{{ currentEmail }}</strong>
+          </p>
+
+          <AccountList
+            v-model:edit="editAccountId"
+            :accounts="accounts"
+            @deleted="loadAccounts"
+            @changed="loadAccounts"
+          />
+          <AccountForm id="add-account" @created="onManualSync" />
+          <ConfigTransfer @imported="onManualSync" />
+
+          <div class="card">
+            <h2>Geräte</h2>
+            <p class="hint">Ein Gerät abzumelden beendet alle zugehörigen Sitzungen.</p>
+            <ul class="devices">
+              <li v-for="device in devices" :key="device.id">
+                <span>
+                  <strong>{{ device.name }}</strong>
+                  <span class="tag">{{ device.platform }}</span>
+                  <span v-if="device.isCurrent" class="tag current">dieses Gerät</span>
+                </span>
+                <button
+                  v-if="!device.isCurrent"
+                  type="button"
+                  :disabled="busy"
+                  @click="revokeDevice(device)"
+                >
+                  Abmelden
+                </button>
+              </li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h2>Posteingang</h2>
+            <label class="checkbox">
+              <input
+                type="checkbox"
+                :checked="unifiedEnabled"
+                :disabled="unifiedBusy"
+                @change="setUnifiedInbox"
+              />
+              Gemeinsamer Posteingang (alle Konten)
+            </label>
+            <p class="hint">
+              Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Konten“ in der
+              Kontoleiste die Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem
+              Konto; geantwortet wird immer aus dem Konto der Nachricht. Nur online verfügbar.
+            </p>
+          </div>
+
+          <PasswordChange @changed="loadDevices" />
+
+          <InstallGuide />
+          <PushSettings />
+        </div>
+
+        <p v-if="error" class="message error">{{ error }}</p>
+        <p v-else-if="info" class="message info">{{ info }}</p>
+      </main>
+    </div>
+
+    <!-- Small screens: side menu with the accounts -->
+    <div v-if="menuOpen" class="side-menu-backdrop" @click.self="menuOpen = false">
+      <div
+        id="side-menu"
+        class="side-menu"
+        role="dialog"
+        aria-label="Konten"
+        @keydown.esc="menuOpen = false"
+      >
+        <AccountRail
+          mode="list"
+          :accounts="railAccounts"
+          :active-account-id="section === 'mail' ? activeAccountId : ''"
+          :statuses="syncStatus"
+          :unified-inbox="unifiedEnabled"
+          :unified-active="section === 'mail' && unifiedEnabled && unifiedOpen"
+          @select="selectAccount"
+          @open-unified="openUnifiedInbox"
+          @add="addAccount"
+          @reorder="reorderAccounts"
+        />
+      </div>
+    </div>
+    <UpdatePrompt />
+  </div>
+
+  <main v-else class="shell">
     <h1>fastmail-alternative</h1>
 
     <div v-if="view === 'loading'" class="card">Wird geladen &hellip;</div>
@@ -754,149 +1060,6 @@ onBeforeUnmount(() => {
       <button type="submit" :disabled="busy">Anmelden</button>
     </form>
 
-    <!-- Authenticated app: mail view and settings -->
-    <template v-else>
-      <nav class="topbar">
-        <span class="tabs">
-          <button
-            type="button"
-            class="tab"
-            :class="{ active: section === 'mail' }"
-            @click="section = 'mail'"
-          >
-            E-Mail
-          </button>
-          <button
-            type="button"
-            class="tab"
-            :class="{ active: section === 'settings' }"
-            @click="section = 'settings'"
-          >
-            Einstellungen
-          </button>
-        </span>
-        <span class="status">
-          <span
-            v-if="isOffline"
-            class="tag offline"
-            role="status"
-            title="Keine Verbindung zum Server – angezeigt werden gespeicherte Daten"
-            >Offline</span
-          >
-          <span v-if="pendingCount > 0" class="tag pending" role="status">{{ pendingText }}</span>
-          <span class="user">{{ currentEmail }}</span>
-        </span>
-      </nav>
-      <ul v-if="offlineState.notices.length" class="notices">
-        <li v-for="(notice, index) in offlineState.notices" :key="index" class="message info">
-          <span>{{ notice }}</span>
-          <button type="button" class="link" @click="dismissNotice(index)">OK</button>
-        </li>
-      </ul>
-
-      <InstallBanner @guide="showInstallGuide" />
-
-      <!-- Swipe back (4.9): arrow at the left edge follows the finger -->
-      <div
-        v-if="swipeDistance > 0"
-        class="swipe-indicator"
-        :class="{ armed: swipeArmed }"
-        :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
-        aria-hidden="true"
-      >
-        &larr;
-      </div>
-
-      <template v-if="section === 'mail'">
-        <UnifiedInbox
-          v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen"
-          :accounts="accounts"
-          @open="openUnifiedMessage"
-          @back="unifiedOpen = false"
-        />
-        <MailView
-          v-if="accounts.length > 0"
-          v-show="!(unifiedEnabled && unifiedOpen)"
-          ref="mailView"
-          :accounts="accounts"
-          :unified-inbox="unifiedEnabled"
-          :sync-status="syncStatus"
-          :sync-cancel-supported="syncStatusSupported === true"
-          @open-unified="unifiedOpen = true"
-          @edit-account="editAccount"
-          @sync-requested="onManualSync"
-          @cancel-sync="onCancelSync"
-        />
-        <div v-else class="card">
-          <p>Noch kein E-Mail-Konto verbunden.</p>
-          <button type="button" @click="section = 'settings'">Konto hinzufügen</button>
-        </div>
-      </template>
-
-      <div v-else class="settings">
-        <div class="card">
-          <p>
-            Angemeldet als <strong>{{ currentEmail }}</strong>
-          </p>
-          <button type="button" :disabled="busy" @click="logout">Abmelden</button>
-        </div>
-
-        <AccountList
-          v-model:edit="editAccountId"
-          :accounts="accounts"
-          @deleted="loadAccounts"
-          @changed="loadAccounts"
-        />
-        <AccountForm @created="onManualSync" />
-        <ConfigTransfer @imported="onManualSync" />
-
-        <div class="card">
-          <h2>Geräte</h2>
-          <p class="hint">Ein Gerät abzumelden beendet alle zugehörigen Sitzungen.</p>
-          <ul class="devices">
-            <li v-for="device in devices" :key="device.id">
-              <span>
-                <strong>{{ device.name }}</strong>
-                <span class="tag">{{ device.platform }}</span>
-                <span v-if="device.isCurrent" class="tag current">dieses Gerät</span>
-              </span>
-              <button
-                v-if="!device.isCurrent"
-                type="button"
-                :disabled="busy"
-                @click="revokeDevice(device)"
-              >
-                Abmelden
-              </button>
-            </li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>Posteingang</h2>
-          <label class="checkbox">
-            <input
-              type="checkbox"
-              :checked="unifiedEnabled"
-              :disabled="unifiedBusy"
-              @change="setUnifiedInbox"
-            />
-            Gemeinsamer Posteingang (alle Konten)
-          </label>
-          <p class="hint">
-            Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Posteingänge“ die
-            Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem Konto; geantwortet
-            wird immer aus dem Konto der Nachricht. Nur online verfügbar.
-          </p>
-        </div>
-
-        <PasswordChange @changed="loadDevices" />
-
-        <InstallGuide />
-        <PushSettings />
-      </div>
-    </template>
-
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-else-if="info" class="message info">{{ info }}</p>
     <UpdatePrompt />
@@ -916,8 +1079,8 @@ onBeforeUnmount(() => {
   height: 2.5rem;
   margin-top: -1.25rem;
   border-radius: 50%;
-  background: #e4e9ee;
-  color: #52606d;
+  background: var(--color-base-300);
+  color: var(--fma-muted);
   font-size: 1.2rem;
   opacity: 0.7;
   pointer-events: none;
@@ -927,8 +1090,8 @@ onBeforeUnmount(() => {
 }
 
 .swipe-indicator.armed {
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   opacity: 1;
 }
 
@@ -939,69 +1102,127 @@ onBeforeUnmount(() => {
   }
 }
 
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* The mail view fills the remaining height; it scrolls its columns itself. */
+.app-main > :deep(.mail) {
+  flex: 1;
+}
+
+.app-main > .notices,
+.app-main > .message,
+.app-main > .empty-state {
+  margin: 0.75rem 1rem;
+}
+
+.settings {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-head h1 {
+  margin: 0 0 0.25rem;
+}
+
+.settings-head h1:focus {
+  outline: none;
+}
+
+.settings-head .link {
+  color: var(--color-primary);
+}
+
+.tag.offline,
+.tag.pending {
+  white-space: nowrap;
+}
+
+.side-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgb(0 0 0 / 35%);
+}
+
+.side-menu {
+  width: min(20rem, 85vw);
+  height: 100%;
+  padding: 0.75rem;
+  overflow-y: auto;
+  background: var(--color-base-100);
+  box-shadow: var(--fma-shadow);
+}
+
+/* Small screens: the page scrolls (pull-to-refresh and swipe-back rely on
+   the window scroll position), the header stays on top. */
+@media (max-width: 760px) {
+  .app-frame {
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .app-frame > :deep(.app-header) {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .desktop-rail {
+    display: none;
+  }
+
+  .app-main {
+    padding-top: 0.5rem;
+    overflow: visible;
+  }
+}
+
 .shell {
   max-width: 28rem;
   margin: 3rem auto;
   padding: 0 1rem;
   font-family: system-ui, sans-serif;
-  color: #1f2933;
-}
-
-.shell.wide {
-  max-width: 90rem;
-  margin-top: 1rem;
-}
-
-.shell.wide h1 {
-  display: none;
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-}
-
-button.tab {
-  padding: 0.4rem 0.9rem;
-  white-space: nowrap;
-  background: transparent;
-  color: #3e4c59;
-}
-
-button.tab.active {
-  background: #e4e9ee;
-  color: #1f2933;
-  font-weight: 600;
-}
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
+  color: var(--color-base-content);
 }
 
 .tag.offline {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .tag.pending {
-  background: #fff3c4;
-  color: #8d2b0b;
-}
-
-.status .tag {
-  margin-left: 0;
-  white-space: nowrap;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
 }
 
 .notices {
@@ -1021,26 +1242,17 @@ button.tab.active {
 button.link {
   padding: 0.2rem 0.5rem;
   background: transparent;
-  color: #046c4e;
+  color: var(--color-success);
   font-weight: 600;
-}
-
-.user {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 0.85rem;
-  color: #52606d;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card {
   display: block;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -1057,7 +1269,7 @@ h2 {
 .hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .form label {
@@ -1071,7 +1283,7 @@ h2 {
   width: 100%;
   margin-top: 0.25rem;
   padding: 0.5rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
   box-sizing: border-box;
   font: inherit;
@@ -1081,8 +1293,8 @@ button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
@@ -1104,7 +1316,7 @@ button:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .devices li:last-child {
@@ -1116,14 +1328,14 @@ button:disabled {
   margin-left: 0.4rem;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: #e4e9ee;
+  background: var(--color-base-300);
   font-size: 0.75rem;
-  color: #3e4c59;
+  color: var(--fma-muted);
 }
 
 .tag.current {
-  background: #d9f2e4;
-  color: #147d46;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 
 .message {
@@ -1133,12 +1345,12 @@ button:disabled {
 }
 
 .message.error {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .message.info {
-  background: #def7ec;
-  color: #046c4e;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 </style>

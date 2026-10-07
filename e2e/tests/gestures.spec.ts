@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { ACCOUNT_A, MAILBOX_A, deliver, openAccount, textMail, touchDrag } from './helpers'
+import {
+  ACCOUNT_A,
+  deliver,
+  MAILBOX_A,
+  openAccount,
+  openSettings,
+  textMail,
+  touchDrag,
+} from './helpers'
 
 // The server accepts one manual sync per account and 30 s (the app start
 // already asked for one), so the flow is: pull right after the start ->
@@ -65,7 +73,7 @@ test('swipe right goes back from a message to the list', async ({ page }) => {
 
 test('swipe back never drops a half-filled form', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await openSettings(page)
   const form = page.locator('form', {
     has: page.getByRole('heading', { name: 'Konto hinzufügen' }),
   })
@@ -80,7 +88,7 @@ test('swipe back never drops a half-filled form', async ({ page }) => {
 
   // Untouched settings: the swipe goes back to the mail view.
   await page.reload()
-  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await openSettings(page)
   await expect(page.getByRole('heading', { name: 'Konto hinzufügen' })).toBeVisible()
   await touchDrag(page, { x: 60, y: viewport.height / 3 }, { x: 280, y: viewport.height / 3 })
   await expect(page.getByRole('heading', { name: 'Konto hinzufügen' })).toBeHidden()

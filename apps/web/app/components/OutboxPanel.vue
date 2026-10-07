@@ -204,7 +204,7 @@ defineExpose({ track, refresh })
 <style scoped>
 .outbox {
   margin-top: 0.75rem;
-  border-top: 1px solid #e4e9ee;
+  border-top: 1px solid var(--color-base-300);
   padding-top: 0.5rem;
   font-size: 0.85rem;
 }
@@ -224,16 +224,16 @@ defineExpose({ track, refresh })
 }
 
 .toggle:hover {
-  background: #e4e9ee;
+  background: var(--color-base-300);
 }
 
 .summary {
   font-size: 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .toggle.failed .summary {
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .entries {
@@ -247,7 +247,7 @@ defineExpose({ track, refresh })
   flex-direction: column;
   gap: 0.15rem;
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
 }
 
 .line {
@@ -266,17 +266,17 @@ defineExpose({ track, refresh })
 .status {
   flex-shrink: 0;
   font-size: 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .status-sent .status {
-  color: #18794e;
+  color: var(--color-success);
 }
 
 .status-failed .status,
 .error-text,
 .error {
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .to,
@@ -292,10 +292,10 @@ defineExpose({ track, refresh })
 .retry {
   align-self: flex-start;
   padding: 0.2rem 0.6rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   font-size: 0.8rem;
   cursor: pointer;
@@ -310,7 +310,7 @@ button.link {
   padding: 0;
   border: none;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
