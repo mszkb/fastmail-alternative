@@ -6,6 +6,7 @@
  */
 
 export * from './account-avatar'
+export * from './appearance'
 export * from './attachments'
 export * from './badge'
 export * from './compose'

@@ -1948,7 +1948,7 @@ button.primary {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  padding: 0.4rem 0.6rem;
+  padding: var(--fma-folder-py) 0.6rem;
   border: none;
   border-radius: 0.375rem;
   background: transparent;
@@ -2190,7 +2190,7 @@ h2 {
 .item {
   display: block;
   width: 100%;
-  padding: 0.6rem 1rem;
+  padding: var(--fma-row-py) var(--fma-row-px);
   border: none;
   border-bottom: 1px solid var(--color-base-200);
   background: transparent;
@@ -2268,6 +2268,11 @@ h2 {
   display: block;
   font-size: 0.8rem;
   color: var(--fma-muted);
+}
+
+/* Compact density hides the preview line of list rows. */
+.item .snippet {
+  display: var(--fma-snippet-display);
 }
 
 .more {

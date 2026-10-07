@@ -36,6 +36,10 @@ import {
   ForegroundSyncPolicy,
   SwipeBack,
   sortOrderUpdates,
+  DENSITY_CHOICES,
+  THEME_CHOICES,
+  parseDensity,
+  parseTheme,
   finishedSyncs,
   hasUnsavedInput,
   isSyncActive,
@@ -70,6 +74,7 @@ import {
   resetOfflineState,
 } from '~/utils/offline-queue'
 import { setShortcutsEnabled, shortcutsEnabled } from '~/utils/shortcuts-setting'
+import { densityChoice, setAppearance, themeChoice } from '~/utils/appearance'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -519,6 +524,19 @@ async function openSettings(): Promise<void> {
 }
 
 const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** Settings: theme and density (#112, per device). */
+function onAppearanceChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const form = input.closest('.card')
+  const value = (name: string) =>
+    form?.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)?.value
+  setAppearance(parseTheme(value('theme')), parseDensity(value('density')))
+  // Saved at once: never unsaved input for the swipe back.
+  form?.querySelectorAll<HTMLInputElement>('input').forEach((field) => {
+    fieldBaseline.set(field, { value: field.value, checked: field.checked })
+  })
+}
 
 /** Settings: keyboard shortcuts on/off (#115, per device). */
 function onShortcutsToggle(event: Event): void {
@@ -1005,6 +1023,40 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="card">
+            <h2>Darstellung</h2>
+            <fieldset class="choices">
+              <legend>Farbschema</legend>
+              <label v-for="choice in THEME_CHOICES" :key="choice.value" class="checkbox">
+                <input
+                  type="radio"
+                  name="theme"
+                  :value="choice.value"
+                  :checked="themeChoice === choice.value"
+                  @change="onAppearanceChange"
+                />
+                {{ choice.label }}
+              </label>
+            </fieldset>
+            <fieldset class="choices">
+              <legend>Dichte der Nachrichtenliste</legend>
+              <label v-for="choice in DENSITY_CHOICES" :key="choice.value" class="checkbox">
+                <input
+                  type="radio"
+                  name="density"
+                  :value="choice.value"
+                  :checked="densityChoice === choice.value"
+                  @change="onAppearanceChange"
+                />
+                {{ choice.label }}
+              </label>
+            </fieldset>
+            <p class="hint">
+              Gilt für dieses Gerät. „Kompakt“ zeigt mehr Nachrichten und blendet die Vorschauzeile
+              aus.
+            </p>
+          </div>
+
+          <div class="card">
             <h2>Tastenkürzel</h2>
             <label class="checkbox">
               <input type="checkbox" :checked="shortcutsEnabled" @change="onShortcutsToggle" />
@@ -1199,6 +1251,22 @@ onBeforeUnmount(() => {
 
 .settings-head h1:focus {
   outline: none;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: none;
+}
+
+.choices legend {
+  width: 100%;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .settings-head .link {

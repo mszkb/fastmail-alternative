@@ -94,6 +94,33 @@
   --fma-warning-border: color-mix(in oklab, var(--color-warning) 45%, var(--color-base-100));
   --fma-warning-text: color-mix(in oklab, var(--color-warning) 55%, var(--color-base-content));
   --fma-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+
+  /* Spacing and type scale (#112). */
+  --fma-space-1: 0.25rem;
+  --fma-space-2: 0.5rem;
+  --fma-space-3: 0.75rem;
+  --fma-space-4: 1rem;
+  --fma-space-5: 1.5rem;
+  --fma-radius: 0.375rem;
+  --fma-radius-box: 0.5rem;
+  --fma-text-xs: 0.75rem;
+  --fma-text-sm: 0.85rem;
+  --fma-text-md: 0.95rem;
+  --fma-text-lg: 1.1rem;
+
+  /* Density "normal": rows of the message list and the folder column. */
+  --fma-row-py: 0.6rem;
+  --fma-row-px: 1rem;
+  --fma-folder-py: 0.4rem;
+  --fma-snippet-display: block;
+}
+
+/* Density "kompakt" (#112): more messages on screen, no preview line. */
+:root[data-density='compact'] {
+  --fma-row-py: 0.3rem;
+  --fma-row-px: 0.75rem;
+  --fma-folder-py: 0.2rem;
+  --fma-snippet-display: none;
 }
 
 /* Base after Preflight: readable defaults for the existing views. */

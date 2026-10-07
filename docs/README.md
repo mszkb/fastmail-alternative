@@ -5,6 +5,7 @@
 | [product/vision.md](product/vision.md)                                 | Produktziel, Zielgruppen, Prinzipien, MVP-Scope und Nicht-Ziele                       |
 | [product/mail-providers.md](product/mail-providers.md)                 | Unterstützte Mailanbieter, Zugangsdaten, Kompatibilitätsmatrix der IMAP-Erweiterungen |
 | [product/ux-flows.md](product/ux-flows.md)                             | UX-Flows: Onboarding, Konto hinzufügen, Kontowechsel, Verfassen, Push-Opt-in          |
+| [product/ux-guide.md](product/ux-guide.md)                             | UX-Leitfaden: Bedienmuster, Leitplanke, Design-Tokens (hell/dunkel, Dichte)           |
 | [product/offene-fragen.md](product/offene-fragen.md)                   | Offene Produktfragen mit gewähltem Default (z. B. Sync-Verhalten bei offener App)     |
 | [architecture/overview.md](architecture/overview.md)                   | Komponenten, Datenfluss, Deployment                                                   |
 | [architecture/data-model.md](architecture/data-model.md)               | Datenmodell-Entwurf mit ER-Diagramm                                                   |
