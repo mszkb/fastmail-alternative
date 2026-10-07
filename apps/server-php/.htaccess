@@ -1,0 +1,3 @@
+# Only public/ may be served. If this directory ended up in the web root by
+# mistake, deny everything (config.php holds the MASTER_KEY).
+Require all denied

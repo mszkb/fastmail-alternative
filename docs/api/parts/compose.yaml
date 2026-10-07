@@ -1,0 +1,784 @@
+paths:
+  /api/outbox:
+    post:
+      operationId: sendMessage
+      tags: [compose]
+      summary: Queue a plain-text message for sending
+      description: |
+        Validates the message, stores it encrypted and enqueues a
+        `send_message` job (SMTP worker). The Message-ID is generated once
+        here. With `clientId` the request is idempotent: a repeat with a
+        known id answers 200 with the existing entry instead of sending
+        again. `draftId` deletes that draft (unknown ids are ignored).
+        `attachmentIds` binds uploads of the same account to the message.
+        Body limit 4 MiB. Rate limit rule `send` (60/min per IP).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessageRequest' }
+      responses:
+        '200':
+          description: Repeat with a known `clientId`; the message queued the first time
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxMessage' }
+        '201':
+          description: Message queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxMessage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Account or explicit identity not found (or not owned)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '410':
+          description: |
+            At least one `attachmentIds` entry is gone (expired, removed or
+            already sent). Nothing is stored or sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentMissingResponse' }
+        '413':
+          description: Request body over 4 MiB, or attachments together exceed `MAX_ATTACHMENTS_TOTAL_BYTES`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/outbox/{id}:
+    get:
+      operationId: getOutboxMessage
+      tags: [compose]
+      summary: Get the status of an outbox message
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Outbox entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/outbox/{id}/retry:
+    post:
+      operationId: retryOutboxMessage
+      tags: [compose]
+      summary: Re-queue a failed message
+      description: |
+        Only messages with status `failed` can be retried; the error is
+        cleared and a new `send_message` job is enqueued. No request body.
+        Rate limit rule `send` (60/min per IP).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Message re-queued (status `queued`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Message is not in status `failed`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/accounts/{id}/outbox:
+    get:
+      operationId: listAccountOutbox
+      tags: [compose]
+      summary: List pending and failed outbox messages of an account
+      description: |
+        Messages with status `queued`, `sending` or `failed`, newest first
+        (`createdAt` desc), at most 100.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Outbox entries
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OutboxListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/accounts/{id}/drafts:
+    get:
+      operationId: listAccountDrafts
+      tags: [compose]
+      summary: List drafts of an account
+      description: Not deleted drafts, newest first (`updatedAt` desc), at most 200.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Drafts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DraftListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/drafts/{id}:
+    get:
+      operationId: getDraft
+      tags: [compose]
+      summary: Get a draft
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveDraft
+      tags: [compose]
+      summary: Create or update a draft (autosave)
+      description: |
+        The id is a client-generated UUID. Only a save without
+        `baseVersion` (or 0) creates the draft (201); otherwise the existing
+        draft is updated (200, `version` + 1). If the draft was saved
+        elsewhere since `baseVersion`, the answer is 409 with the current
+        draft, unless `force` is true (last write wins). A sent or
+        discarded draft answers 410. Each save enqueues a delayed
+        `draft_sync` job (IMAP Drafts folder). Body limit 4 MiB.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaveDraftRequest' }
+      responses:
+        '200':
+          description: Draft updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            Invalid draft id, account or identity not found, or the draft
+            belongs to another user/account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '409':
+          description: Draft was changed on another device since `baseVersion`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DraftConflictResponse' }
+        '410':
+          description: Draft was sent or discarded meanwhile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '413':
+          description: Request body over 4 MiB, or kept attachments together exceed `MAX_ATTACHMENTS_TOTAL_BYTES`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429':
+          description: |
+            Too many uploads kept with drafts of this account (limit 200);
+            no `Retry-After`. The global rate limit can also answer 429
+            (with `Retry-After`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+    delete:
+      operationId: deleteDraft
+      tags: [compose]
+      summary: Discard a draft
+      description: |
+        Idempotent: an unknown or already deleted draft also answers 204.
+        Deletes the uploads kept with the draft and enqueues removal of its
+        IMAP copy.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Draft discarded (or did not exist)
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Invalid id, or the draft belongs to another user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  /api/messages/{id}/draft:
+    post:
+      operationId: openMessageAsDraft
+      tags: [compose]
+      summary: Open a message of the IMAP Drafts folder for editing
+      description: |
+        Returns the draft the message belongs to (200), or creates one from
+        it (201). On creation the message's attachments are copied into
+        uploads of the new draft; `attachmentsSkipped` counts the ones that
+        could not be copied (the original then stays in the Drafts folder).
+        No request body.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Existing draft of this message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        '201':
+          description: Draft created from the message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Draft' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The message body is not synchronized yet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  /api/accounts/{id}/uploads:
+    post:
+      operationId: uploadAttachment
+      tags: [compose]
+      summary: Upload one attachment file
+      description: |
+        The raw file is the request body (`application/octet-stream`, not
+        multipart). Stored encrypted with the account DEK until sent,
+        kept with a draft or removed by the cleanup. Size limit
+        `MAX_ATTACHMENT_BYTES` (default 10 MiB). Account ownership and the
+        concurrency limit (`MAX_CONCURRENT_UPLOADS`) are checked before the
+        body is read. Rate limit rule `upload` (60/min per IP).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: X-Filename
+          in: header
+          required: false
+          description: |
+            Percent-encoded file name. Path parts and control characters are
+            removed, length capped at 255; empty -> `anhang`.
+          schema: { type: string }
+        - name: X-Content-Type
+          in: header
+          required: false
+          description: MIME type of the file; invalid or missing -> `application/octet-stream`.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Upload stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadedAttachment' }
+        '400':
+          description: Invalid percent-encoding in `X-Filename`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Account not found (or not owned)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '413':
+          description: File larger than `MAX_ATTACHMENT_BYTES`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '415':
+          description: Body is not `application/octet-stream`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429':
+          description: |
+            Rate limit `upload` exceeded or too many uploads in progress
+            (both with `Retry-After`), or too many pending uploads of this
+            account (limit 100, no `Retry-After`).
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the next attempt (not sent for the pending-uploads limit)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+  /api/uploads/{id}:
+    delete:
+      operationId: deleteUpload
+      tags: [compose]
+      summary: Remove an upload not yet attached to a message
+      description: Also removes uploads kept with a draft. Uploads bound to an outbox message answer 404.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Upload removed
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/messages/{id}/attachments/copy:
+    post:
+      operationId: copyMessageAttachments
+      tags: [compose]
+      summary: Copy a message's attachments into new uploads (forwarding)
+      description: |
+        Copies the attachments of the received message into new uploads of
+        `accountId`. With `includeInline: true` inline raster images
+        (png/jpeg/gif/webp) are copied too. Attachments beyond the size,
+        count or pending limits are skipped and counted. Shares the upload
+        concurrency limit (weight 2).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CopyAttachmentsRequest' }
+      responses:
+        '201':
+          description: Copies created (possibly none)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CopyAttachmentsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Account (missing/invalid `accountId` included) or message not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '409':
+          description: The raw message is not synchronized yet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '422':
+          description: The raw message could not be parsed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '429':
+          description: Too many uploads/copies in progress (`Retry-After` 2)
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the next attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+
+components:
+  schemas:
+    # MailPerson: defined in accounts-read.yaml
+    SendRecipient:
+      description: A recipient of `POST /api/outbox`, either a plain address or `{ name, address }`.
+      oneOf:
+        - type: string
+          format: email
+          maxLength: 320
+        - type: object
+          required: [address]
+          properties:
+            name:
+              type: string
+              maxLength: 200
+              description: Line breaks are replaced by spaces; trimmed.
+            address:
+              type: string
+              format: email
+              maxLength: 320
+
+    MessageIdHeader:
+      type: string
+      description: Message-ID in angle brackets, e.g. `<abc@example.com>`.
+      maxLength: 250
+      pattern: '^<[^\s<>@]+@[^\s<>@]+>$'
+
+    SendMessageRequest:
+      type: object
+      description: |
+        At least one recipient in `to`, `cc` or `bcc` is required, at most
+        100 in total.
+      required: [accountId, subject, text]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        identityId:
+          type: string
+          format: uuid
+          description: Sender identity; defaults to the account's default identity.
+        to:
+          type: array
+          items: { $ref: '#/components/schemas/SendRecipient' }
+        cc:
+          type: array
+          items: { $ref: '#/components/schemas/SendRecipient' }
+        bcc:
+          type: array
+          items: { $ref: '#/components/schemas/SendRecipient' }
+        subject:
+          type: string
+          maxLength: 998
+          description: Line breaks are replaced by spaces; trimmed.
+        text:
+          type: string
+          maxLength: 500000
+          description: Plain-text body.
+        inReplyTo:
+          $ref: '#/components/schemas/MessageIdHeader'
+        references:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/MessageIdHeader' }
+        clientId:
+          type: string
+          format: uuid
+          description: Client-generated id that makes the request idempotent.
+        draftId:
+          type: string
+          format: uuid
+          description: Draft to delete with the send; unknown ids are ignored.
+        attachmentIds:
+          type: array
+          maxItems: 20
+          description: Uploads of the same account, in order; duplicates are ignored.
+          items:
+            type: string
+            format: uuid
+
+    OutboxStatus:
+      type: string
+      enum: [queued, sending, sent, failed]
+
+    SentCopyStatus:
+      type: string
+      description: Copy in the "Sent" folder.
+      enum: [pending, done, skipped, failed]
+
+    OutboxErrorCode:
+      type: string
+      enum:
+        - AUTH_FAILED
+        - SMTP_REJECTED
+        - SMTP_TEMPORARY
+        - HOST_NOT_FOUND
+        - BLOCKED_HOST
+        - BLOCKED_PORT
+        - CONNECTION_REFUSED
+        - TIMEOUT
+        - TLS_ERROR
+        - TLS_REQUIRED
+        - ATTACHMENT_MISSING
+        - UNKNOWN
+
+    OutboxMessage:
+      type: object
+      required:
+        - id
+        - accountId
+        - identityId
+        - status
+        - subject
+        - from
+        - to
+        - cc
+        - bcc
+        - messageId
+        - attempts
+        - error
+        - sentCopy
+        - createdAt
+        - sentAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        identityId:
+          type: [string, 'null']
+          format: uuid
+        status:
+          $ref: '#/components/schemas/OutboxStatus'
+        subject:
+          type: [string, 'null']
+          description: Null once the content is no longer stored (or cannot be decrypted).
+        from:
+          oneOf:
+            - $ref: '#/components/schemas/MailPerson'
+            - type: 'null'
+        to:
+          type: array
+          items: { $ref: '#/components/schemas/MailPerson' }
+        cc:
+          type: array
+          items: { $ref: '#/components/schemas/MailPerson' }
+        bcc:
+          type: array
+          items: { $ref: '#/components/schemas/MailPerson' }
+        messageId:
+          type: string
+          description: Message-ID header (angle brackets), generated at submission.
+        attempts:
+          type: integer
+          minimum: 0
+        error:
+          description: Last error (also while a retry is pending); null after success.
+          oneOf:
+            - type: object
+              required: [code, message]
+              properties:
+                code: { $ref: '#/components/schemas/OutboxErrorCode' }
+                message:
+                  type: string
+                  description: German text for the code.
+            - type: 'null'
+        sentCopy:
+          oneOf:
+            - $ref: '#/components/schemas/SentCopyStatus'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: [string, 'null']
+          format: date-time
+
+    OutboxListResponse:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/OutboxMessage' }
+
+    AttachmentMissingResponse:
+      type: object
+      required: [code, message, missingIds]
+      properties:
+        code:
+          type: string
+          const: ATTACHMENT_MISSING
+        message:
+          type: string
+        missingIds:
+          type: array
+          description: Requested upload ids that were not found.
+          items:
+            type: string
+            format: uuid
+
+    SaveDraftRequest:
+      type: object
+      required: [accountId, subject, text]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        identityId:
+          type: [string, 'null']
+          format: uuid
+        to:
+          type: string
+          maxLength: 20000
+          description: Address field as typed (may be incomplete); default empty.
+        cc:
+          type: string
+          maxLength: 20000
+        bcc:
+          type: string
+          maxLength: 20000
+        subject:
+          type: string
+          maxLength: 998
+          description: Line breaks are replaced by spaces.
+        text:
+          type: string
+          maxLength: 500000
+        inReplyTo:
+          oneOf:
+            - $ref: '#/components/schemas/MessageIdHeader'
+            - type: 'null'
+        references:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/MessageIdHeader' }
+        baseVersion:
+          type: integer
+          minimum: 0
+          description: Version the client edited; missing or 0 for a new draft.
+        force:
+          type: boolean
+          description: Overwrite even if the draft changed elsewhere (last write wins).
+        attachmentIds:
+          type: array
+          maxItems: 20
+          description: |
+            Complete list of uploads kept with the draft; uploads missing
+            here are released. Omitted = attachments unchanged. Unknown or
+            foreign ids are ignored.
+          items:
+            type: string
+            format: uuid
+
+    UploadedAttachment:
+      type: object
+      required: [id, filename, contentType, size]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          maxLength: 255
+        contentType:
+          type: string
+        size:
+          type: integer
+          minimum: 0
+          description: Bytes.
+
+    Draft:
+      type: object
+      required:
+        - id
+        - accountId
+        - identityId
+        - to
+        - cc
+        - bcc
+        - subject
+        - text
+        - inReplyTo
+        - references
+        - version
+        - createdAt
+        - updatedAt
+        - messageIds
+        - attachments
+      properties:
+        id:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        identityId:
+          type: [string, 'null']
+          format: uuid
+        to:
+          type: string
+        cc:
+          type: string
+        bcc:
+          type: string
+        subject:
+          type: string
+        text:
+          type: string
+        inReplyTo:
+          type: [string, 'null']
+        references:
+          type: array
+          items: { type: string }
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messageIds:
+          type: array
+          description: Local message ids of the draft's copy in the IMAP Drafts folder.
+          items:
+            type: string
+            format: uuid
+        attachments:
+          type: array
+          description: Uploads kept with the draft, in upload order.
+          items: { $ref: '#/components/schemas/UploadedAttachment' }
+        attachmentsSkipped:
+          type: integer
+          minimum: 1
+          description: Only when `POST /api/messages/{id}/draft` created the draft and not all attachments could be copied.
+
+    DraftListResponse:
+      type: object
+      required: [drafts]
+      properties:
+        drafts:
+          type: array
+          items: { $ref: '#/components/schemas/Draft' }
+
+    DraftConflictResponse:
+      type: object
+      required: [message, draft]
+      properties:
+        message:
+          type: string
+        draft:
+          $ref: '#/components/schemas/Draft'
+
+    CopyAttachmentsRequest:
+      type: object
+      required: [accountId]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          description: Account that receives the uploads.
+        includeInline:
+          type: boolean
+          default: false
+          description: Also copy inline raster images (png/jpeg/gif/webp).
+
+    CopyAttachmentsResponse:
+      type: object
+      required: [attachments, skipped]
+      properties:
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/UploadedAttachment' }
+        skipped:
+          type: integer
+          minimum: 0
+          description: Attachments not copied (size, count or pending limits).

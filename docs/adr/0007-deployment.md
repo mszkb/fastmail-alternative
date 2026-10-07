@@ -1,6 +1,6 @@
 # ADR-0007: Deployment
 
-- **Status:** Accepted
+- **Status:** Accepted, teilweise superseded by [ADR-0013](0013-php-backend.md) (Dienste `api`/`worker`/`postgres`, Shared Hosting als zusätzlicher Installationsweg)
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 1.3, 7.2
 

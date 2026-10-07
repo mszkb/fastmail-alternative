@@ -10,6 +10,7 @@ export default defineConfigWithVueTs(
       '**/.output/**',
       '**/coverage/**',
       '**/node_modules/**',
+      'apps/server-php/vendor/**',
       'e2e/test-results/**',
       'e2e/playwright-report/**',
     ],

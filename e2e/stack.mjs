@@ -6,7 +6,15 @@
 // Needs DATABASE_URL (a database this script may wipe) and GreenMail
 // reachable from the api/worker; MAIL_ALLOW_PRIVATE_HOSTS and
 // MAIL_INSECURE_TRANSPORT are set here because GreenMail has no TLS.
-import { spawn } from 'node:child_process'
+//
+// Other backends (ADR-0013, #96): API_CMD and WORKER_CMD replace the Node
+// api and worker. Both run through `sh -c` from the repository root; the
+// api command gets HOST and PORT in its environment and must listen there,
+// e.g. for the PHP backend:
+//   API_CMD='php apps/server-php/bin/migrate.php && exec php -S "$HOST:$PORT" -t apps/server-php/public apps/server-php/public/index.php'
+// WORKER_CMD may be empty (no worker). A non-PostgreSQL DATABASE_URL needs
+// DB_RESET_CMD, a shell command that empties the database.
+import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, request } from 'node:http'
@@ -19,15 +27,27 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const PUBLIC_DIR = join(ROOT, 'apps/web/.output/public')
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 4173)
 const API_PORT = Number(process.env.E2E_API_PORT ?? 3101)
+const API_CMD = process.env.API_CMD ?? 'exec node apps/api/dist/main.js'
+const WORKER_CMD = process.env.WORKER_CMD ?? 'exec node apps/worker/dist/main.js'
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required (the database is wiped)')
-for (const file of ['apps/api/dist/main.js', 'apps/worker/dist/main.js', 'apps/web/.output']) {
+const required = ['apps/web/.output']
+if (process.env.API_CMD === undefined) required.push('apps/api/dist/main.js')
+if (process.env.WORKER_CMD === undefined) required.push('apps/worker/dist/main.js')
+for (const file of required) {
   if (!existsSync(join(ROOT, file))) throw new Error(`${file} missing - run pnpm build first`)
 }
 
-const pool = new pg.Pool({ connectionString: databaseUrl })
-await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
-await pool.end()
+if (process.env.DB_RESET_CMD) {
+  const reset = spawnSync('sh', ['-c', process.env.DB_RESET_CMD], { cwd: ROOT, stdio: 'inherit' })
+  if (reset.status !== 0) throw new Error('DB_RESET_CMD failed')
+} else if (/^postgres(ql)?:/.test(databaseUrl)) {
+  const pool = new pg.Pool({ connectionString: databaseUrl })
+  await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public')
+  await pool.end()
+} else {
+  throw new Error('DB_RESET_CMD is required for a non-PostgreSQL DATABASE_URL')
+}
 
 const dataDir = mkdtempSync(join(tmpdir(), 'fma-e2e-'))
 const env = {
@@ -43,13 +63,15 @@ const env = {
   SYNC_MIN_INTERVAL_SECONDS: '0',
 }
 const children = [
-  spawn('node', ['apps/api/dist/main.js'], {
+  spawn('sh', ['-c', API_CMD], {
     cwd: ROOT,
     env: { ...env, HOST: '127.0.0.1', PORT: String(API_PORT) },
     stdio: 'inherit',
   }),
-  spawn('node', ['apps/worker/dist/main.js'], { cwd: ROOT, env, stdio: 'inherit' }),
 ]
+if (WORKER_CMD !== '') {
+  children.push(spawn('sh', ['-c', WORKER_CMD], { cwd: ROOT, env, stdio: 'inherit' }))
+}
 function stop() {
   for (const child of children) child.kill('SIGTERM')
   rmSync(dataDir, { recursive: true, force: true })

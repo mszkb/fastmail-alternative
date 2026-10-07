@@ -1,0 +1,102 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fma\Tests\Support;
+
+use Fma\Crypto\Backup;
+use Fma\Crypto\Envelope;
+
+/**
+ * Cross-implementation vectors (#99), same layout and cases as
+ * packages/crypto/test/php-compat.test.ts. Throwaway keys only.
+ */
+final class CryptoVectors
+{
+    public const FIXTURE_DIR = __DIR__ . '/../fixtures/';
+    public const MESSAGE_ID = '0b6f3c1e-8a2d-4c5b-9e7f-1a2b3c4d5e6f';
+    public const ACCOUNT_ID = '5f0e6d7c-1b2a-4938-8776-5a4b3c2d1e0f';
+    public const BACKUP_LENGTH = Backup::CHUNK_BYTES + 1000;
+
+    /** @return list<array{aad: string, plaintext: string}> */
+    public static function fieldCases(): array
+    {
+        $m = self::MESSAGE_ID;
+
+        return [
+            ['aad' => Envelope::messageFieldAad('subject', $m), 'plaintext' => 'Grüße aus Köln 🎉'],
+            ['aad' => Envelope::messageFieldAad('from', $m), 'plaintext' => '{"name":"Zoë","address":"zoe@example.org"}'],
+            ['aad' => Envelope::messageFieldAad('recipients', $m), 'plaintext' => '{"to":[{"address":"a@example.org"}]}'],
+            ['aad' => Envelope::messageFieldAad('snippet', $m), 'plaintext' => 'Vorschau – mit Gedankenstrich'],
+            ['aad' => Envelope::messageFieldAad('body', $m), 'plaintext' => '<p>Hallo&nbsp;Welt</p>'],
+            ['aad' => Envelope::messageFieldAad('text', $m), 'plaintext' => "Hallo Welt\r\n"],
+            ['aad' => Envelope::credentialAad(self::ACCOUNT_ID), 'plaintext' => '{"imapPassword":"pässwört"}'],
+            ['aad' => Envelope::outboxContentAad($m), 'plaintext' => '{"subject":"Ä"}'],
+            ['aad' => Envelope::draftContentAad($m), 'plaintext' => ''],
+            ['aad' => Envelope::uploadFieldAad('filename', $m), 'plaintext' => 'Rechnung März.pdf'],
+            ['aad' => Envelope::uploadFieldAad('content', $m), 'plaintext' => 'not used as field, still a valid context'],
+            ['aad' => Envelope::pushKeysAad('https://push.example.org/send/abc?x=1'), 'plaintext' => '{"p256dh":"k","auth":"a"}'],
+        ];
+    }
+
+    public static function patternBytes(int $length): string
+    {
+        $buf = '';
+        for ($i = 0; $i < $length; ++$i) {
+            $buf .= \chr(($i * 31 + 7) & 0xFF);
+        }
+
+        return $buf;
+    }
+
+    /** @return array<string, mixed> */
+    public static function generate(): array
+    {
+        $masterKey = '';
+        $dataKey = '';
+        for ($i = 0; $i < 32; ++$i) {
+            $masterKey .= \chr(($i * 7 + 3) & 0xFF);
+            $dataKey .= \chr((255 - $i * 5) & 0xFF);
+        }
+        $raw = self::patternBytes(1000);
+        $bytesAad = 'message.raw:' . self::MESSAGE_ID;
+
+        $in = fopen('php://memory', 'w+b');
+        $out = fopen('php://memory', 'w+b');
+        \assert($in !== false && $out !== false);
+        fwrite($in, self::patternBytes(self::BACKUP_LENGTH));
+        rewind($in);
+        Backup::encryptStream($masterKey, $in, $out);
+        rewind($out);
+        $backup = (string) stream_get_contents($out);
+
+        return [
+            'generator' => 'php',
+            'masterKey' => base64_encode($masterKey),
+            'keyId' => 'v1',
+            'wrappedDek' => Envelope::wrapDataKey($masterKey, $dataKey, 'v1'),
+            'dataKey' => base64_encode($dataKey),
+            'fields' => array_map(
+                static fn(array $c): array => $c + ['envelope' => Envelope::encryptField($dataKey, $c['plaintext'], $c['aad'])],
+                self::fieldCases(),
+            ),
+            'bytes' => [
+                'aad' => $bytesAad,
+                'plaintext' => base64_encode($raw),
+                'envelope' => base64_encode(Envelope::encryptBytes($dataKey, $raw, $bytesAad)),
+            ],
+            // Legacy raw-mail form: the bytes as a latin1 string (UTF-8 encoded) in a field envelope.
+            'legacyBytes' => [
+                'aad' => $bytesAad,
+                'plaintext' => base64_encode($raw),
+                'envelope' => Envelope::encryptField($dataKey, mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1'), $bytesAad),
+            ],
+            'hmac' => [
+                'context' => 'thread',
+                'value' => 'Re: Grüße',
+                'expected' => Envelope::hmacValue(Envelope::deriveHmacKey($dataKey, 'thread'), 'Re: Grüße'),
+            ],
+            'backup' => ['length' => self::BACKUP_LENGTH, 'envelope' => base64_encode($backup)],
+        ];
+    }
+}

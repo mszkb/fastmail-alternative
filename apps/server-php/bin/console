@@ -1,0 +1,103 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Maintenance commands (docs/operations/backup-restore.md):
+//   php bin/console backup create [--out=DIR]      default BACKUP_DIR or ./backups
+//   php bin/console backup verify FILE
+//   php bin/console backup restore FILE [--force]
+// Reads MASTER_KEY, MAIL_DATA_DIR, DATABASE_URL / DB_* and BACKUP_KEEP_DAYS
+// like the app. Prints only counts, sizes and the backup file name.
+
+use Fma\Backup\BackupException;
+use Fma\Backup\InstanceBackup;
+use Fma\Crypto\BackupDecryptException;
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$usage = "usage: php bin/console backup create [--out=DIR] | backup verify FILE | backup restore FILE [--force]\n";
+$args = array_slice($argv, 1);
+$options = array_values(array_filter($args, static fn(string $a): bool => str_starts_with($a, '--')));
+$positional = array_values(array_filter($args, static fn(string $a): bool => !str_starts_with($a, '--')));
+[$group, $command, $file] = $positional + ['', '', ''];
+if ($group !== 'backup' || !in_array($command, ['create', 'verify', 'restore'], true) || ($command !== 'create' && $file === '')) {
+    fwrite(STDERR, $usage);
+    exit(2);
+}
+
+$config = Fma\Config::load();
+$appDir = dirname(__DIR__);
+$describe = static fn(array $s): string => sprintf(
+    '%d rows in %d tables, %d files (%.1f MiB), %d migrations, created %s',
+    array_sum($s['tables']),
+    count($s['tables']),
+    $s['files'],
+    $s['bytes'] / 1048576,
+    count($s['migrations']),
+    $s['createdAt'],
+);
+
+$partial = null;
+try {
+    $backup = new InstanceBackup(
+        Fma\Db\Database::connect($config),
+        $config->get('MASTER_KEY'),
+        $config->get('MAIL_DATA_DIR', $appDir . '/data'),
+        $appDir . '/migrations',
+    );
+    if ($command === 'create') {
+        $out = '';
+        foreach ($options as $option) {
+            if (str_starts_with($option, '--out=')) {
+                $out = substr($option, 6);
+            }
+        }
+        $dir = $out !== '' ? $out : $config->get('BACKUP_DIR', $appDir . '/backups');
+        if (!is_dir($dir) && !@mkdir($dir, 0o700, true) && !is_dir($dir)) {
+            throw new BackupException('cannot create the backup directory');
+        }
+        $target = rtrim($dir, '/') . '/fma-backup-' . gmdate('Ymd-His') . '.fmabk';
+        $partial = $target . '.partial';
+        umask(0o077);
+        $handle = @fopen($partial, 'xb');
+        if ($handle === false) {
+            $partial = null;
+            throw new BackupException('cannot write the backup file');
+        }
+        try {
+            $summary = $backup->create($handle);
+        } finally {
+            fclose($handle);
+        }
+        if (!rename($partial, $target)) {
+            throw new BackupException('cannot rename the backup file');
+        }
+        $partial = null;
+        echo sprintf("backup written: %s (%.1f MiB)\n", basename($target), (int) filesize($target) / 1048576);
+        echo $describe($summary), "\n";
+        $deleted = InstanceBackup::prune($dir, (int) $config->get('BACKUP_KEEP_DAYS', '14'), $target);
+        if ($deleted > 0) {
+            echo "deleted {$deleted} backup(s) older than the retention period\n";
+        }
+    } elseif ($command === 'verify') {
+        $summary = $backup->verify($file);
+        echo 'backup ok: ', $describe($summary), "\n";
+    } else {
+        $summary = $backup->restore($file, in_array('--force', $options, true));
+        echo 'restore complete: ', $describe($summary), "\n";
+        $pending = $backup->pendingOutboxCount();
+        if ($pending > 0) {
+            fwrite(STDERR, "warning: {$pending} unsent outbox message(s) - they may already have been sent after this backup was taken; check them before the cron runner starts again\n");
+        }
+    }
+} catch (Throwable $e) {
+    if ($partial !== null) {
+        @unlink($partial);
+    }
+    // Our own errors carry no secrets or contents; anything else (driver
+    // errors may contain connection details) is reduced to its type.
+    $known = $e instanceof BackupException || $e instanceof BackupDecryptException;
+    fwrite(STDERR, 'backup failed: ' . ($known ? $e->getMessage() : $e::class . ' (' . $e->getCode() . ')') . "\n");
+    exit(1);
+}

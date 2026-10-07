@@ -1,0 +1,92 @@
+openapi: 3.1.0
+info:
+  title: fastmail-alternative API
+  version: 0.0.0
+  description: |
+    HTTP API of the self-hosted multi-account mail client (ADR-0008/0010,
+    ADR-0013). Contract for the PWA (`apps/web`), the Node backend
+    (`apps/api`) and the PHP backend (`apps/server-php`). All routes live
+    under `/api`. Authentication is a server-side session in the HttpOnly,
+    SameSite=Strict cookie `fma_session` (ADR-0004). State-changing
+    requests from browsers must be same-origin (`Sec-Fetch-Site` or
+    `Origin`), otherwise 403. Rate limits answer 429 with `Retry-After`.
+  license:
+    name: ISC
+servers:
+  - url: /
+security:
+  - session: []
+tags:
+  - name: system
+  - name: auth
+  - name: settings
+  - name: accounts
+  - name: identities
+  - name: folders
+  - name: messages
+  - name: compose
+  - name: push
+  - name: storage
+  - name: config
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: fma_session
+    metricsToken:
+      type: http
+      scheme: bearer
+      description: '`METRICS_TOKEN` from the server configuration'
+  schemas:
+    ErrorMessage:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: Human-readable text; never contains mail contents or credentials.
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+    Unauthorized:
+      description: Not authenticated (no or expired session)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+    Forbidden:
+      description: Cross-origin request rejected (CSRF protection)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+    NotFound:
+      description: Not found (or not owned by the current user)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+    Conflict:
+      description: Conflict with the current state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the next attempt
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorMessage' }
+paths: {}

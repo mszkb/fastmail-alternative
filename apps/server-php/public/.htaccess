@@ -1,0 +1,16 @@
+# Apache: route every request that is not an existing file to index.php.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # PHP-FPM/CGI drops the Authorization header (needed for /api/metrics).
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# Never serve hidden files.
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+
+Options -Indexes

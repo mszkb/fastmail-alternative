@@ -89,3 +89,16 @@ Das Format ist versioniert (`"format": "fma-config"`, `"version": 1`); eine Inst
 Konten, deren Mailadresse auf der Zielinstanz schon existiert, werden übersprungen – ein wiederholter Import ist also gefahrlos.
 
 Nicht übertragen werden: Mails (kommen vom Anbieter), der Postausgang, Geräte/Sitzungen und Push-Abos (je Gerät neu anmelden bzw. aktivieren) sowie der Login des Benutzers selbst.
+
+## Umstieg auf das PHP-Backend (PostgreSQL → MySQL/MariaDB)
+
+> **Vorschau** – das PHP-Backend ([ADR-0013](../adr/0013-php-backend.md), Epic #94) ist noch nicht vollständig. Diese Schritte beschreiben das Werkzeug aus #108; die endgültige Anleitung folgt mit der Umstellung (#110).
+
+Einmaliger Import einer bestehenden Installation (Node + PostgreSQL) in eine leere MySQL-/MariaDB-Datenbank. Ids und verschlüsselte Inhalte werden unverändert übernommen, deshalb **muss derselbe `MASTER_KEY`** gesetzt sein. Nötig ist die PHP-Erweiterung `pdo_pgsql` (im Docker-Image vorhanden; auf Shared Hosting den Import auf dem alten Server bzw. lokal ausführen).
+
+1. Alte Instanz stoppen bzw. nur noch lesen lassen und ein [Backup](backup-restore.md) erstellen.
+2. In `apps/server-php`: Konfiguration der neuen Datenbank und den bisherigen `MASTER_KEY` setzen, dann `php bin/migrate.php`.
+3. Import: `php bin/import-postgres.php postgres://BENUTZER:PASSWORT@HOST:5432/mail`. Danach entschlüsselt das Werkzeug zur Probe alle Zugangsdaten und Betreffzeilen; meldet es nicht lesbare Daten, ist der `MASTER_KEY` falsch – nichts weiter tun, Ziel-Datenbank leeren und mit dem richtigen Key wiederholen.
+4. Das Volume `mail-data` (Rohmails) unverändert an den neuen Ort kopieren.
+
+Übernommen werden alle Tabellen; erledigte Jobs nicht, laufende Jobs werden wieder eingereiht. IMAP-Flags und `References` landen in den MySQL-Ersatztabellen (siehe [Datenmodell](../architecture/data-model.md#mysqlmariadb-php-backend-adr-0013)).
