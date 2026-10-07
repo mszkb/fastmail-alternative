@@ -14,7 +14,7 @@ Self-hosted Fastmail-Alternative mit PWA. Hintergrund und Prinzipien: [`docs/pro
 Die GitHub-Labels `P0`/`P1`/`P2` entsprechen der Priorität hier. P0 ist bewusst auf wenige Issues begrenzt:
 
 1. 🟨 **#119** Sync sichtbar machen und stoppen (Fortschritt je Konto, Abbrechen) – schließt den offenen Teil von 4.8 (#74) mit ab; umgesetzt (PHP-Backend: Fortschritt in der `job`-Zeile, Migration 0004, `GET /api/sync/status`, kooperatives Stoppen; PWA: Sync-Panel neben „Aktualisieren“, Fallback auf `syncing` beim Node-Backend), offen: Abnahme auf echtem iOS-Gerät
-2. ⬜ **#120** App-Rahmen in voller Breite: Kontoleiste mit Initialen, Kopfzeile mit Suche, Profil-Menü (Epic #111)
+2. 🟨 **#120** App-Rahmen in voller Breite: Kontoleiste mit Initialen, Kopfzeile mit Suche, Profil-Menü (Epic #111) – umgesetzt: Kontoleiste (Initialen, Kontofarbe, Ungelesen-Badge, Fehlerpunkt, Sync-Ring aus #119, Drag & Drop, „Alle Konten“ nur bei aktivierter Einstellung, ein-/ausklappbar), Kopfzeile mit Suche im aktiven Konto, Hilfe und Profil-Menü (Einstellungen, Abmelden), mobil Seitenmenü und Vollbild-Suche; ganze App auf Tailwind CSS + daisyUI mit Dunkelmodus ([ADR-0014](docs/adr/0014-styling-tailwind-daisyui.md)); offen: Playwright-Lauf der angepassten Specs
 
 Danach (P1): #121 globale Suche über alle Konten, die übrigen Issues aus Epic #111 (#112–#117) und der Abschluss des PHP-Umstiegs (Epic #94).
 
