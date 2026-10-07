@@ -19,8 +19,31 @@
 // soon as it is back online; queued actions (utils/offline-queue.ts) are
 // replayed first, then the usual sync runs. Logout, an expired or revoked
 // session (401) or another user clear all offline data on this device.
-import { ForegroundSyncPolicy, SwipeBack, hasUnsavedInput, unreadBadgeCount } from '@fma/shared'
-import type { AccountListResponse, AccountSummary, UserSettings } from '@fma/shared'
+// Sync status (#119): after a refresh shows a sync, GET /api/sync/status is
+// polled every 2.5 s while any account's sync is queued, running or
+// stopping, and not afterwards; when an account's sync ends, the account
+// list is reloaded (the views refresh as in 4.5). "Stoppen" posts the
+// cancel and shows "wird gestoppt" right away. A backend without the
+// endpoint (404, the Node backend) keeps the 4.5 behavior: the state comes
+// from `syncing`, the account list is polled, there is no stop button.
+import {
+  ForegroundSyncPolicy,
+  SwipeBack,
+  finishedSyncs,
+  hasUnsavedInput,
+  isSyncActive,
+  nextSyncStatusPoll,
+  onlyQueuedSyncs,
+  syncStatusFromAccounts,
+  unreadBadgeCount,
+} from '@fma/shared'
+import type {
+  AccountListResponse,
+  AccountSummary,
+  AccountSyncStatus,
+  SyncStatusResponse,
+  UserSettings,
+} from '@fma/shared'
 import {
   clearOfflineData,
   cacheDeleteAccount,
@@ -78,6 +101,15 @@ let sessionVerified = false
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
+// Sync status (#119); supported: null = not asked yet, false = 404 (Node).
+const syncStatus = ref<AccountSyncStatus[]>([])
+const syncStatusSupported = ref<boolean | null>(null)
+let statusTimer: ReturnType<typeof setTimeout> | undefined
+let statusLoading = false
+// Bumped by a stop: a status response requested before it is outdated.
+let statusEpoch = 0
+// Since when all active syncs only wait (slower polling after a while).
+let onlyQueuedSince: number | null = null
 
 // Swipe navigation (4.9): a swipe to the right goes one step back
 // (message -> list, account form -> settings, settings -> mail). The
@@ -215,7 +247,18 @@ async function loadAccounts(): Promise<void> {
       await forgetRemovedAccounts(body.accounts)
       accounts.value = body.accounts
       void cachePut(ACCOUNTS_KEY, body.accounts, { pinned: true })
-      schedulePoll(body.accounts.some((a) => a.syncing))
+      const anySyncing = body.accounts.some((a) => a.syncing)
+      if (syncStatusSupported.value === false) {
+        syncStatus.value = syncStatusFromAccounts(body.accounts)
+        schedulePoll(anySyncing)
+      } else if (statusTimer !== undefined || statusLoading) {
+        // The status poll is running and reloads the list when a sync ends.
+      } else if (anySyncing || syncStatusSupported.value === null) {
+        void loadSyncStatus()
+      } else {
+        // Nothing syncing: the account list has all there is to show.
+        syncStatus.value = syncStatusFromAccounts(body.accounts)
+      }
     }
   } catch {
     offlineState.reachable = false
@@ -251,6 +294,81 @@ function schedulePoll(anySyncing: boolean): void {
 function stopPolling(): void {
   syncPolicy.stop()
   clearTimeout(pollTimer)
+  clearTimeout(statusTimer)
+  statusTimer = undefined
+}
+
+/**
+ * Sync state of all accounts (#119). Polls itself while a sync is active;
+ * reloads the account list for every account whose sync just ended.
+ */
+async function loadSyncStatus(): Promise<void> {
+  clearTimeout(statusTimer)
+  statusTimer = undefined
+  if (statusLoading || view.value !== 'app') return
+  statusLoading = true
+  const epoch = statusEpoch
+  try {
+    const res = await fetch('/api/sync/status')
+    if (res.status === 401) {
+      await handleUnauthorized()
+      return
+    }
+    if (res.status === 404) {
+      // Backend without the endpoint: fall back to `syncing` (4.5).
+      syncStatusSupported.value = false
+      syncStatus.value = syncStatusFromAccounts(accounts.value)
+      schedulePoll(accounts.value.some((a) => a.syncing))
+      return
+    }
+    if (!res.ok) return
+    const next = ((await res.json()) as SyncStatusResponse).accounts
+    syncStatusSupported.value = true
+    if (epoch !== statusEpoch) {
+      // Requested before a stop: ask again instead of showing the old state.
+      statusTimer = setTimeout(() => void loadSyncStatus(), 0)
+      return
+    }
+    const finished = finishedSyncs(syncStatus.value, next)
+    syncStatus.value = next
+    if (finished.length > 0) void loadAccounts()
+    if (!onlyQueuedSyncs(next)) onlyQueuedSince = null
+    else onlyQueuedSince ??= Date.now()
+    const delay = nextSyncStatusPoll(next, onlyQueuedSince ? Date.now() - onlyQueuedSince : 0)
+    if (delay !== null && document.visibilityState === 'visible') {
+      statusTimer = setTimeout(() => void loadSyncStatus(), delay)
+    }
+  } catch {
+    // Offline: keep the last state; the next foreground event asks again.
+  } finally {
+    statusLoading = false
+  }
+}
+
+/**
+ * "Stoppen" (#119) for one account or all: the state shows "wird
+ * gestoppt" at once (the spinner stops), then the status is polled until
+ * the running sync has ended.
+ */
+async function cancelSync(accountId: string | null): Promise<void> {
+  statusEpoch++
+  syncStatus.value = syncStatus.value.map((s) =>
+    (accountId === null || s.accountId === accountId) && isSyncActive(s)
+      ? { ...s, state: s.state === 'queued' ? 'idle' : 'cancelling' }
+      : s,
+  )
+  const path = accountId ? `/api/accounts/${accountId}/sync/cancel` : '/api/sync/cancel'
+  try {
+    const res = await fetch(path, { method: 'POST' })
+    if (res.status === 401) {
+      await handleUnauthorized()
+      return
+    }
+  } catch {
+    // Offline: the status request below restores the real state later.
+  }
+  statusEpoch++
+  await loadSyncStatus()
 }
 
 /**
@@ -273,7 +391,14 @@ async function syncNow(force = false): Promise<void> {
  */
 function onManualSync(): void {
   syncPolicy.trigger(true)
+  // Show the new sync at once, even before the account list reports it.
+  if (syncStatusSupported.value !== false) void loadSyncStatus()
   void loadAccounts()
+}
+
+/** Sync panel "Stoppen"/"Alle stoppen". */
+function onCancelSync(accountId: string | null): void {
+  void cancelSync(accountId)
 }
 
 /**
@@ -418,6 +543,7 @@ async function handleUnauthorized(): Promise<void> {
   await clearOffline()
   devices.value = []
   accounts.value = []
+  syncStatus.value = []
   currentEmail.value = ''
   view.value = 'login'
   info.value =
@@ -533,6 +659,7 @@ async function logout(): Promise<void> {
   password.value = ''
   devices.value = []
   accounts.value = []
+  syncStatus.value = []
   currentEmail.value = ''
   info.value = ''
   await loadStatus()
@@ -693,9 +820,12 @@ onBeforeUnmount(() => {
           ref="mailView"
           :accounts="accounts"
           :unified-inbox="unifiedEnabled"
+          :sync-status="syncStatus"
+          :sync-cancel-supported="syncStatusSupported === true"
           @open-unified="unifiedOpen = true"
           @edit-account="editAccount"
           @sync-requested="onManualSync"
+          @cancel-sync="onCancelSync"
         />
         <div v-else class="card">
           <p>Noch kein E-Mail-Konto verbunden.</p>

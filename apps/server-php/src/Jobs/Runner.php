@@ -22,6 +22,10 @@ use Fma\Log\Logger;
  *   port does not exist yet stay queued.
  * - A new job starts only while enough budget is left; handlers check the
  *   Deadline for long work.
+ * - Cancellation (#119): a handler that stopped on a cancel request throws
+ *   JobCancelledException; the job ends as 'cancelled', is not retried and
+ *   does not count as an account failure. Works the same for cron and the
+ *   long-running worker, both run jobs through here.
  */
 final class Runner
 {
@@ -117,6 +121,11 @@ final class Runner
                 $this->health->recordSuccess($job->accountId);
             }
             $this->logger->info('job done', $context);
+
+            return true;
+        } catch (JobCancelledException) {
+            $this->queue->markCancelled($job->id);
+            $this->logger->info('job cancelled', $context);
 
             return true;
         } catch (\Throwable $e) {

@@ -46,6 +46,12 @@
 // reload the list; app.vue then polls the account list while the sync runs,
 // and the view reloads again once it finished (same path as 4.5). Disabled
 // while offline.
+// Sync status (#119): the button spins while the active account's sync is
+// queued or running (GET /api/sync/status via app.vue, else `syncing`) and
+// stops at once when the sync is stopped; a progress line shows folder and
+// "done / total" under the header. SyncPanel next to the button lists all
+// accounts with progress, "Stoppen" and "Jetzt synchronisieren" - the
+// latter takes the same path as the button (same rate limit and notice).
 import {
   PullToRefresh,
   manualSyncNotice,
@@ -54,13 +60,17 @@ import {
   accountStatusInfo,
   createDraft,
   isStaleResponse,
+  isSyncBusy,
   mergeFirstPage,
   overlayPendingActions,
   parseSearchQuery,
   searchQueryString,
+  syncProgressText,
+  syncStatusFromAccounts,
 } from '@fma/shared'
 import type {
   AccountSummary,
+  AccountSyncStatus,
   AccountSyncState,
   ComposeDraft,
   ComposeIdentity,
@@ -101,11 +111,20 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
 
 // unifiedInbox: the opt-in unified inbox (3.7) is switched on; its entry
 // "Alle Posteingänge" then sits above the accounts (emit openUnified).
-const props = defineProps<{ accounts: AccountOption[]; unifiedInbox?: boolean }>()
+// syncStatus/syncCancelSupported (#119): state per account from app.vue;
+// without them (or on a backend without the status endpoint) the state is
+// derived from `syncing` and there is no stop button.
+const props = defineProps<{
+  accounts: AccountOption[]
+  unifiedInbox?: boolean
+  syncStatus?: AccountSyncStatus[]
+  syncCancelSupported?: boolean
+}>()
 const emit = defineEmits<{
   editAccount: [id: string]
   syncRequested: []
   openUnified: []
+  cancelSync: [accountId: string | null]
 }>()
 
 const SPECIAL_USE_LABELS: Record<string, string> = {
@@ -200,9 +219,25 @@ const accountScope = new RequestScope()
 const activeAccount = computed(() => props.accounts.find((a) => a.id === accountId.value) ?? null)
 const activeStatus = computed(() => (activeAccount.value ? statusInfo(activeAccount.value) : null))
 
-/** Manual sync (4.8): request in flight, or the account's sync still running. */
+/** Sync state of every account (#119), from the status endpoint or `syncing`. */
+const syncStatuses = computed(() =>
+  props.syncStatus?.length ? props.syncStatus : syncStatusFromAccounts(props.accounts),
+)
+const activeSyncStatus = computed(
+  () => syncStatuses.value.find((s) => s.accountId === accountId.value) ?? null,
+)
+/** Progress line of the active account's running sync. */
+const activeSyncProgress = computed(() => {
+  const status = activeSyncStatus.value
+  if (!status || !isSyncBusy(status)) return null
+  const folder = folders.value.find((f) => f.id === status.folderId)
+  return syncProgressText(status, folder ? folderLabel(folder) : null)
+})
+/** Manual sync (4.8): request in flight, or the account's sync still queued/running. */
 const manualSyncing = ref(false)
-const syncBusy = computed(() => manualSyncing.value || (activeAccount.value?.syncing ?? false))
+const syncBusy = computed(
+  () => manualSyncing.value || isSyncBusy(activeSyncStatus.value ?? undefined),
+)
 const pull = new PullToRefresh()
 const pullDistance = ref(0)
 const pullArmed = ref(false)
@@ -917,7 +952,11 @@ async function runAction(
  * skipped request still reloads; app.vue polls while the sync runs.
  */
 async function syncActiveAccount(): Promise<void> {
-  const id = accountId.value
+  await syncAccount(accountId.value)
+}
+
+/** Same path for the button and "Jetzt synchronisieren" in the sync panel. */
+async function syncAccount(id: string): Promise<void> {
   if (!id || manualSyncing.value) return
   if (isOffline.value) {
     showSyncNotice(manualSyncNotice('offline'))
@@ -933,7 +972,7 @@ async function syncActiveAccount(): Promise<void> {
     }
     showSyncNotice(manualSyncNotice(res.status))
     emit('syncRequested')
-    await refreshView()
+    if (id === accountId.value) await refreshView()
   } catch (err) {
     if (!isNetworkError(err)) throw err
     offlineState.reachable = false
@@ -1316,7 +1355,21 @@ onBeforeUnmount(() => {
         >
           <span aria-hidden="true">&#8635;</span>
         </button>
+        <SyncPanel
+          v-if="accountId"
+          :accounts="accounts"
+          :statuses="syncStatuses"
+          :can-cancel="syncCancelSupported ?? false"
+          :active-account-id="accountId"
+          :active-folders="folders"
+          :folder-label="folderLabel"
+          :disabled="isOffline"
+          @cancel="emit('cancelSync', $event)"
+          @sync="syncAccount"
+          @edit-account="emit('editAccount', $event)"
+        />
       </header>
+      <p v-if="activeSyncProgress" class="hint sync-progress">{{ activeSyncProgress }}</p>
       <div
         v-if="pullDistance > 0"
         class="pull-indicator"
@@ -1849,6 +1902,13 @@ h2 {
   .refresh.spinning span {
     animation: none;
   }
+}
+
+.sync-progress {
+  margin: 0.5rem 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sync-notice {

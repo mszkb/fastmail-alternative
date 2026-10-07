@@ -100,6 +100,24 @@ flowchart TD
 - Benachrichtigungen enthalten keinen Betreff, Absender oder Inhalt (Prinzip 4); die App lädt die Nachrichten erst nach dem Öffnen.
 - Abnahme auf einem echten iOS-Gerät steht noch aus (Roadmap 4.3).
 
+## 6. Sync beobachten und stoppen
+
+```mermaid
+flowchart TD
+  A["Liste: Ring neben „Aktualisieren“"] -- Tippen --> B["Panel „Synchronisierung“: je Konto Zustand"]
+  B -- "Sync läuft" --> C["„Posteingang – 1 240 / 8 000 Nachrichten“, Phase, Dauer, Fortschrittsbalken"]
+  C -- "„Stoppen“ / „Alle stoppen“" --> D["„Wird gestoppt …“, Drehen endet sofort"]
+  D -- "nach wenigen Sekunden" --> E["„Aktuell“ + „Jetzt synchronisieren“"]
+  E -- Tippen --> F["Gleicher Weg wie „Aktualisieren“ (30-s-Grenze, „Gerade aktualisiert.“)"]
+  B -- "Fehler" --> G["„Anmeldung fehlgeschlagen – Zugangsdaten prüfen“ + „Kontoeinstellungen öffnen“"]
+```
+
+- Der Ring dreht sich, solange ein Abgleich wartet oder läuft, und füllt sich mit dem Fortschritt des aktiven Kontos; ein roter Punkt zeigt ein Konto mit Fehler. Unter der Kopfzeile der Liste steht während des Abgleichs Ordner und Fortschritt des aktiven Kontos.
+- Gestoppt wird nur der laufende Abgleich: Bereits geladene Nachrichten bleiben, der nächste Abgleich setzt ohne Duplikate fort; der regelmäßige Abgleich startet das Konto zum nächsten Termin wieder. Andere Konten laufen weiter.
+- Die App fragt den Status nur ab, solange ein Abgleich läuft (alle 2,5 s). Ohne Status-Endpunkt (Node-Backend bis zur Umstellung #110) zeigt das Panel nur „Wird synchronisiert“/„Aktuell“, ohne „Stoppen“.
+- Statuswechsel werden Screenreadern angesagt (`aria-live`), der Fortschritt ist ein `progressbar`; Escape schließt das Panel.
+- Tests: `sync-panel.spec.ts`, `gestures.spec.ts`. Abnahme auf einem echten iOS-Gerät steht noch aus (#74).
+
 ## Offene Produktfragen
 
 Sync-Verhalten direkt nach dem Start und bei offener App: [offene-fragen.md](offene-fragen.md).

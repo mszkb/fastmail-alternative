@@ -25,7 +25,7 @@ use Fma\Security\RateLimiter;
  * 3. Outbox entries sent and settled or failed, after OUTBOX_RETENTION_DAYS.
  * 4. Expired sessions; push subscriptions disabled for 30 days; the PHP
  *    runtime tables rate_limit and login_lockout.
- * 5. Finished jobs after JOB_RETENTION_DAYS, failed ones after
+ * 5. Finished (done/cancelled) jobs after JOB_RETENTION_DAYS, failed ones after
  *    FAILED_JOB_RETENTION_DAYS; queued and running jobs are never touched.
  * 6. Volume scan: message directories without a message_body row pointing
  *    at them and directories of accounts that no longer exist, only when
@@ -132,7 +132,7 @@ final class CleanupJob implements JobHandler
         (new LoginLockout($this->db))->prune();
 
         // 5. Old jobs; queued/running stay.
-        $jobCondition = "(state = 'done' AND run_at < UTC_TIMESTAMP(6) - INTERVAL ? SECOND)
+        $jobCondition = "(state IN ('done', 'cancelled') AND run_at < UTC_TIMESTAMP(6) - INTERVAL ? SECOND)
             OR (state = 'failed' AND run_at < UTC_TIMESTAMP(6) - INTERVAL ? SECOND)";
         $jobParams = [$s['jobRetention'], $s['failedJobRetention']];
         $jobs = $this->deleteInBatches('job', "SELECT id FROM job WHERE {$jobCondition}", "({$jobCondition})", $jobParams, $deadline);

@@ -15,12 +15,18 @@ use Fma\Db\Database;
  *   account in auth_error/disabled or in backoff (next_retry_at);
  * - at most IMAP_MAX_CONNECTIONS_PER_HOST running jobs per IMAP host,
  *   counted in the database (no shared memory between PHP processes);
- * - retries with backoff 30 s * 2^(n-1), at most 1 h; 'failed' after 5.
+ * - retries with backoff 30 s * 2^(n-1), at most 1 h; 'failed' after 5;
+ * - cooperative cancellation of syncs (#119): queued sync jobs of an
+ *   account end as 'cancelled' at once, running ones get
+ *   cancel_requested_at and stop between batches (SyncProgress); a job
+ *   asked to cancel is never retried or re-queued.
  * Payloads hold ids only; last_error holds codes only.
  */
 final class JobQueue
 {
     public const MAX_ATTEMPTS = 5;
+    /** Job types that make up a sync (#119: progress, cancel, status). */
+    public const SYNC_TYPES = ['folder_sync', 'message_sync'];
     private const BACKOFF_BASE_SECONDS = 30;
     private const BACKOFF_MAX_SECONDS = 3600;
     /** Retry interval after a folder_sync ran out of attempts. */
@@ -104,10 +110,27 @@ final class JobQueue
         $this->run("UPDATE job SET state = 'done', last_error = NULL WHERE id = ?", [$jobId]);
     }
 
-    /** Retry with backoff while attempts remain, else terminal 'failed'. */
+    /** A job that stopped on a cancel request (#119); run_at records when. */
+    public function markCancelled(string $jobId): void
+    {
+        $this->run("UPDATE job SET state = 'cancelled', run_at = UTC_TIMESTAMP(6) WHERE id = ?", [$jobId]);
+    }
+
+    /** Progress reporter and cancel check of a running sync job. */
+    public function progress(string $jobId): SyncProgress
+    {
+        return new SyncProgress($this->db, $jobId);
+    }
+
+    /** Retry with backoff while attempts remain, else terminal 'failed'; a job asked to cancel ends 'cancelled'. */
     public function fail(Job $job, string $errorCode): void
     {
         $error = substr($errorCode, 0, 500);
+        if ($this->run('SELECT 1 FROM job WHERE id = ? AND cancel_requested_at IS NOT NULL', [$job->id])->fetchColumn() !== false) {
+            $this->run("UPDATE job SET state = 'cancelled', run_at = UTC_TIMESTAMP(6), last_error = ? WHERE id = ?", [$error, $job->id]);
+
+            return;
+        }
         if ($job->attempts >= self::MAX_ATTEMPTS) {
             // run_at records when the job finally failed (the CONDSTORE flag sync compares it).
             $this->run("UPDATE job SET state = 'failed', run_at = UTC_TIMESTAMP(6), last_error = ? WHERE id = ?", [$error, $job->id]);
@@ -134,18 +157,20 @@ final class JobQueue
         try {
             $rows = Database::run(
                 $pdo,
-                "SELECT id, type, account_id, payload, attempts FROM job
+                "SELECT id, type, account_id, payload, attempts, cancel_requested_at IS NOT NULL AS cancel FROM job
                  WHERE state = 'running' AND locked_at <= UTC_TIMESTAMP(6) - INTERVAL ? SECOND FOR UPDATE",
                 [$staleSeconds],
             )->fetchAll();
             $givenUp = [];
             foreach ($rows as $row) {
-                /** @var array{id: int|string, type: string, account_id: ?string, payload: string, attempts: int|string} $row */
+                /** @var array{id: int|string, type: string, account_id: ?string, payload: string, attempts: int|string, cancel: int|string} $row */
                 $failed = (int) $row['attempts'] >= self::MAX_ATTEMPTS;
+                // A lost job that was asked to cancel stays stopped.
+                $state = (int) $row['cancel'] === 1 ? 'cancelled' : ($failed ? 'failed' : 'queued');
                 Database::run(
                     $pdo,
                     "UPDATE job SET state = ?, last_error = IF(?, 'WORKER_LOST', last_error), run_at = UTC_TIMESTAMP(6), locked_at = NULL WHERE id = ?",
-                    [$failed ? 'failed' : 'queued', $failed ? 1 : 0, $row['id']],
+                    [$state, $failed ? 1 : 0, $row['id']],
                 );
                 if ($failed) {
                     $payload = json_decode($row['payload'], true);
@@ -205,6 +230,77 @@ final class JobQueue
                  AND JSON_UNQUOTE(JSON_EXTRACT(q.payload, '$.folderId')) = ?)",
             [$accountId, $folderId, $accountId, $folderId, $minIntervalSeconds, $accountId, $folderId],
         )->rowCount() > 0;
+    }
+
+    /**
+     * Cancels the syncs of an account (#119): queued sync jobs end as
+     * 'cancelled' (so the folder_sync -> message_sync chain stops), running
+     * ones are asked to stop. Locks the account row like chainUnlessCancelled(),
+     * so a running folder_sync cannot chain new jobs past the cancel.
+     *
+     * @return array{cancelledQueued: int, cancelling: bool}
+     */
+    public function cancelSyncs(string $accountId): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $types = "'" . implode("', '", self::SYNC_TYPES) . "'";
+            Database::run($pdo, 'SELECT 1 FROM mail_account WHERE id = ? FOR UPDATE', [$accountId]);
+            $queued = Database::run(
+                $pdo,
+                "UPDATE job SET state = 'cancelled', cancel_requested_at = UTC_TIMESTAMP(6), run_at = UTC_TIMESTAMP(6)
+                 WHERE account_id = ? AND state = 'queued' AND type IN ({$types})",
+                [$accountId],
+            )->rowCount();
+            Database::run(
+                $pdo,
+                "UPDATE job SET cancel_requested_at = UTC_TIMESTAMP(6)
+                 WHERE account_id = ? AND state = 'running' AND type IN ({$types}) AND cancel_requested_at IS NULL",
+                [$accountId],
+            );
+            $running = Database::run(
+                $pdo,
+                "SELECT 1 FROM job WHERE account_id = ? AND state = 'running' AND type IN ({$types}) LIMIT 1",
+                [$accountId],
+            )->fetchColumn() !== false;
+            $pdo->commit();
+
+            return ['cancelledQueued' => $queued, 'cancelling' => $running];
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Runs `$enqueue` (follow-up jobs of a running sync) unless the job was
+     * asked to cancel; serialized with cancelSyncs() by the account row
+     * lock, so nothing is chained after a cancel. Returns whether it ran.
+     *
+     * @param callable(): mixed $enqueue
+     */
+    public function chainUnlessCancelled(Job $job, callable $enqueue): bool
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            Database::run($pdo, 'SELECT 1 FROM mail_account WHERE id = ? FOR UPDATE', [$job->accountId]);
+            $cancel = Database::run($pdo, 'SELECT 1 FROM job WHERE id = ? AND cancel_requested_at IS NOT NULL', [$job->id])->fetchColumn() !== false;
+            if (!$cancel) {
+                $enqueue();
+            }
+            $pdo->commit();
+
+            return !$cancel;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /** Enqueues the periodic cleanup job unless one is pending or recent. */
