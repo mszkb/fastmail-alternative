@@ -132,7 +132,7 @@ select {
   flex: 1;
   min-width: 0;
   padding: 0.35rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
   font: inherit;
   font-size: 0.85rem;
@@ -141,12 +141,12 @@ select {
 .hint {
   margin: 0;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .error {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 </style>

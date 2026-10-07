@@ -5,6 +5,7 @@
 // account (emit `open`), so reading, actions and replies always use the
 // account the message belongs to. Online only: the list is not cached
 // offline; without a connection a hint is shown instead.
+import { accountColor } from '@fma/shared'
 import type {
   AccountSummary,
   MailPerson,
@@ -24,15 +25,13 @@ const loading = ref(false)
 const error = ref('')
 let request = 0
 
-/** Fixed palette; an account keeps its color by its position in the list. */
-const TAG_COLORS = ['#1273de', '#0e7c66', '#b44d12', '#7b3fbf', '#a3165a', '#4b5563']
-
+/** Same color per account as its icon in the account bar (#120). */
 const accountTags = computed(() => {
   const tags = new Map<string, { label: string; color: string; title: string }>()
-  props.accounts.forEach((account, index) => {
+  props.accounts.forEach((account) => {
     tags.set(account.id, {
       label: account.displayName,
-      color: TAG_COLORS[index % TAG_COLORS.length]!,
+      color: accountColor(account.id),
       title: account.emailAddress,
     })
   })
@@ -139,7 +138,7 @@ onMounted(() => void load())
 .unified {
   max-width: 60rem;
   margin: 0 auto;
-  background: #fff;
+  background: var(--color-base-100);
   border-radius: 8px;
 }
 
@@ -148,7 +147,7 @@ onMounted(() => void load())
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 1rem;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
 }
 
 .header h2 {
@@ -168,7 +167,7 @@ onMounted(() => void load())
   width: 100%;
   padding: 0.6rem 1rem;
   border: none;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -177,7 +176,7 @@ onMounted(() => void load())
 }
 
 .item:hover {
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 .row {
@@ -210,7 +209,7 @@ onMounted(() => void load())
 .date {
   flex-shrink: 0;
   font-size: 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .account-tag {
@@ -221,6 +220,7 @@ onMounted(() => void load())
   white-space: nowrap;
   padding: 0 0.4rem;
   border-radius: 999px;
+  /* Background: the account color (accountColor), white text is AA on all. */
   color: #fff;
   font-size: 0.7rem;
   line-height: 1.4;
@@ -229,7 +229,7 @@ onMounted(() => void load())
 .snippet {
   display: block;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .hint,

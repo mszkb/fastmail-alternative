@@ -1675,29 +1675,29 @@ onBeforeUnmount(() => {
   grid-template-columns: 14rem minmax(18rem, 24rem) 1fr;
   height: calc(100vh - 7rem);
   min-height: 24rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #fff;
+  background: var(--color-base-100);
   overflow: hidden;
 }
 
 .sidebar,
 .list {
-  border-right: 1px solid #e4e9ee;
+  border-right: 1px solid var(--color-base-300);
   overflow-y: auto;
 }
 
 .sidebar {
   padding: 0.75rem 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 select {
   width: 100%;
   padding: 0.45rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
-  background: #fff;
+  background: var(--color-base-100);
   font: inherit;
 }
 
@@ -1709,7 +1709,7 @@ select {
 .accounts {
   margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .account {
@@ -1730,12 +1730,12 @@ select {
 }
 
 .account:hover {
-  background: #e4e9ee;
+  background: var(--color-base-300);
 }
 
 .account.active {
-  background: #1f2933;
-  color: #fff;
+  background: var(--color-neutral);
+  color: var(--color-neutral-content);
 }
 
 .status-badge {
@@ -1744,14 +1744,14 @@ select {
   margin-right: 0.3rem;
   padding: 0 0.4rem;
   border-radius: 999px;
-  background: #b45309;
-  color: #fff;
+  background: var(--color-warning);
+  color: var(--color-warning-content);
   font-size: 0.75rem;
   font-weight: 700;
 }
 
 .status-badge.auth_error {
-  background: #cf1124;
+  background: var(--color-error);
 }
 
 .account-status {
@@ -1761,17 +1761,17 @@ select {
   gap: 0.35rem;
   margin: 0.75rem 1rem;
   padding: 0.6rem 0.75rem;
-  border: 1px solid #f5c26b;
+  border: 1px solid var(--fma-warning-border);
   border-radius: 0.375rem;
-  background: #fffbeb;
-  color: #7c2d12;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
   font-size: 0.85rem;
 }
 
 .account-status button.secondary {
   padding: 0.25rem 0.6rem;
-  border-color: #7c2d12;
-  color: #7c2d12;
+  border-color: var(--fma-warning-text);
+  color: var(--fma-warning-text);
   font-size: 0.85rem;
 }
 
@@ -1783,10 +1783,10 @@ select {
 
 button.primary {
   padding: 0.45rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
@@ -1813,18 +1813,18 @@ button.primary {
 }
 
 .folder:hover:not(:disabled) {
-  background: #e4e9ee;
+  background: var(--color-base-300);
 }
 
 /* Container without messages (IMAP \Noselect, e.g. "[Gmail]"). */
 .folder:disabled {
-  color: #6b7785;
+  color: var(--fma-muted);
   cursor: default;
 }
 
 .folder.active {
-  background: #dbeafe;
-  color: #0b4f9c;
+  background: var(--fma-primary-soft);
+  color: var(--color-primary);
 }
 
 .folder-name {
@@ -1837,8 +1837,8 @@ button.primary {
   margin-left: 0.4rem;
   padding: 0 0.45rem;
   border-radius: 999px;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font-size: 0.75rem;
 }
 
@@ -1849,8 +1849,8 @@ button.primary {
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e4e9ee;
-  background: #fff;
+  border-bottom: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
 }
 
 h2 {
@@ -1873,10 +1873,10 @@ h2 {
   width: 2.25rem;
   height: 2.25rem;
   padding: 0;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
-  background: #fff;
-  color: #1f2d3d;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
   font-size: 1.15rem;
   line-height: 1;
   cursor: pointer;
@@ -1920,7 +1920,7 @@ h2 {
   align-items: flex-end;
   justify-content: center;
   overflow: hidden;
-  color: #52606d;
+  color: var(--fma-muted);
   font-size: 0.85rem;
 }
 
@@ -1935,7 +1935,7 @@ h2 {
   width: 100%;
   padding: 0.6rem 1rem;
   border: none;
-  border-bottom: 1px solid #eef2f6;
+  border-bottom: 1px solid var(--color-base-200);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1944,11 +1944,11 @@ h2 {
 }
 
 .item:hover {
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 .item.active {
-  background: #dbeafe;
+  background: var(--fma-primary-soft);
 }
 
 .row {
@@ -1981,7 +1981,7 @@ h2 {
   height: 0.45rem;
   margin-right: 0.4rem;
   border-radius: 50%;
-  background: #1273de;
+  background: var(--color-primary);
   vertical-align: middle;
 }
 
@@ -1989,11 +1989,11 @@ h2 {
 .icons {
   flex-shrink: 0;
   font-size: 0.75rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .flagged {
-  color: #cf1124;
+  color: var(--color-error);
 }
 
 .subject {
@@ -2003,7 +2003,7 @@ h2 {
 .snippet {
   display: block;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .more {
@@ -2013,10 +2013,10 @@ h2 {
 
 button.secondary {
   padding: 0.4rem 0.8rem;
-  border: 1px solid #1273de;
+  border: 1px solid var(--color-primary);
   border-radius: 0.375rem;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   cursor: pointer;
 }
@@ -2033,7 +2033,7 @@ button.secondary {
 
 .search {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .search-row {
@@ -2046,7 +2046,7 @@ button.secondary {
   flex: 1;
   min-width: 0;
   padding: 0.35rem 0.5rem;
-  border: 1px solid #cbd2d9;
+  border: 1px solid var(--fma-border);
   border-radius: 0.375rem;
   font: inherit;
 }
@@ -2054,7 +2054,7 @@ button.secondary {
 .search button.link {
   border: none;
   background: transparent;
-  color: #1273de;
+  color: var(--color-primary);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
@@ -2072,7 +2072,7 @@ button.secondary {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .search-options label.check {
@@ -2084,7 +2084,7 @@ button.secondary {
 .search-options input[type='text'],
 .search-options input[type='date'] {
   padding: 0.3rem 0.4rem;
-  border: 1px solid #cbd2d9;
+  border: 1px solid var(--fma-border);
   border-radius: 0.375rem;
   font: inherit;
 }
@@ -2097,18 +2097,18 @@ button.secondary {
 .search-summary {
   margin: 0;
   padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .hit-folder {
   margin-right: 0.35rem;
   padding: 0 0.3rem;
   border-radius: 0.25rem;
-  background: #eef2f6;
+  background: var(--color-base-200);
   font-size: 0.75rem;
-  color: #323f4b;
+  color: var(--color-base-content);
 }
 
 .toolbar {
@@ -2126,13 +2126,13 @@ button.secondary {
 }
 
 .toolbar button.is-flagged {
-  border-color: #cf1124;
-  color: #cf1124;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .toolbar button.danger {
-  border-color: #9b1c1c;
-  color: #9b1c1c;
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .toolbar .move select {
@@ -2146,27 +2146,27 @@ button.secondary {
   min-width: 1.1rem;
   margin-right: 0.25rem;
   padding: 0 0.3rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 999px;
-  color: #3e4c59;
+  color: var(--fma-muted);
   text-align: center;
 }
 
 .thread-info {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .thread-message.in-thread {
   margin-bottom: 0.6rem;
   padding: 0.25rem 0.75rem 0.5rem;
-  border: 1px solid #e4e9ee;
+  border: 1px solid var(--color-base-300);
   border-radius: 0.375rem;
 }
 
 .thread-message.opened {
-  border-color: #93c5fd;
+  border-color: var(--fma-primary-soft);
 }
 
 .thread-toggle {
@@ -2196,12 +2196,12 @@ button.secondary {
   gap: 0.2rem 0.75rem;
   margin: 0 0 1rem;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
   font-size: 0.85rem;
 }
 
 .headers dt {
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .headers dd {
@@ -2212,7 +2212,7 @@ button.secondary {
 .hint {
   margin: 0.75rem 1rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .hint.center,
@@ -2223,7 +2223,7 @@ button.secondary {
 .error {
   margin: 0.75rem 1rem;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 
 .visually-hidden {

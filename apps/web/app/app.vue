@@ -914,8 +914,8 @@ onBeforeUnmount(() => {
   height: 2.5rem;
   margin-top: -1.25rem;
   border-radius: 50%;
-  background: #e4e9ee;
-  color: #52606d;
+  background: var(--color-base-300);
+  color: var(--fma-muted);
   font-size: 1.2rem;
   opacity: 0.7;
   pointer-events: none;
@@ -925,8 +925,8 @@ onBeforeUnmount(() => {
 }
 
 .swipe-indicator.armed {
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   opacity: 1;
 }
 
@@ -942,7 +942,7 @@ onBeforeUnmount(() => {
   margin: 3rem auto;
   padding: 0 1rem;
   font-family: system-ui, sans-serif;
-  color: #1f2933;
+  color: var(--color-base-content);
 }
 
 .shell.wide {
@@ -971,12 +971,12 @@ button.tab {
   padding: 0.4rem 0.9rem;
   white-space: nowrap;
   background: transparent;
-  color: #3e4c59;
+  color: var(--fma-muted);
 }
 
 button.tab.active {
-  background: #e4e9ee;
-  color: #1f2933;
+  background: var(--color-base-300);
+  color: var(--color-base-content);
   font-weight: 600;
 }
 
@@ -988,13 +988,13 @@ button.tab.active {
 }
 
 .tag.offline {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .tag.pending {
-  background: #fff3c4;
-  color: #8d2b0b;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
 }
 
 .status .tag {
@@ -1019,7 +1019,7 @@ button.tab.active {
 button.link {
   padding: 0.2rem 0.5rem;
   background: transparent;
-  color: #046c4e;
+  color: var(--color-success);
   font-weight: 600;
 }
 
@@ -1027,7 +1027,7 @@ button.link {
   min-width: 0;
   overflow: hidden;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1036,9 +1036,9 @@ button.link {
   display: block;
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -1055,7 +1055,7 @@ h2 {
 .hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .form label {
@@ -1069,7 +1069,7 @@ h2 {
   width: 100%;
   margin-top: 0.25rem;
   padding: 0.5rem;
-  border: 1px solid #b8c2cc;
+  border: 1px solid var(--fma-border-strong);
   border-radius: 0.375rem;
   box-sizing: border-box;
   font: inherit;
@@ -1079,8 +1079,8 @@ button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }
@@ -1102,7 +1102,7 @@ button:disabled {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0;
-  border-bottom: 1px solid #e4e9ee;
+  border-bottom: 1px solid var(--color-base-300);
 }
 
 .devices li:last-child {
@@ -1114,14 +1114,14 @@ button:disabled {
   margin-left: 0.4rem;
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
-  background: #e4e9ee;
+  background: var(--color-base-300);
   font-size: 0.75rem;
-  color: #3e4c59;
+  color: var(--fma-muted);
 }
 
 .tag.current {
-  background: #d9f2e4;
-  color: #147d46;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 
 .message {
@@ -1131,12 +1131,12 @@ button:disabled {
 }
 
 .message.error {
-  background: #fde8e8;
-  color: #9b1c1c;
+  background: var(--fma-error-soft);
+  color: var(--color-error);
 }
 
 .message.info {
-  background: #def7ec;
-  color: #046c4e;
+  background: var(--fma-success-soft);
+  color: var(--color-success);
 }
 </style>

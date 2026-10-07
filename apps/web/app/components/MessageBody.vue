@@ -157,10 +157,10 @@ watch(
   flex: 1;
   margin: 0;
   padding: 0.4rem 0.6rem;
-  border: 1px solid #e4d9a8;
+  border: 1px solid var(--fma-warning-border);
   border-radius: 4px;
-  background: #fdf8e4;
-  color: #52430d;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
 }
 
 .toggle {
@@ -171,7 +171,7 @@ watch(
   padding: 0;
   border: none;
   background: none;
-  color: #1d4ed8;
+  color: var(--color-primary);
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
@@ -183,7 +183,7 @@ watch(
   min-height: 12rem;
   overflow: hidden;
   resize: vertical;
-  border: 1px solid #e4e9ee;
+  border: 1px solid var(--color-base-300);
   border-radius: 4px;
 }
 
@@ -192,7 +192,7 @@ watch(
   width: 100%;
   height: 100%;
   border: 0;
-  background: #fff;
+  background: var(--color-base-100);
 }
 
 .body {
@@ -207,6 +207,6 @@ watch(
 .hint {
   margin: 0.75rem 0;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 </style>

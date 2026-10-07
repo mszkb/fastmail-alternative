@@ -138,9 +138,9 @@ onMounted(() => {
 .card {
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
-  border: 1px solid #d5dde5;
+  border: 1px solid var(--fma-border);
   border-radius: 0.5rem;
-  background: #f7f9fb;
+  background: var(--color-base-200);
 }
 
 h2 {
@@ -166,13 +166,13 @@ li {
 .hint {
   margin: 0.25rem 0 0.5rem;
   font-size: 0.85rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .ok {
   margin: 0 0 0.5rem;
   font-size: 0.9rem;
-  color: #147d46;
+  color: var(--color-success);
 }
 
 details {
@@ -182,15 +182,15 @@ details {
 
 summary {
   cursor: pointer;
-  color: #1273de;
+  color: var(--color-primary);
 }
 
 button {
   padding: 0.5rem 1rem;
   border: none;
   border-radius: 0.375rem;
-  background: #1273de;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
   font: inherit;
   cursor: pointer;
 }

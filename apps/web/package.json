@@ -13,10 +13,14 @@
   },
   "dependencies": {
     "@fma/shared": "workspace:*",
+    "@tabler/icons-vue": "^3.49.0",
     "nuxt": "^4.5.2",
     "vue": "^3.5.43"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "daisyui": "^5.7.47",
+    "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
     "vue-tsc": "^3.3.12"
   }

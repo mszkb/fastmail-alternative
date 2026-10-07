@@ -118,8 +118,8 @@ defineExpose({ reload, messageIds })
 
 <style scoped>
 .drafts {
-  border-bottom: 1px solid #e4e9ee;
-  background: #fffdf5;
+  border-bottom: 1px solid var(--color-base-300);
+  background: var(--fma-warning-soft);
 }
 
 h3 {
@@ -127,7 +127,7 @@ h3 {
   padding: 0.5rem 0.75rem 0.25rem;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #8a6d1d;
+  color: var(--fma-warning-text);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -141,7 +141,7 @@ ul {
 li {
   display: flex;
   align-items: stretch;
-  border-top: 1px solid #f3ead0;
+  border-top: 1px solid var(--fma-warning-border);
 }
 
 .draft {
@@ -159,7 +159,7 @@ li {
 }
 
 .draft:hover {
-  background: #fff6db;
+  background: var(--fma-warning-soft);
 }
 
 .row {
@@ -182,12 +182,12 @@ li {
 .date {
   flex: none;
   font-size: 0.8rem;
-  color: #52606d;
+  color: var(--fma-muted);
 }
 
 .subject {
   font-size: 0.9rem;
-  color: #323f4b;
+  color: var(--color-base-content);
 }
 
 .remove {
@@ -195,7 +195,7 @@ li {
   width: 2.25rem;
   border: none;
   background: transparent;
-  color: #9b1c1c;
+  color: var(--color-error);
   font-size: 1.2rem;
   cursor: pointer;
 }
@@ -203,6 +203,6 @@ li {
 .error {
   margin: 0 0.75rem 0.5rem;
   font-size: 0.85rem;
-  color: #9b1c1c;
+  color: var(--color-error);
 }
 </style>
