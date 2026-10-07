@@ -15,7 +15,7 @@ Ziel aus Epic #111: Wer von Fastmail kommt, findet sich sofort zurecht. Dafür �
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------- |
 | Volle Fensterbreite, durchgehende Kopfzeile     | App-Rahmen mit Kopfzeile (Name, Suche, Hilfe, Profil-Menü)                                               | #120       |
 | Schmale Leiste ganz links zum Wechseln          | Kontoleiste: ein Initialen-Icon je **Konto** (statt je App), Badge, Fehlerpunkt, Sync-Ring               | #120, #119 |
-| Ordner \| Liste \| Lesebereich                  | Dreispaltig auf breiten Bildschirmen; umschaltbar auf zweispaltig folgt                                  | #113       |
+| Ordner \| Liste \| Lesebereich                  | Dreispaltig auf breiten Bildschirmen; Lesebereich rechts/unten/aus, Spaltenbreiten ziehbar               | #113       |
 | Kompakte Liste mit Absender, Betreff, Vorschau  | Zeile mit Absender, Datum, Betreff, Symbolen, Vorschau; Dichte „Kompakt“ ohne Vorschauzeile              | #114, #112 |
 | Gruppierung nach Datum                          | „Heute / Gestern / Diese Woche / Älter“                                                                  | #114       |
 | Mehrfachauswahl und Aktionen beim Überfahren    | Checkbox, Shift-Klick, `x`; Auswahlleiste; Archivieren/Löschen/Gelesen/Markieren beim Überfahren         | #114       |
