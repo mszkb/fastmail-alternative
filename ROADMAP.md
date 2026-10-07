@@ -18,6 +18,12 @@ Die GitHub-Labels `P0`/`P1`/`P2` entsprechen der Priorität hier. P0 ist bewusst
 
 Danach (P1): #121 globale Suche über alle Konten, die übrigen Issues aus Epic #111 (#112–#117) und der Abschluss des PHP-Umstiegs (Epic #94).
 
+Epic #111 (vertraute Oberfläche), Stand im Sammelbranch `feature/epic-111-batch`:
+
+- 🟨 **#117** Anbieter-Vorlagen in „Konto hinzufügen“ (Fastmail mit App-Passwort u. a.) und Karte „Erste Schritte“ – offen: Verbindungstest mit echtem Fastmail-Konto
+- 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – offen: Playwright-Lauf (`keyboard.spec.ts`)
+- 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – offen: Playwright-Lauf (`multi-select.spec.ts`)
+
 ## Milestones
 
 | Milestone                 | Umfang     | Ziel                                                                                              |
