@@ -21,10 +21,24 @@ export function parseUndoSendSeconds(value: unknown): UndoSendSeconds {
   return (UNDO_SEND_CHOICES as readonly number[]).includes(number) ? (number as UndoSendSeconds) : 5
 }
 
-/** The entry being typed: text after the last comma or semicolon. */
+/** Index of the last comma/semicolon outside a quoted name (-1: none). */
+function lastSeparator(field: string): number {
+  let quoted = false
+  let index = -1
+  for (let i = 0; i < field.length; i++) {
+    const char = field[i]
+    if (char === '"') quoted = !quoted
+    else if (!quoted && (char === ',' || char === ';')) index = i
+  }
+  return index
+}
+
+/** The entry being typed: text after the last separator, without quotes. */
 export function currentRecipientToken(field: string): string {
-  const parts = field.split(/[,;]/)
-  return (parts[parts.length - 1] ?? '').trim()
+  return field
+    .slice(lastSeparator(field) + 1)
+    .replace(/"/g, '')
+    .trim()
 }
 
 /** Distinct people by address (case-insensitive), the first name wins. */
@@ -60,6 +74,7 @@ export function suggestRecipients(field: string, known: MailPerson[], limit = 6)
     .filter(
       (person) =>
         person.address.toLowerCase().startsWith(token) ||
+        person.name.toLowerCase().startsWith(token) ||
         person.name
           .toLowerCase()
           .split(/\s+/)
@@ -77,7 +92,7 @@ export function formatRecipient(person: MailPerson): string {
 
 /** Replaces the entry being typed with the chosen person, ready for the next. */
 export function applyRecipientSuggestion(field: string, person: MailPerson): string {
-  const index = Math.max(field.lastIndexOf(','), field.lastIndexOf(';'))
+  const index = lastSeparator(field)
   const head = index >= 0 ? `${field.slice(0, index + 1).trimEnd()} ` : ''
   return `${head}${formatRecipient(person)}, `
 }

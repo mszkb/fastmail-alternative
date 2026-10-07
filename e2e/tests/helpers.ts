@@ -147,8 +147,23 @@ export async function createFolder(mailbox: string, name: string): Promise<void>
   socket.write(`a1 LOGIN "${mailbox}" "${mailbox}"\r\n`)
   await waitFor(/^a1 OK/m)
   socket.write(`a2 CREATE "${name}"\r\n`)
-  await waitFor(/^a2 (OK|NO)/m)
-  socket.end('a3 LOGOUT\r\n')
+  await waitFor(/^a2 (OK|NO|BAD)/m)
+  const created = /^a2 OK/m.test(buffer)
+  // NO is fine only when the folder exists already.
+  if (!created) {
+    socket.write(`a3 LIST "" "${name}"\r\n`)
+    await waitFor(/^a3 (OK|NO|BAD)/m)
+  }
+  socket.end('a4 LOGOUT\r\n')
+  const listed = buffer
+    .split('\r\n')
+    .some(
+      (line) =>
+        /^\* LIST /.test(line) && (line.endsWith(` "${name}"`) || line.endsWith(` ${name}`)),
+    )
+  if (!created && !listed) {
+    throw new Error(`IMAP CREATE ${name} failed: ${buffer.match(/^a2 .*$/m)?.[0] ?? ''}`)
+  }
 }
 
 /**

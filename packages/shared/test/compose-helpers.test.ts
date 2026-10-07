@@ -45,6 +45,15 @@ describe('recipient suggestions', () => {
       '"Müller, Hans" <h@m.de>, ',
     )
   })
+
+  it('keeps separators inside a quoted name in the typed entry', () => {
+    const hans = { name: 'Müller, Hans', address: 'h@m.de' }
+    expect(currentRecipientToken('a@b.de, "Müller, Ha')).toBe('Müller, Ha')
+    expect(suggestRecipients('a@b.de, "Müller, Ha', [hans])).toEqual([hans])
+    expect(applyRecipientSuggestion('a@b.de, "Müller, Ha', hans)).toBe(
+      'a@b.de, "Müller, Hans" <h@m.de>, ',
+    )
+  })
 })
 
 describe('undo send', () => {

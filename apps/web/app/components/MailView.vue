@@ -2506,7 +2506,8 @@ button.secondary {
 /* Layout (#113), wide screens: reading pane below the list or off. */
 .mail.reading-bottom {
   grid-template-columns: var(--folders-w, 14rem) minmax(0, 1fr);
-  grid-template-rows: var(--list-h, 20rem) minmax(0, 1fr);
+  /* A stored height never pushes the message out of a short window. */
+  grid-template-rows: minmax(0, min(var(--list-h, 20rem), 50%)) minmax(0, 1fr);
   grid-template-areas:
     'side list'
     'side detail';

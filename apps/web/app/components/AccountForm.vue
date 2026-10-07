@@ -13,6 +13,7 @@ import {
   presetForAddress,
   syncSinceFromDays,
 } from '@fma/shared'
+import type { ProviderPreset } from '@fma/shared'
 
 interface EditableAccount {
   id: string
@@ -86,6 +87,17 @@ function applyPreset(): void {
   samePassword.value = true
 }
 
+/**
+ * The address no longer matches the auto-detected provider: drop it and
+ * its server values (those still as the preset filled them).
+ */
+function clearAutoPreset(previous: ProviderPreset): void {
+  const fields = presetFields(previous, '')
+  if (imapHost.value === fields.imapHost) imapHost.value = ''
+  if (smtpHost.value === fields.smtpHost) smtpHost.value = ''
+  presetId.value = ''
+}
+
 function onPresetChange(): void {
   presetChosenByUser = true
   applyPreset()
@@ -98,6 +110,8 @@ function onAddressChange(): void {
   if (detected && !presetChosenByUser && presetId.value !== detected.id) {
     presetId.value = detected.id
     applyPreset()
+  } else if (!detected && !presetChosenByUser && preset.value) {
+    clearAutoPreset(preset.value)
   } else if (preset.value && (!imapUser.value || imapUser.value.includes('@'))) {
     imapUser.value = emailAddress.value.trim()
   }
