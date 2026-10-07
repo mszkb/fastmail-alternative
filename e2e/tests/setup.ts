@@ -3,17 +3,19 @@ import { expect, test as setup } from '@playwright/test'
 import {
   ACCOUNT_A,
   ACCOUNT_B,
-  MAILBOX_A,
-  MAILBOX_B,
-  SETUP_CODE,
-  USER,
   appendOld,
   deliver,
   imapPort,
+  MAILBOX_A,
+  MAILBOX_B,
   mailHost,
+  openSettings,
+  profileButton,
   richMail,
+  SETUP_CODE,
   smtpPort,
   textMail,
+  USER,
 } from './helpers'
 
 setup('first-run setup, login and two accounts', async ({ page }) => {
@@ -44,11 +46,13 @@ setup('first-run setup, login and two accounts', async ({ page }) => {
     await page.getByLabel('Passwort', { exact: true }).fill(USER.password)
     await page.getByRole('button', { name: 'Anmelden' }).click()
   }
-  await expect(page.getByRole('button', { name: 'Einstellungen' })).toBeVisible()
+  await expect(profileButton(page)).toBeVisible()
 
-  // Logout and login again (incl. a wrong password).
-  await page.getByRole('button', { name: 'Einstellungen' }).click()
-  await page.getByRole('button', { name: 'Abmelden' }).first().click()
+  // Settings and logout via the profile menu (#120), then login again (incl. a
+  // wrong password).
+  await openSettings(page)
+  await profileButton(page).click()
+  await page.getByRole('menuitem', { name: 'Abmelden' }).click()
   await expect(loginForm).toBeVisible()
   await page.getByLabel('E-Mail').fill(USER.email)
   await page.getByLabel('Passwort', { exact: true }).fill('not-the-password')
@@ -57,14 +61,14 @@ setup('first-run setup, login and two accounts', async ({ page }) => {
   await page.getByLabel('Passwort', { exact: true }).fill(USER.password)
   await page.getByLabel('Gerätename (optional)').fill('E2E Handy')
   await page.getByRole('button', { name: 'Anmelden' }).click()
-  await expect(page.getByRole('button', { name: 'Einstellungen' })).toBeVisible()
+  await expect(profileButton(page)).toBeVisible()
 
   // Accounts via the settings form; B only syncs the last 30 days.
   for (const [mailbox, name, since] of [
     [MAILBOX_A, ACCOUNT_A, 'Alle'],
     [MAILBOX_B, ACCOUNT_B, '30 Tage'],
   ] as const) {
-    await page.getByRole('button', { name: 'Einstellungen' }).click()
+    await openSettings(page)
     const form = page.locator('form', {
       has: page.getByRole('heading', { name: 'Konto hinzufügen' }),
     })

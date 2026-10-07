@@ -6,6 +6,7 @@ import {
   contrastRatio,
   moveId,
   reorderIds,
+  sortOrderUpdates,
 } from '../src/account-avatar'
 
 describe('accountInitials', () => {
@@ -64,5 +65,31 @@ describe('reordering', () => {
     expect(moveId(ids, 'b', 1)).toEqual(['a', 'c', 'b', 'd'])
     expect(moveId(ids, 'a', -1)).toEqual(ids)
     expect(moveId(ids, 'd', 1)).toEqual(ids)
+  })
+})
+
+describe('sortOrderUpdates', () => {
+  it('saves only the positions that changed', () => {
+    const current = [
+      { id: 'a', sortOrder: 0 },
+      { id: 'b', sortOrder: 1 },
+      { id: 'c', sortOrder: 2 },
+    ]
+    expect(sortOrderUpdates(['b', 'a', 'c'], current)).toEqual([
+      { id: 'b', sortOrder: 0 },
+      { id: 'a', sortOrder: 1 },
+    ])
+    expect(sortOrderUpdates(['a', 'b', 'c'], current)).toEqual([])
+    // Equal sort orders (e.g. all 0 after an import) get distinct ones.
+    expect(
+      sortOrderUpdates(
+        ['a', 'b'],
+        [
+          { id: 'a', sortOrder: 0 },
+          { id: 'b', sortOrder: 0 },
+        ],
+      ),
+    ).toEqual([{ id: 'b', sortOrder: 1 }])
+    expect(sortOrderUpdates(['x'], current)).toEqual([])
   })
 })

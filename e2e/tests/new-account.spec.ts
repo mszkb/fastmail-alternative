@@ -1,5 +1,15 @@
 import { expect, test } from '@playwright/test'
-import { deliver, imapPort, mailHost, smtpPort, textMail } from './helpers'
+import {
+  backToMail,
+  escapeRegExp,
+  openSideMenu,
+  deliver,
+  imapPort,
+  mailHost,
+  openSettings,
+  smtpPort,
+  textMail,
+} from './helpers'
 
 // Regression: the folder list of a new account stayed empty ("Noch keine
 // Ordner synchronisiert") until a reload when it was opened while the first
@@ -12,7 +22,7 @@ test('a new account shows its inbox after the first sync without reload', async 
   await deliver(mailbox, textMail(mailbox, 'Erste Mail', 'Willkommen'))
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Einstellungen' }).click()
+  await openSettings(page)
   const form = page.locator('form', {
     has: page.getByRole('heading', { name: 'Konto hinzufügen' }),
   })
@@ -30,11 +40,9 @@ test('a new account shows its inbox after the first sync without reload', async 
   await expect(form.getByText('Konto verbunden und gespeichert.')).toBeVisible()
 
   // Straight to the new account, before its first sync is through.
-  await page.getByRole('button', { name: 'E-Mail', exact: true }).click()
-  const picker = page.locator('.account-picker select')
-  await picker.selectOption(
-    (await picker.locator('option', { hasText: name }).getAttribute('value'))!,
-  )
+  await backToMail(page)
+  const menu = await openSideMenu(page)
+  await menu.getByRole('button', { name: new RegExp(`^${escapeRegExp(name)},`) }).click()
   await expect(
     page.getByRole('region', { name: 'Nachrichten' }).getByText('Erste Mail'),
   ).toBeVisible({ timeout: 30_000 })

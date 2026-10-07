@@ -80,3 +80,17 @@ export function moveId(ids: string[], id: string, step: -1 | 1): string[] {
   if (from < 0 || to < 0 || to >= ids.length) return [...ids]
   return reorderIds(ids, id, ids[to]!)
 }
+
+/**
+ * Sort orders to save after reordering: position i gets sortOrder i; only
+ * accounts whose stored value differs are returned (one PATCH each).
+ */
+export function sortOrderUpdates(
+  orderedIds: string[],
+  current: { id: string; sortOrder?: number }[],
+): { id: string; sortOrder: number }[] {
+  const stored = new Map(current.map((a) => [a.id, a.sortOrder]))
+  return orderedIds
+    .map((id, index) => ({ id, sortOrder: index }))
+    .filter(({ id, sortOrder }) => stored.has(id) && stored.get(id) !== sortOrder)
+}

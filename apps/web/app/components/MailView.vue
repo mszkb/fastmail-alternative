@@ -109,21 +109,21 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
     >
   >
 
-// unifiedInbox: the opt-in unified inbox (3.7) is switched on; its entry
-// "Alle Posteingänge" then sits above the accounts (emit openUnified).
+// Account bar (#120): the accounts are listed by AccountRail in app.vue,
+// which switches via switchAccount(); `activeAccount` reports the active
+// account and its live INBOX unread count back for the bar's badge.
 // syncStatus/syncCancelSupported (#119): state per account from app.vue;
 // without them (or on a backend without the status endpoint) the state is
 // derived from `syncing` and there is no stop button.
 const props = defineProps<{
   accounts: AccountOption[]
-  unifiedInbox?: boolean
   syncStatus?: AccountSyncStatus[]
   syncCancelSupported?: boolean
 }>()
 const emit = defineEmits<{
   editAccount: [id: string]
   syncRequested: []
-  openUnified: []
+  activeAccount: [id: string, inboxUnread: number | null]
   cancelSync: [accountId: string | null]
 }>()
 
@@ -136,8 +136,6 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   trash: 'Papierkorb',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
-/** Value of the "Alle Posteingänge" entry in the mobile account picker. */
-const UNIFIED_OPTION = '__unified__'
 /** Messages of a folder list kept offline (three pages of 50). */
 const CACHED_LIST_MESSAGES = 150
 const LIST_CACHE_DELAY_MS = 500
@@ -382,14 +380,15 @@ function getJson<T>(path: string): Promise<T> {
   })
 }
 
-/** Unread count shown in the switcher: live folder counts for the active account. */
-function accountUnread(account: AccountOption): number {
-  if (account.id === accountId.value) {
-    const inboxes = folders.value.filter((f) => f.specialUse === 'inbox')
-    if (inboxes.length > 0) return inboxes.reduce((sum, f) => sum + f.unreadCount, 0)
-  }
-  return account.unreadCount ?? 0
-}
+/** Live INBOX unread count of the active account for the account bar; null until known. */
+const activeInboxUnread = computed(() => {
+  const inboxes = folders.value.filter((f) => f.specialUse === 'inbox')
+  return inboxes.length > 0 ? inboxes.reduce((sum, f) => sum + f.unreadCount, 0) : null
+})
+
+watch([accountId, activeInboxUnread], ([id, unread]) => emit('activeAccount', id, unread), {
+  immediate: true,
+})
 
 /**
  * Switches the active account. An open compose form belongs to the previous
@@ -404,16 +403,6 @@ function switchAccount(id: string): boolean {
   compose.value = null
   accountId.value = id
   return true
-}
-
-function onAccountSelect(event: Event): void {
-  const select = event.target as HTMLSelectElement
-  if (select.value === UNIFIED_OPTION) {
-    select.value = accountId.value
-    emit('openUnified')
-    return
-  }
-  if (!switchAccount(select.value)) select.value = accountId.value
 }
 
 function readStoredAccount(): string {
@@ -1149,7 +1138,13 @@ async function openFromUnified(account: string, messageId: string): Promise<void
   await openMessage(messageId)
 }
 
-defineExpose({ goBack, openFromUnified })
+/** Header search (#120): searches the active account like the list's form did. */
+function searchFor(query: string): void {
+  searchForm.q = query
+  void runSearch()
+}
+
+defineExpose({ goBack, openFromUnified, switchAccount, searchFor })
 
 function closeDetail(): void {
   detailRequest++
@@ -1246,50 +1241,6 @@ onBeforeUnmount(() => {
       <button type="button" class="primary compose-button" @click="openCompose('new')">
         Neue E-Mail
       </button>
-      <nav class="accounts" aria-label="Konten">
-        <button v-if="unifiedInbox" type="button" class="account" @click="emit('openUnified')">
-          <span class="account-name">Alle Posteingänge</span>
-        </button>
-        <button
-          v-for="(account, index) in accounts"
-          :key="account.id"
-          type="button"
-          class="account"
-          :class="{ active: account.id === accountId }"
-          :aria-current="account.id === accountId ? 'true' : undefined"
-          :title="`${account.emailAddress}${index < 9 ? ` – Tastenkürzel: ${index + 1}` : ''}`"
-          @click="switchAccount(account.id)"
-        >
-          <span class="account-name">{{ account.displayName }}</span>
-          <span
-            v-if="statusInfo(account)"
-            class="status-badge"
-            :class="account.status"
-            :title="statusInfo(account)!.label"
-            role="img"
-            :aria-label="statusInfo(account)!.label"
-            >!</span
-          >
-          <span
-            v-if="accountUnread(account) > 0"
-            class="count"
-            :aria-label="`${accountUnread(account)} ungelesen`"
-            >{{ accountUnread(account) }}</span
-          >
-        </button>
-      </nav>
-      <!-- Mobile: compact account switcher -->
-      <label class="account-picker">
-        <span class="visually-hidden">Konto</span>
-        <select :value="accountId" @change="onAccountSelect">
-          <option v-if="unifiedInbox" :value="UNIFIED_OPTION">Alle Posteingänge</option>
-          <option v-for="account in accounts" :key="account.id" :value="account.id">
-            {{ account.displayName
-            }}{{ accountUnread(account) > 0 ? ` (${accountUnread(account)})` : ''
-            }}{{ statusInfo(account) ? ` – ${statusInfo(account)!.label}` : '' }}
-          </option>
-        </select>
-      </label>
       <nav class="folders" aria-label="Ordner">
         <button
           v-for="folder in folders"
@@ -1380,16 +1331,9 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="syncNotice" class="hint sync-notice" role="status">{{ syncNotice }}</p>
 
-      <form v-if="accountId" class="search" role="search" @submit.prevent="runSearch">
+      <form v-if="accountId" class="search" aria-label="Suchfilter" @submit.prevent="runSearch">
         <div class="search-row">
-          <input
-            v-model="searchForm.q"
-            type="search"
-            enterkeyhint="search"
-            :placeholder="`In ${activeAccount?.displayName ?? 'diesem Konto'} suchen …`"
-            aria-label="Suchbegriff"
-            @keydown.esc.prevent="clearSearch"
-          />
+          <span v-if="searchForm.q" class="search-query">„{{ searchForm.q }}“</span>
           <button
             type="button"
             class="link"
@@ -1425,6 +1369,10 @@ onBeforeUnmount(() => {
           <label>
             <span>Vor dem</span>
             <input v-model="searchForm.before" type="date" />
+          </label>
+          <label>
+            <span>Suchbegriff</span>
+            <input v-model="searchForm.q" type="text" autocomplete="off" />
           </label>
           <label class="check">
             <input v-model="searchForm.onlyFolder" type="checkbox" />
@@ -1672,11 +1620,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .mail {
   display: grid;
-  grid-template-columns: 14rem minmax(18rem, 24rem) 1fr;
-  height: calc(100vh - 7rem);
-  min-height: 24rem;
-  border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  grid-template-columns: 14rem minmax(18rem, 26rem) 1fr;
+  height: 100%;
+  min-height: 0;
   background: var(--color-base-100);
   overflow: hidden;
 }
@@ -1701,59 +1647,6 @@ select {
   font: inherit;
 }
 
-.account-picker {
-  display: none;
-  margin-bottom: 0.75rem;
-}
-
-.accounts {
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--color-base-300);
-}
-
-.account {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  border: none;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.account:hover {
-  background: var(--color-base-300);
-}
-
-.account.active {
-  background: var(--color-neutral);
-  color: var(--color-neutral-content);
-}
-
-.status-badge {
-  flex-shrink: 0;
-  margin-left: auto;
-  margin-right: 0.3rem;
-  padding: 0 0.4rem;
-  border-radius: 999px;
-  background: var(--color-warning);
-  color: var(--color-warning-content);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.status-badge.auth_error {
-  background: var(--color-error);
-}
-
 .account-status {
   display: flex;
   flex-direction: column;
@@ -1773,12 +1666,6 @@ select {
   border-color: var(--fma-warning-text);
   color: var(--fma-warning-text);
   font-size: 0.85rem;
-}
-
-.account-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 button.primary {
@@ -2042,6 +1929,20 @@ button.secondary {
   gap: 0.35rem;
 }
 
+.search-query {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fma-muted);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-row .link:first-of-type {
+  margin-left: auto;
+}
+
 .search input[type='search'] {
   flex: 1;
   min-width: 0;
@@ -2245,7 +2146,7 @@ button.secondary {
     display: block;
     height: auto;
     min-height: 0;
-    border: none;
+    padding: 0 0.75rem;
     overflow: visible;
   }
 
@@ -2256,13 +2157,11 @@ button.secondary {
   }
 
   .folders,
-  .accounts,
   .desktop-title {
     display: none;
   }
 
-  .mobile-folders,
-  .account-picker {
+  .mobile-folders {
     display: block;
   }
 

@@ -155,14 +155,37 @@ export async function touchDrag(
   await cdp.detach()
 }
 
-/** Opens the inbox of an account via the mobile account picker. */
+/** Signed in: the profile avatar of the header (#120) is shown. */
+export function profileButton(page: Page) {
+  return page.getByRole('button', { name: /^Profil:/ })
+}
+
+/** Settings via the profile menu (#120). */
+export async function openSettings(page: Page): Promise<void> {
+  await profileButton(page).click()
+  await page.getByRole('menuitem', { name: 'Einstellungen' }).click()
+  await page.getByRole('heading', { name: 'Einstellungen', level: 1 }).waitFor()
+}
+
+/** Back from the settings to the mail view. */
+export async function backToMail(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Zurück zur Post' }).click()
+}
+
+/** Phone viewport: the side menu with the accounts (#120). */
+export async function openSideMenu(page: Page) {
+  await page.getByRole('button', { name: 'Konten und Ordner' }).click()
+  return page.getByRole('dialog', { name: 'Konten' })
+}
+
+/** Opens the inbox of an account via the side menu of the phone layout. */
 export async function openAccount(page: Page, displayName: string): Promise<void> {
   await page.goto('/')
-  await page.getByRole('button', { name: 'E-Mail', exact: true }).click()
-  const picker = page.locator('.account-picker select')
-  const value = await picker
-    .locator('option', { hasText: displayName })
-    .first()
-    .getAttribute('value')
-  await picker.selectOption(value!)
+  const menu = await openSideMenu(page)
+  await menu.getByRole('button', { name: new RegExp(`^${escapeRegExp(displayName)},`) }).click()
+  await menu.waitFor({ state: 'hidden' })
+}
+
+export function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
