@@ -6,6 +6,14 @@
 #
 # Configuration via .env (scripts/setup-env.mjs): MASTER_KEY, VAPID_*,
 # MARIADB_PASSWORD. Guide: docs/operations/installation-php.md.
+#
+# Own project name: containers and volumes (mail-data!) never mix with the
+# Node stack from docker-compose.yml in the same directory. Both can run side
+# by side when the PHP stack gets other ports and its own address, e.g. in
+# .env: PHP_HTTP_PORT=8080, PHP_HTTPS_PORT=8443, PHP_DOMAIN=:80 (plain HTTP
+# in the LAN for a trial).
+
+name: fma-php
 
 x-logging: &default-logging
   driver: json-file
@@ -15,7 +23,7 @@ x-logging: &default-logging
 
 x-php-env: &php-env
   LOG_LEVEL: ${LOG_LEVEL:-info}
-  DOMAIN: ${DOMAIN:-:80}
+  DOMAIN: ${PHP_DOMAIN:-${DOMAIN:-:80}}
   COOKIE_SECURE: ${COOKIE_SECURE:-}
   MAIL_DATA_DIR: /data/mail
   MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
@@ -38,10 +46,10 @@ services:
     logging: *default-logging
     mem_limit: 64m
     ports:
-      - '80:80'
-      - '443:443'
+      - '${PHP_HTTP_PORT:-80}:80'
+      - '${PHP_HTTPS_PORT:-443}:443'
     environment:
-      DOMAIN: ${DOMAIN:-:80}
+      DOMAIN: ${PHP_DOMAIN:-${DOMAIN:-:80}}
     volumes:
       - ./Caddyfile.php:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
