@@ -1,4 +1,5 @@
-// The spec covers exactly the routes of the Node backend (apps/api); runs
+// The spec covers exactly the routes of the Node backend (apps/api), plus
+// operations marked `x-backends: [php]` (PHP backend only, ADR-0013); runs
 // without a database (the app is only built, never queried).
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../../../apps/api/src/app'
@@ -23,9 +24,13 @@ describe('OpenAPI spec vs. apps/api routes', () => {
 
     const documented = new Set(
       Object.entries(spec.paths).flatMap(([path, item]) =>
-        Object.keys(item)
-          .filter((m) => METHODS.includes(m.toUpperCase()))
-          .map((m) => `${m.toUpperCase()} ${path}`),
+        Object.entries(item)
+          .filter(([m]) => METHODS.includes(m.toUpperCase()))
+          .filter(([, op]) => {
+            const backends = (op as { 'x-backends'?: string[] })['x-backends']
+            return backends === undefined || backends.includes('node')
+          })
+          .map(([m]) => `${m.toUpperCase()} ${path}`),
       ),
     )
     expect([...routes].filter((r) => !documented.has(r)).sort(), 'missing in the spec').toEqual([])

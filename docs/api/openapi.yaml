@@ -11,6 +11,9 @@ info:
     SameSite=Strict cookie `fma_session` (ADR-0004). State-changing
     requests from browsers must be same-origin (`Sec-Fetch-Site` or
     `Origin`), otherwise 403. Rate limits answer 429 with `Retry-After`.
+    Operations with `x-backends: [php]` exist only in the PHP backend
+    (new features after ADR-0013); the Node backend answers 404 there and
+    clients fall back to the older behavior.
   license:
     name: ISC
 servers:
@@ -1911,6 +1914,146 @@ components:
           type: integer
           minimum: 0
           description: Attachments not copied (size, count or pending limits).
+    SyncState:
+      type: string
+      description: |
+        `idle` nothing to do; `queued` a sync waits for the worker;
+        `running` a sync runs (progress fields set); `cancelling` a stop was
+        requested and the running sync ends after its current message;
+        `error` the provider was unreachable (backoff until `nextRunAt`);
+        `auth_error` new credentials needed; `paused` the account is
+        disabled.
+      enum:
+        - idle
+        - queued
+        - running
+        - cancelling
+        - error
+        - auth_error
+        - paused
+    SyncPhase:
+      type: string
+      description: |
+        `folders` listing the mailboxes (done/total = mailboxes); `flags`
+        listing UIDs and flags of a folder; `expunge` removing vanished
+        messages; `headers` fetching new messages incl. their bodies
+        (done/total = messages); `bodies` bodies missing from earlier runs.
+      enum:
+        - folders
+        - headers
+        - bodies
+        - flags
+        - expunge
+    AccountSyncStatus:
+      type: object
+      required:
+        - accountId
+        - state
+        - phase
+        - folderId
+        - done
+        - total
+        - startedAt
+        - updatedAt
+        - queuedJobs
+        - lastSyncAt
+        - nextRunAt
+        - lastErrorCode
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        state:
+          $ref: "#/components/schemas/SyncState"
+        phase:
+          description: Phase of the running sync; null otherwise.
+          oneOf:
+            - $ref: "#/components/schemas/SyncPhase"
+            - type: "null"
+        folderId:
+          description: Folder the running sync works on (resolve the name via the folder list); null in phase `folders`.
+          type:
+            - string
+            - "null"
+          format: uuid
+        done:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        total:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        startedAt:
+          description: Start of the running job.
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          description: Last progress write (at most every ~2 s).
+          type:
+            - string
+            - "null"
+          format: date-time
+        queuedJobs:
+          description: Sync jobs of the account waiting to run (e.g. one per folder).
+          type: integer
+          minimum: 0
+        lastSyncAt:
+          description: Last successful sync.
+          type:
+            - string
+            - "null"
+          format: date-time
+        nextRunAt:
+          description: Earliest next run (scheduler, queued job or end of the backoff); null while running or when the account needs action.
+          type:
+            - string
+            - "null"
+          format: date-time
+        lastErrorCode:
+          description: Error code of the last failed connection (e.g. `AUTH_FAILED`, `TIMEOUT`), never a provider message.
+          type:
+            - string
+            - "null"
+    SyncStatusResponse:
+      type: object
+      required:
+        - accounts
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSyncStatus"
+    SyncCancelResult:
+      type: object
+      required:
+        - accountId
+        - cancelledQueued
+        - cancelling
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        cancelledQueued:
+          description: Waiting sync jobs that were cancelled.
+          type: integer
+          minimum: 0
+        cancelling:
+          description: A running sync was asked to stop.
+          type: boolean
+    SyncCancelAllResponse:
+      type: object
+      required:
+        - accounts
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncCancelResult"
   parameters:
     Id:
       name: id
@@ -2396,6 +2539,40 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/SyncRequestResult"
                   - $ref: "#/components/schemas/ErrorMessage"
+  /api/accounts/{id}/sync/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      operationId: cancelAccountSync
+      x-backends:
+        - php
+      tags:
+        - accounts
+      summary: Stop the sync of one account
+      description: |
+        Queued folder/message syncs of the account end at once (so the
+        folder sync -> message sync chain stops); a running one stops
+        cooperatively between two stored messages within a few seconds
+        (`state` is `cancelling` until then). Messages stored so far stay;
+        the next sync continues without duplicates. Other accounts are not
+        affected. The periodic scheduler syncs the account again at its next
+        regular time; a manual sync is possible right away (a stopped sync
+        does not count for the 30 s limit).
+      responses:
+        "200":
+          description: Cancel requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncCancelResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /api/accounts/{id}/uploads:
     post:
       operationId: uploadAttachment
@@ -3738,6 +3915,55 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/sync/cancel:
+    post:
+      operationId: cancelAllSyncs
+      x-backends:
+        - php
+      tags:
+        - accounts
+      summary: Stop the syncs of all accounts
+      description: |
+        Like `POST /api/accounts/{id}/sync/cancel` for every account of the
+        user.
+      responses:
+        "200":
+          description: One result per account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncCancelAllResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /api/sync/status:
+    get:
+      operationId: getSyncStatus
+      x-backends:
+        - php
+      tags:
+        - accounts
+      summary: Sync state and progress of all accounts
+      description: |
+        One entry per account of the user, in account order. Ids, numbers,
+        codes and times only - folder names are resolved by the client from
+        its folder list. Cheap (one grouped select); meant for polling every
+        2-3 s while a sync runs (`state` running, queued or cancelling) and
+        not otherwise.
+      responses:
+        "200":
+          description: Sync state per account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /api/threads/{id}:
     parameters:
       - $ref: "#/components/parameters/Id"
