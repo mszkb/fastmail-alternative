@@ -480,36 +480,33 @@ function onPageHide(event: Event): void {
   if (dirty.value) void saveDraft({ keepalive: true })
 }
 
-async function send(): Promise<void> {
-  if (sending.value) return
-  error.value = ''
+/** Validates the form and builds the send request; null (with `error` set) when invalid. */
+function buildRequest(): (SendMessageRequest & { clientId: string }) | null {
   if (uploading.value > 0) {
     error.value = 'Bitte warten, bis alle Anhänge hochgeladen sind.'
-    return
+    return null
   }
   const to = parseField('An', form.to)
   const cc = to && parseField('Cc', form.cc)
   const bcc = cc && parseField('Bcc', form.bcc)
-  if (!to || !cc || !bcc) return
+  if (!to || !cc || !bcc) return null
   const total = to.length + cc.length + bcc.length
   if (total === 0) {
     error.value = 'Bitte mindestens einen Empfänger angeben.'
-    return
+    return null
   }
   if (total > OUTBOX_LIMITS.maxRecipients) {
     error.value = `Höchstens ${OUTBOX_LIMITS.maxRecipients} Empfänger sind erlaubt.`
-    return
+    return null
   }
   if (form.subject.length > OUTBOX_LIMITS.maxSubjectLength) {
     error.value = 'Der Betreff ist zu lang.'
-    return
+    return null
   }
   if (form.text.length > OUTBOX_LIMITS.maxTextLength) {
     error.value = 'Der Nachrichtentext ist zu lang.'
-    return
+    return null
   }
-  if (!form.subject.trim() && !window.confirm('Ohne Betreff senden?')) return
-
   const body: SendMessageRequest & { clientId: string } = {
     accountId: props.accountId,
     to,
@@ -525,9 +522,22 @@ async function send(): Promise<void> {
   if (inReplyTo) body.inReplyTo = inReplyTo
   if (references.length) body.references = references
   if (attachments.value.length) body.attachmentIds = attachments.value.map((a) => a.id)
+  return body
+}
 
-  if (countdown.value > 0) return
-  if (undoSendSeconds.value > 0 && !(await waitForUndoWindow(undoSendSeconds.value))) return
+async function send(): Promise<void> {
+  if (sending.value || countdown.value > 0) return
+  error.value = ''
+  let body = buildRequest()
+  if (!body) return
+  if (!form.subject.trim() && !window.confirm('Ohne Betreff senden?')) return
+
+  if (undoSendSeconds.value > 0) {
+    if (!(await waitForUndoWindow(undoSendSeconds.value))) return
+    // Changes made during the countdown are sent as well.
+    body = buildRequest()
+    if (!body) return
+  }
 
   sending.value = true
   // No autosave may race the send (it would answer 410 or recreate nothing).
