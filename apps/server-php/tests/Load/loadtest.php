@@ -33,6 +33,26 @@ use Fma\Tests\Support\Http;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
+/**
+ * Jobs still queued or running.
+ *
+ * @phpstan-impure
+ */
+function queuedJobs(PDO $pdo): int
+{
+    return (int) Database::run($pdo, "SELECT COUNT(*) FROM job WHERE state IN ('queued', 'running')")->fetchColumn();
+}
+
+/**
+ * Messages synced into a folder.
+ *
+ * @phpstan-impure
+ */
+function locations(PDO $pdo, string $folderId): int
+{
+    return (int) Database::run($pdo, 'SELECT COUNT(*) FROM message_location WHERE folder_id = ?', [$folderId])->fetchColumn();
+}
+
 $options = getopt('', ['accounts::', 'messages::', 'synthetic::', 'runs::', 'full-history']);
 $option = static fn(string $name, int $default): int => \is_array($options) && \is_string($options[$name] ?? null) ? (int) $options[$name] : $default;
 $accounts = max(1, $option('accounts', 3));
@@ -128,13 +148,12 @@ for ($a = 0; $a < $accounts; ++$a) {
 
 // Initial sync with the real runner, until the queue is empty.
 $runner = Bootstrap::runner($config, $logger, $db);
-$queued = static fn(): int => (int) Database::run($pdo, "SELECT COUNT(*) FROM job WHERE state IN ('queued', 'running')")->fetchColumn();
 $memoryBefore = memory_get_usage(true);
 $start = microtime(true);
 $runner->schedule();
 $done = 0;
 $failed = 0;
-while ($queued() > 0) {
+while (queuedJobs($pdo) > 0) {
     $result = $runner->work(new Deadline(300));
     $done += $result['done'];
     $failed += $result['failed'];
@@ -148,7 +167,7 @@ Database::run($pdo, "DELETE FROM job WHERE state IN ('done', 'failed')");
 $start = microtime(true);
 $runner->schedule();
 Database::run($pdo, "INSERT INTO job (type, account_id, payload) SELECT 'folder_sync', id, '{}' FROM mail_account WHERE NOT EXISTS (SELECT 1 FROM job j WHERE j.account_id = mail_account.id AND j.state = 'queued')");
-while ($queued() > 0) {
+while (queuedJobs($pdo) > 0) {
     $runner->work(new Deadline(300));
 }
 $incremental = microtime(true) - $start;
@@ -199,9 +218,9 @@ $out->add('| Endpunkt | p50 | p95 | max |');
 $out->add('| --- | --- | --- | --- |');
 foreach ($endpoints as $name => $path) {
     // The search has its own limit of 10 provider searches per account and minute.
-    $count = str_contains($path, '/search') ? min($runs, 9) : $runs;
+    $calls = str_contains($path, '/search') ? min($runs, 9) : $runs;
     $times = [];
-    for ($r = 0; $r < $count; ++$r) {
+    for ($r = 0; $r < $calls; ++$r) {
         $times[] = $call($path);
     }
     $out->add("| {$name} | " . $ms($percentile($times, 0.5)) . ' | ' . $ms($percentile($times, 0.95)) . ' | ' . $ms(max($times)) . ' |');
@@ -209,26 +228,25 @@ foreach ($endpoints as $name => $path) {
 
 // Full history of one account: "load older" until the whole mailbox is synced.
 if ($fullHistory) {
-    $count = static fn(): int => (int) Database::run($pdo, 'SELECT COUNT(*) FROM message_location WHERE folder_id = ?', [$inbox])->fetchColumn();
-    $before = $count();
+    $before = locations($pdo, $inbox);
     $start = microtime(true);
     $rounds = 0;
     do {
-        $last = $count();
+        $last = locations($pdo, $inbox);
         $request = Http::request('POST', "/api/folders/{$inbox}/load-older", ['Sec-Fetch-Site' => 'same-origin'])->withCookieParams(['fma_session' => $token]);
         if ($app->handle($request)->getStatusCode() !== 202) {
             throw new RuntimeException('load-older failed');
         }
-        while ($queued() > 0) {
+        while (queuedJobs($pdo) > 0) {
             $runner->work(new Deadline(300));
         }
         ++$rounds;
-    } while ($count() < $messages && $count() > $last);
+    } while (locations($pdo, $inbox) < $messages && locations($pdo, $inbox) > $last);
     $elapsed = microtime(true) - $start;
-    $loaded = $count() - $before;
+    $loaded = locations($pdo, $inbox) - $before;
     $out->add('');
     $out->add("Volle Historie (1 Konto, „Ältere laden“ bis alles da ist): {$loaded} weitere Mails in " . number_format($elapsed, 1, ',', '')
-        . " s ({$rounds} Runden, ≈ " . (int) round($loaded / max($elapsed, 0.001)) . ' Mails/s), jetzt ' . $count() . ' im Ordner; Spitzen-Speicher ' . $mb(memory_get_peak_usage(true)) . ' MB.');
+        . " s ({$rounds} Runden, ≈ " . (int) round($loaded / max($elapsed, 0.001)) . ' Mails/s), jetzt ' . locations($pdo, $inbox) . ' im Ordner; Spitzen-Speicher ' . $mb(memory_get_peak_usage(true)) . ' MB.');
 }
 
 // Very large folder: synthetic rows (valid encryption, no raw files).
