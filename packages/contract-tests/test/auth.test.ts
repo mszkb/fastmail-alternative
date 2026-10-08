@@ -69,6 +69,21 @@ describe.skipIf(!API_URL)('auth', () => {
     expect(response.status).toBe(404)
   })
 
+  it('DELETE /api/auth/devices/{id} signs out another device', async () => {
+    const other = new Client()
+    await other.signIn()
+    const { devices } = (await client.request('GET', '/api/auth/devices')).body as {
+      devices: { id: string; isCurrent: boolean }[]
+    }
+    const { devices: own } = (await other.request('GET', '/api/auth/devices')).body as {
+      devices: { id: string; isCurrent: boolean }[]
+    }
+    const otherId = own.find((d) => d.isCurrent)!.id
+    expect(devices.map((d) => d.id)).toContain(otherId)
+    expect((await client.request('DELETE', `/api/auth/devices/${otherId}`)).status).toBe(204)
+    expect((await other.request('GET', '/api/auth/devices')).status).toBe(401)
+  })
+
   it('POST /api/auth/password rejects a wrong current password', async () => {
     const response = await client.request('POST', '/api/auth/password', {
       body: { currentPassword: 'not-the-password', newPassword: 'whatever-new-1' },
