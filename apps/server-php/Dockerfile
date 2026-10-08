@@ -41,7 +41,7 @@ EXPOSE 9000
 FROM runtime AS import
 USER root
 RUN apk add --no-cache libpq \
-    && apk add --no-cache --virtual .pg-build postgresql-dev \
+    && apk add --no-cache --virtual .pg-build libpq-dev \
     && docker-php-ext-install pdo_pgsql \
     && apk del .pg-build
 USER www-data

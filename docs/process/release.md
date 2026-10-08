@@ -1,6 +1,6 @@
 # Release-Prozess (SemVer, Images, Signatur)
 
-Releases sind Git-Tags `vX.Y.Z`. Zu jedem Tag baut [`.github/workflows/release.yml`](../../.github/workflows/release.yml) die Images für api, worker und web als Multi-Arch-Images (`linux/amd64`, `linux/arm64` – also auch für den Raspberry Pi), legt sie in der GitHub Container Registry ab und signiert sie keyless mit [cosign](https://docs.sigstore.dev/) (Sigstore). Bei Branches und Pull Requests läuft der Workflow nicht.
+Releases sind Git-Tags `vX.Y.Z`. Zu jedem Tag baut [`.github/workflows/release.yml`](../../.github/workflows/release.yml) die Images für das PHP-Backend (`server-php`, läuft als php und worker) und die PWA (`web`) als Multi-Arch-Images (`linux/amd64`, `linux/arm64` – also auch für den Raspberry Pi), legt sie in der GitHub Container Registry ab und signiert sie keyless mit [cosign](https://docs.sigstore.dev/) (Sigstore). Bei Branches und Pull Requests läuft der Workflow nicht.
 
 Die fertigen Images sind ein **Angebot, keine Voraussetzung**: Self-hosted first bleibt – `docker compose up -d --build --wait` baut wie bisher alles auf dem eigenen Server (Standard auf dem Pi, siehe [Upgrade](../operations/upgrade.md)).
 
@@ -24,7 +24,7 @@ Regeln:
 
 ## Image-Tags
 
-Pro Release in `ghcr.io/<owner>/fastmail-alternative-{api,worker,web}`:
+Pro Release in `ghcr.io/<owner>/fastmail-alternative-{server-php,web}`:
 
 | Tag      | Bedeutung                                           |
 | -------- | --------------------------------------------------- |
@@ -61,14 +61,14 @@ Signiert wird der Digest des Multi-Arch-Index; die Identität ist der Release-Wo
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/mszkb/fastmail-alternative/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/mszkb/fastmail-alternative-api:0.3.1
+  ghcr.io/mszkb/fastmail-alternative-server-php:0.3.1
 ```
 
-Für `worker` und `web` entsprechend. Bei einem per `workflow_dispatch` wiederholten Lauf lautet die Identität `…/release.yml@refs/heads/<branch>`; dann `@refs/` statt `@refs/tags/v` im Ausdruck verwenden. Für Forks `mszkb` durch den eigenen Owner ersetzen.
+Für `web` entsprechend. Bei einem per `workflow_dispatch` wiederholten Lauf lautet die Identität `…/release.yml@refs/heads/<branch>`; dann `@refs/` statt `@refs/tags/v` im Ausdruck verwenden. Für Forks `mszkb` durch den eigenen Owner ersetzen.
 
 ## Fertige Images verwenden (optional)
 
-[`docker-compose.release.yml`](../../docker-compose.release.yml) ersetzt für web, api und worker den lokalen Build durch die Release-Images (benötigt Docker Compose ≥ 2.24.4). Dauerhaft per `.env`, damit jeder `docker compose`-Befehl (auch `scripts/backup.sh`) die Images nutzt:
+[`docker-compose.release.yml`](../../docker-compose.release.yml) ersetzt für web, php und worker den lokalen Build durch die Release-Images (php und worker nutzen dasselbe Image `server-php`) (benötigt Docker Compose ≥ 2.24.4). Dauerhaft per `.env`, damit jeder `docker compose`-Befehl (auch `scripts/backup.sh`) die Images nutzt:
 
 ```sh
 # in .env
