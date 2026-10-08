@@ -58,13 +58,29 @@ API-Latenz (30 Aufrufe je Endpunkt, ms):
 
 Die Suche fragt bei jedem Aufruf den Anbieter (eine IMAP-Verbindung je Suche, kein Ergebnis-Cache im PHP-Backend); gemessen werden höchstens 9 Aufrufe, weil die Suche auf 10 pro Konto und Minute begrenzt ist.
 
+### Gegen Dovecot (echter IMAP-Server)
+
+Dovecot 2.3 im Container (`dovecot/dovecot:2.3.21`, Klartext-Login nur für den Test freigeschaltet, `LOADTEST_IMAP_PASSWORD=pass`), sonst wie oben:
+
+| Lauf                                                       | Wert                                                                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 3 Konten × 5000 Mails: Initial-Sync (je 200 neueste)       | **6,2 s** (gegen GreenMail 600 s), 0 fehlgeschlagen                                                                        |
+| 3 Konten × 5000 Mails: inkrementeller Lauf ohne Änderungen | 0,23 s                                                                                                                     |
+| 1 Konto × 50 000 Mails: inkrementeller Lauf                | 0,17 s                                                                                                                     |
+| 1 Konto × 50 000 Mails: volle Historie (`--full-history`)  | 49 800 weitere Mails in 940 s (≈ 53 Mails/s, 249 Runden „Ältere laden“), alle 50 000 da; Spitzen-Speicher 72 MB, DB 289 MB |
+| Suche bei 50 000 Mails im Ordner (p50)                     | 1,4 s – Dovecot durchsucht ohne Volltextindex (FTS) jede Mail beim Aufruf                                                  |
+
+Damit ist der langsame Initial-Sync gegen GreenMail bestätigt als Artefakt des Testservers.
+
 ### Gefundene Engpässe
 
 1. **Behoben: Die Nachrichtenliste sortierte den ganzen Ordner.** Sie ordnete nach dem Datum der verbundenen Nachricht, also musste MariaDB jede Zeile des Ordners samt verschlüsselter Spalten und Flag-Unterabfragen in eine temporäre Tabelle kopieren und sortieren (`Using temporary; Using filesort`): **475 ms (p50) je Seite bei 50 000 Mails** auf x86, auf dem Pi also mehrere Sekunden. Migration `0005_message_sort_key` kopiert das (unveränderliche) Sortierdatum nach `message_location.sort_at` und indiziert `(folder_id, sort_at, id)`; eine Seite wird jetzt in Indexreihenfolge gelesen: **4,1 ms**. Details: [Datenmodell](../architecture/data-model.md).
-2. **Sync-Durchsatz gegen GreenMail.** Wie schon beim Node-Backend (unten, Punkt 1) sucht GreenMail pro Befehl linear im Ordner; mit 5000 Mails im Ordner schafft der Sync ≈ 1 Mail/s. Das PHP-Backend arbeitet die Jobs zudem nacheinander ab (ein Prozess, ADR-0013), das Node-Backend parallel. Gegen indizierte Server bestimmt die Netzwerk-Latenz je Mail den Durchsatz. **Offen:** Messung gegen Dovecot auf dem Pi; erst dann entscheiden, ob Bodies gebündelt geholt werden.
-3. **Unified Inbox** liest je INBOX aus dem Index, sortiert über die Konten aber noch zusammen (10,6 ms p50 bei 3 × 200 Mails). Bei vielen Konten mit großen Posteingängen erneut messen.
-4. **Keine Fehler, Retries oder Lecks:** 8 Jobs, 0 fehlgeschlagen; der Speicher des Prozesses wächst nicht mit der Postfachgröße (20 MB Spitze bei 50 000 Mails in einem Ordner).
-5. **Offen:** Messung auf dem Pi (arm64, mit den Container-Limits aus `docker-compose.yml`: php 256 MB, worker 384 MB) und volle Historie großer Postfächer gegen Dovecot.
+2. **Behoben: Datenverlust lokaler Kopien in großen Postfächern.** Der Lauf gegen Dovecot mit 50 000 Mails verlor beim ersten inkrementellen Abgleich alle synchronisierten Mails: Die IMAP-Antwort `* SEARCH` mit allen UIDs (≈ 290 KB in einer Zeile) wurde nach 64 KB abgeschnitten, und das Auslesen per Regex scheiterte bei so langen Zeilen ganz. Mit CONDSTORE galten damit fast alle lokalen Mails als beim Server gelöscht. Betroffen waren Ordner ab etwa 12 000 Mails auf Servern mit CONDSTORE; auf dem Server selbst ging nichts verloren. Behoben in `MailSocket::readLine()` und `ImapMailbox::searchResult()`; zusätzlich bricht der Abgleich ab, wenn die UID-Liste kürzer ist als die Zahl der Mails, die der Server meldet (`EXISTS`).
+3. **Behoben: Threading wurde mit der Postfachgröße langsamer.** Die Suche nach verwandten Mails verknüpfte ihre Bedingungen mit `OR` und las dadurch für jede neue Mail alle schon einsortierten Mails des Kontos (≈ 30 000 Zeilen laut `EXPLAIN`); die volle Historie fiel so von ≈ 50 auf ≈ 12 Mails/s. Jetzt eine `UNION` aus indizierten Teilabfragen (`Threading::assign`); der Durchsatz bleibt bei ≈ 50 Mails/s.
+4. **Sync-Durchsatz gegen GreenMail.** Wie schon beim Node-Backend (unten, Punkt 1) sucht GreenMail pro Befehl linear im Ordner; mit 5000 Mails im Ordner schafft der Sync ≈ 1 Mail/s. Das PHP-Backend arbeitet die Jobs zudem nacheinander ab (ein Prozess, ADR-0013), das Node-Backend parallel. Gegen indizierte Server bestimmt die Netzwerk-Latenz je Mail den Durchsatz. Gegen Dovecot sind es ≈ 100 Mails/s im Initial-Sync (oben); ob Bodies gebündelt geholt werden sollen, nach einer Messung auf dem Pi entscheiden.
+5. **Unified Inbox** liest je INBOX aus dem Index, sortiert über die Konten aber noch zusammen (10,6 ms p50 bei 3 × 200 Mails). Bei vielen Konten mit großen Posteingängen erneut messen.
+6. **Keine Fehler, Retries oder Lecks:** 8 Jobs, 0 fehlgeschlagen; der Speicher wächst nur mit den UID-Listen eines Ordners (20 MB Spitze bei 50 000 synthetischen Mails, 72 MB beim Synchronisieren der vollen Historie von 50 000 Mails).
+7. **Offen:** Messung auf dem Pi (arm64, mit den Container-Limits aus `docker-compose.yml`: php 256 MB, worker 384 MB).
 
 ## Node-Backend (historisch, 2026-10-04)
 
