@@ -37,14 +37,14 @@ backup: ## Encrypted backup to ./backups
 upgrade: ## Upgrade to origin/main (see docs/operations/upgrade.md)
 	./scripts/upgrade.sh main
 
-test-services: ## Start MariaDB (33306) and GreenMail (3143/3025) for tests
+test-services: ## Start MariaDB (33306) and GreenMail (3143/3025, TLS 3993/3465) for tests; after changes: make test-services-down
 	docker start $(TEST_DB) 2>/dev/null || docker run -d --name $(TEST_DB) \
 	  -e MARIADB_USER=mail -e MARIADB_PASSWORD=mail -e MARIADB_DATABASE=mail_test \
 	  -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:33306:3306 mariadb:11 \
 	  --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 	docker start $(TEST_MAIL) 2>/dev/null || docker run -d --name $(TEST_MAIL) \
-	  -e GREENMAIL_OPTS='-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.users=testuser@example.com:secret123' \
-	  -p 127.0.0.1:3143:3143 -p 127.0.0.1:3025:3025 greenmail/standalone:2.1.14
+	  -e GREENMAIL_OPTS='-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.users=testuser@example.com:secret123' \
+	  -p 127.0.0.1:3143:3143 -p 127.0.0.1:3025:3025 -p 127.0.0.1:3993:3993 -p 127.0.0.1:3465:3465 greenmail/standalone:2.1.14
 	@until docker exec $(TEST_DB) healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; do sleep 1; done
 	-docker exec $(TEST_DB) mariadb -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mail_e2e; GRANT ALL ON mail_e2e.* TO 'mail'@'%'"
 
