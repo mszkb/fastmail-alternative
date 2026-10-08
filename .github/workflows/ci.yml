@@ -56,7 +56,7 @@ jobs:
   php:
     name: PHP backend (lint, static analysis, unit tests)
     runs-on: ubuntu-latest
-    # Unit tests only, like the Node job: the integration suite needs
+    # Unit tests only, like the JS job: the integration suite needs
     # DATABASE_URL (MySQL/MariaDB) and runs in the nightly.
     defaults:
       run:

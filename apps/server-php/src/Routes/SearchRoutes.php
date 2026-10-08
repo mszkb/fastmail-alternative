@@ -23,8 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * GET /api/accounts/{id}/search like apps/api/src/mail/search.ts (roadmap
- * 5.1, ADR-0006): IMAP SEARCH at the provider, matching UIDs mapped back to
+ * GET /api/accounts/{id}/search (roadmap 5.1, ADR-0006): IMAP SEARCH at the provider, matching UIDs mapped back to
  * locally synced messages. No search index; nothing of the query or the
  * results is persisted.
  *
@@ -39,8 +38,8 @@ use Slim\App;
  * - Privacy: the query is never logged (the request log has no query
  *   string) nor stored; failures log the error code only.
  * - Rate limit: RATE_LIMIT provider searches per account and minute in the
- *   rate_limit table (bucket `search`, keyed by account id). Unlike Node
- *   there is no in-process result cache (PHP keeps no state between
+ *   rate_limit table (bucket `search`, keyed by account id). There is no
+ *   in-process result cache (PHP keeps no state between
  *   requests), so every search counts.
  */
 final class SearchRoutes

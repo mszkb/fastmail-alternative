@@ -22,11 +22,11 @@
 - **Absoluter Ablauf:** 30 Tage nach dem Login, Aktivität verlängert nicht.
 - **Leerlauf-Ablauf:** 14 Tage ohne Aktivität. Gemessen an `session.rotated_at` (jede aktive Session rotiert mindestens alle 24 h), also ohne Schreibzugriff pro Anfrage; Auflösung ein Tag.
 - **Logout** löscht die Session serverseitig und setzt das Cookie mit denselben Attributen zurück; Geräte-Widerruf löscht alle Sessions des Geräts.
-- **Passwortwechsel** (`POST /api/auth/password`, umgesetzt): verlangt eine gültige Session und das aktuelle Passwort (Argon2id-Prüfung wie beim Login; Fehlversuche zählen für denselben IP-Lockout wie der Login, zusätzlich Rate-Limit `auth`; falsches Passwort → `403` ohne Details). Das neue Passwort muss dieselben Mindestanforderungen wie bei der Ersteinrichtung erfüllen (10–200 Zeichen, sonst `400`). In **einer Transaktion** werden der neue Hash gespeichert, alle anderen Geräte des Benutzers widerrufen, deren Sessions und Push-Subscriptions gelöscht und das Token der aktuellen Session rotiert (neues Cookie). Das aktuelle Gerät behält seine Push-Subscriptions. Passwörter werden nie geloggt (`req.body` ist in den Logs redigiert); CSRF-Schutz greift global (siehe unten).
+- **Passwortwechsel** (`POST /api/auth/password`, umgesetzt): verlangt eine gültige Session und das aktuelle Passwort (Argon2id-Prüfung wie beim Login; Fehlversuche zählen für denselben IP-Lockout wie der Login, zusätzlich Rate-Limit `auth`; falsches Passwort → `403` ohne Details). Das neue Passwort muss dieselben Mindestanforderungen wie bei der Ersteinrichtung erfüllen (10–200 Zeichen, sonst `400`). In **einer Transaktion** werden der neue Hash gespeichert, alle anderen Geräte des Benutzers widerrufen, deren Sessions und Push-Subscriptions gelöscht und das Token der aktuellen Session rotiert (neues Cookie). Das aktuelle Gerät behält seine Push-Subscriptions. Passwörter werden nie geloggt (Request-Bodies landen nie im Log); CSRF-Schutz greift global (siehe unten).
 
 ## CSRF
 
-Zwei unabhängige Schichten, ohne CSRF-Token (`apps/api/src/security/csrf.ts`):
+Zwei unabhängige Schichten, ohne CSRF-Token (`apps/server-php/src/Http/Middleware/CsrfProtection.php`):
 
 1. `SameSite=Strict` – Browser senden das Session-Cookie bei Cross-Site-Anfragen gar nicht mit.
 2. **Origin-Prüfung** für alle Anfragen außer `GET`/`HEAD`/`OPTIONS` (auch Login, Setup, Uploads und `DELETE`), bevor Authentifizierung oder Body-Parsing laufen: Ist `Sec-Fetch-Site` gesetzt, wird nur `same-origin` akzeptiert (auch `same-site` nicht – eine Nachbar-Subdomain ist nicht vertrauenswürdig). Sonst muss der Host im `Origin`-Header dem `Host` der Anfrage entsprechen (`Origin: null` wird abgewiesen). Ohne beide Header (kein Browser, z. B. curl oder ein künftiger nativer Client) ist die Anfrage erlaubt – solche Clients lassen sich nicht von einer fremden Seite fernsteuern. Antwort bei Verstoß: `403`.
@@ -35,15 +35,15 @@ Beide Header sind „forbidden header names“, Skripte können sie nicht fälsc
 
 ## Große Request-Bodies (Speicher-DoS)
 
-Die API läuft mit `mem_limit: 192m`. Damit unauthentifizierte Clients sie nicht durch große Bodies (Upload bis 10 MB, Versand/Entwurf bis 4 MB, Konfig-Import 2 MB) zum OOM bringen:
+Der `php`-Container läuft mit `mem_limit: 256m` (PHP `memory_limit = 256M`, `post_max_size = 16M`). Damit unauthentifizierte Clients ihn nicht durch große Bodies (Upload bis 10 MB, Versand/Entwurf bis 4 MB, Konfig-Import 2 MB) zum OOM bringen:
 
-- **Authentifizierung vor dem Body:** Geschützte Routen prüfen die Session im `onRequest`-Hook (`requireAuth`), also bevor der Body gelesen oder geparst wird; ohne gültige Session folgt sofort `401`. Der Upload prüft dort zusätzlich den Konto-Besitz (`404`).
-- **Gleichzeitige Uploads:** höchstens `MAX_CONCURRENT_UPLOADS` (Standard 2) Upload-Bodies gleichzeitig im Speicher, darüber `429` mit `Retry-After` (die PWA wartet und versucht es erneut).
-- **Slow-Body:** Eine Anfrage muss innerhalb von 120 s vollständig ankommen (Fastify `requestTimeout`), Caddy begrenzt Header (30 s) und Body (2 min) ebenfalls.
+- **Authentifizierung vor dem Body:** Geschützte Routen prüfen die Session in der Route-Middleware `RequireAuth`, bevor der Body geparst wird; ohne gültige Session folgt sofort `401`. Der Upload prüft zusätzlich den Konto-Besitz (`404`).
+- **Gleichzeitige Uploads:** Parallele Anfragen begrenzt php-fpm über seine Worker-Zahl; der Upload-Body wird in Blöcken und nur bis `MAX_ATTACHMENT_BYTES` gelesen.
+- **Slow-Body:** Caddy begrenzt Header (30 s) und Body (2 min).
 
 ## Rate Limits
 
-In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-limit.ts`, eine API-Instanz, kein Redis; ein Neustart setzt die Zähler zurück). Antwort `429` mit `Retry-After`; die Offline-Queue wiederholt `429` automatisch.
+Pro Client-IP, feste 1-Minuten-Fenster, gezählt in der Tabelle `rate_limit` (`apps/server-php/src/Security/RateLimiter.php`, `RateLimitRule.php`; PHP behält zwischen Requests keinen Speicher, kein Redis). Antwort `429` mit `Retry-After`; die Offline-Queue wiederholt `429` automatisch.
 
 | Regel          | Routen                                                                          | Limit/min |
 | -------------- | ------------------------------------------------------------------------------- | --------- |
@@ -56,11 +56,11 @@ In-Memory pro Client-IP, feste 1-Minuten-Fenster (`apps/api/src/security/rate-li
 
 Zusätzlich bleiben die Login-Sperre (5 Fehlversuche in 15 min → 15 min gesperrt) und das Suchlimit (10/min je Konto) bestehen.
 
-**Client-IP hinter dem Proxy** (`apps/api/src/security/client-ip.ts`): Vertraut wird nur dem direkten Gegenüber und nur, wenn es eine Loopback-/private Adresse hat (Caddy im Compose-Netz oder der eigene Proxy des Betreibers). Dann zählt der rechte `X-Forwarded-For`-Eintrag (die Adresse, die der Proxy gesehen hat); weiter links stehende, vom Client geschriebene Einträge werden ignoriert. Caddy ersetzt einen eingehenden `X-Forwarded-For` ohnehin (keine `trusted_proxies` konfiguriert). Direkte Anfragen von öffentlichen Adressen ignorieren `X-Forwarded-For` ganz.
+**Client-IP hinter dem Proxy** (`apps/server-php/src/Security/ClientIp.php`): Vertraut wird nur dem direkten Gegenüber und nur, wenn es eine Loopback-/private Adresse hat (Caddy im Compose-Netz oder der eigene Proxy des Betreibers). Dann zählt der rechte `X-Forwarded-For`-Eintrag (die Adresse, die der Proxy gesehen hat); weiter links stehende, vom Client geschriebene Einträge werden ignoriert. Caddy ersetzt einen eingehenden `X-Forwarded-For` ohnehin (keine `trusted_proxies` konfiguriert). Direkte Anfragen von öffentlichen Adressen ignorieren `X-Forwarded-For` ganz.
 
 ## Security-Header
 
-- **API** (`apps/api/src/security/headers.ts`), nur wenn die Route den Header nicht selbst setzt (Anhänge und HTML-Ansicht behalten ihre strengeren Werte, z. B. CSP `sandbox`): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store`.
+- **API** (`apps/server-php/src/Http/Middleware/SecurityHeaders.php`), nur wenn die Route den Header nicht selbst setzt (Anhänge und HTML-Ansicht behalten ihre strengeren Werte, z. B. CSP `sandbox`): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store`.
 - **PWA** (nginx im `web`-Container, Snippet wird beim Build von `apps/web/scripts/build-csp.mjs` erzeugt, gilt also auch hinter einem eigenen Reverse Proxy):
   - CSP `default-src 'self'; script-src 'self' 'sha256-…'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
   - `script-src` ohne `'unsafe-inline'`: Die zwei Inline-Skripte von Nuxt (Import-Map, Runtime-Config) werden per SHA-256-Hash erlaubt, der beim Build berechnet wird.
@@ -87,21 +87,21 @@ Der Server speichert **alle Mails vollständig** (ADR-0001). Lesbare Inhalte in 
 
 ## Verbindungen zu Mailanbietern (IMAP/SMTP)
 
-Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und Suche in der api, alle Worker-Jobs und IMAP IDLE – läuft über einen zentralen Helfer (`packages/shared/src/mail-transport.ts`):
+Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und Suche in der API, alle Worker-Jobs und IMAP IDLE – läuft über eine zentrale Richtlinie (`apps/server-php/src/Mail/TransportPolicy.php`, SSRF-Prüfung in `Ssrf.php`; IMAP/SMTP-Clients auf PHP-Streams):
 
-- **TLS-Pflicht:** Ports 993 (IMAP) und 465 (SMTP) nutzen implizites TLS. Auf allen anderen Ports (143, 587, 25 …) ist **STARTTLS Pflicht** (ImapFlow `doSTARTTLS: true`, nodemailer `requireTLS: true`). Bietet der Server kein STARTTLS an – oder entfernt ein Angreifer im Netz die Fähigkeit (Downgrade) –, bricht die Verbindung **vor** `LOGIN`/`AUTH` ab; das Passwort geht nie im Klartext über die Leitung. Fehlercode `TLS_REQUIRED` mit deutscher Meldung, im Log nur Fehlername/-code.
+- **TLS-Pflicht:** Ports 993 (IMAP) und 465 (SMTP) nutzen implizites TLS. Auf allen anderen Ports (143, 587, 25 …) ist **STARTTLS Pflicht**. Bietet der Server kein STARTTLS an – oder entfernt ein Angreifer im Netz die Fähigkeit (Downgrade) –, bricht die Verbindung **vor** `LOGIN`/`AUTH` ab; das Passwort geht nie im Klartext über die Leitung. Fehlercode `TLS_REQUIRED` mit deutscher Meldung, im Log nur Fehlername/-code.
 - **Zertifikatsprüfung** immer gegen den konfigurierten Hostnamen (SNI/`servername`).
-- **SSRF-Schutz:** Der Hostname wird einmal aufgelöst, **alle** Adressen müssen öffentlich sein (`assertPublicHost`). IPv6-Literale werden vor der Prüfung vollständig normalisiert (alle Schreibweisen wie `0:0:0:0:0:ffff:127.0.0.1`, `0::ffff:a00:1`, Großbuchstaben, Zone-IDs); Bereiche mit eingebetteter IPv4 (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible `::/96`, SIIT `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) werden über die eingebettete IPv4-Adresse geprüft; Teredo, lokales NAT64 (`64:ff9b:1::/48`) und Dokumentationsbereiche sind gesperrt.
-- **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. Push-Endpoints: Der Socket-`lookup` des Push-Requests löst den Host genau einmal auf, prüft jede Adresse und verbindet nur mit einer geprüften; die Zertifikatsprüfung läuft weiter gegen den Hostnamen.
+- **SSRF-Schutz:** Der Hostname wird einmal aufgelöst, **alle** Adressen müssen öffentlich sein (`Ssrf`). IPv6-Literale werden vor der Prüfung vollständig normalisiert (alle Schreibweisen wie `0:0:0:0:0:ffff:127.0.0.1`, `0::ffff:a00:1`, Großbuchstaben, Zone-IDs); Bereiche mit eingebetteter IPv4 (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible `::/96`, SIIT `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) werden über die eingebettete IPv4-Adresse geprüft; Teredo, lokales NAT64 (`64:ff9b:1::/48`) und Dokumentationsbereiche sind gesperrt.
+- **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. Push-Endpoints: Der Push-Request (`StreamPushSender`) löst den Host genau einmal auf, prüft jede Adresse und verbindet nur mit einer geprüften; die Zertifikatsprüfung läuft weiter gegen den Hostnamen.
 - **Mail-Ports:** Verbindungen gehen nur an die Standard-Ports (IMAP 143/993, SMTP 25/465/587/2525), damit ein Mailkonto nicht als Port-Scanner oder Client für andere Dienste dient (ASVS N2). Weitere Ports gibt der Betreiber mit `MAIL_EXTRA_PORTS` frei.
-- **Mailserver im LAN:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (api + worker, per `.env`) erlaubt private/interne Ziele, z. B. einen eigenen Mailserver im Heimnetz, und schaltet damit den SSRF-Schutz für Mail-Hosts ab. STARTTLS-Pflicht und Zertifikatsprüfung bleiben **an**; der Server braucht ein gültiges Zertifikat für den konfigurierten Hostnamen. Push-Endpoints sind davon nicht betroffen (immer https auf öffentlichem Host).
-- **Nur Entwicklung/Tests:** `MAIL_INSECURE_TRANSPORT=1` erlaubt Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Fakes zu (GreenMail auf Plain-Ports, selbstsigniert). Standard aus, nicht in Compose/`.env.example`; die Vitest-Configs und die CI setzen ihn. Niemals produktiv setzen. Beide Schalter sind unabhängig (Audit N7).
+- **Mailserver im LAN:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (php + worker, per `.env`) erlaubt private/interne Ziele, z. B. einen eigenen Mailserver im Heimnetz, und schaltet damit den SSRF-Schutz für Mail-Hosts ab. STARTTLS-Pflicht und Zertifikatsprüfung bleiben **an**; der Server braucht ein gültiges Zertifikat für den konfigurierten Hostnamen. Push-Endpoints sind davon nicht betroffen (immer https auf öffentlichem Host).
+- **Nur Entwicklung/Tests:** `MAIL_INSECURE_TRANSPORT=1` erlaubt Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Fakes zu (GreenMail auf Plain-Ports, selbstsigniert). Standard aus, nicht in Compose/`.env.example`; die Testumgebungen (PHPUnit-Integrationstests, `e2e/stack.mjs`) und die CI setzen ihn. Niemals produktiv setzen. Beide Schalter sind unabhängig (Audit N7).
 
 ## HTML-Mails
 
 Umgesetzt in Roadmap 2.9. Drei unabhängige Schichten, jede für sich soll Script-Ausführung und ungewolltes Nachladen verhindern:
 
-1. **Sanitizing auf dem Server** (`apps/api/src/mail/html-sanitizer.ts`, sanitize-html): strikte Tag-/Attribut-Allowlist (kein `script`, `iframe`, `object`/`embed`, Formulare, `meta`/`base`/`link`, `svg`/`math`, keine Event-Handler). Links nur `http(s)`/`mailto`, immer `target="_blank" rel="noopener noreferrer nofollow"`. CSS (`style`-Attribute und `<style>`-Blöcke) wird nach dem Dekodieren von Escapes gefiltert: `@import`, `expression()`, `image-set()` u. ä. entfernt, `url()` über dieselbe URL-Policy wie Bilder.
+1. **Sanitizing auf dem Server** (`apps/server-php/src/Mail/HtmlSanitizer.php`, HTML5-Parser `masterminds/html5`, Ausgabe neu aus dem DOM serialisiert): strikte Tag-/Attribut-Allowlist (kein `script`, `iframe`, `object`/`embed`, Formulare, `meta`/`base`/`link`, `svg`/`math`, keine Event-Handler). Links nur `http(s)`/`mailto`, immer `target="_blank" rel="noopener noreferrer nofollow"`. CSS (`style`-Attribute und `<style>`-Blöcke) wird nach dem Dekodieren von Escapes gefiltert: `@import`, `expression()`, `image-set()` u. ä. entfernt, `url()` über dieselbe URL-Policy wie Bilder.
 2. **Remote-Content opt-in:** Bilder/Hintergründe aus dem Netz werden standardmäßig entfernt (`remoteContentBlocked: true`); erst nach Klick auf „Laden" (pro Nachricht, `?remote=1`) bleiben absolute `http(s)`-Bild-URLs erhalten. Inline-Bilder (`cid:`) werden als `data:`-URL eingebettet (nur Rasterformate, kein SVG, größenbegrenzt). Relative URLs werden nie geladen.
 3. **Sandboxed iframe + CSP im Client:** Darstellung per `srcdoc` mit `sandbox="allow-popups allow-popups-to-escape-sandbox"` (ohne `allow-scripts`, ohne `allow-same-origin` → opaker Origin) und CSP `default-src 'none'; img-src data: [http: https:]; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'`, kein Referrer.
 
@@ -122,13 +122,13 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 
 ## Backups
 
-- Backups werden **verschlüsselt**: eine Datei aus `pg_dump` und dem Volume `mail-data`, als Ganzes mit AES-256-GCM in 64-KiB-Blöcken verschlüsselt; der Schlüssel wird je Backup per HKDF aus `MASTER_KEY` und zufälligem Salt abgeleitet. Damit sind auch die Klartext-Metadaten der DB (Hostnamen, Benutzernamen, Adressen, Ordner) geschützt. Der `MASTER_KEY` selbst ist nie im Backup.
-- Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes PostgreSQL im nächtlichen Lauf auf der Gitea-Instanz (`msz/gitea-workflows`) (`apps/worker/test/backup.test.ts`), inkl. falschem Key und beschädigter Datei.
+- Backups werden **verschlüsselt** (`apps/server-php/src/Backup/InstanceBackup.php`): eine Datei aus einem logischen Export der Datenbank (aus PHP, ohne `mysqldump`) und den Dateien im Volume `mail-data`, als Ganzes mit AES-256-GCM in 64-KiB-Blöcken verschlüsselt; der Schlüssel wird je Backup per HKDF aus `MASTER_KEY` und zufälligem Salt abgeleitet. Damit sind auch die Klartext-Metadaten der DB (Hostnamen, Benutzernamen, Adressen, Ordner) geschützt. Der `MASTER_KEY` selbst ist nie im Backup.
+- Wiederherstellung wird **regelmäßig getestet**: automatisierter Restore-Test gegen echtes MySQL/MariaDB im nächtlichen Lauf auf der Gitea-Instanz (`msz/gitea-workflows`) (`apps/server-php/tests/Integration/BackupTest.php`), inkl. falschem Key und beschädigter Datei.
 - Restore auf einer frischen Installation funktioniert mit dokumentierten Schritten: [Backup & Restore](../operations/backup-restore.md).
 
 ## Ersteinrichtung
 
-Umgesetzt im ASVS-Review (#56, Befund M1). `POST /api/auth/setup` ist nur erlaubt, solange kein Benutzer existiert, und verlangt einen **Setup-Code** (`apps/api/src/auth/setup-code.ts`): `SETUP_TOKEN` aus der Umgebung oder – Standard – ein zufälliger Code (6×4 Base32, 120 Bit), den die api einmalig mit `FIRST-RUN SETUP CODE` ins Log schreibt. Vergleich in konstanter Zeit, nach erfolgreichem Setup wird der Code verworfen; das Rate-Limit für `setup` greift zusätzlich. Prüfung „kein Benutzer" und INSERT laufen in einer Transaktion unter `pg_advisory_xact_lock`, parallele Anfragen erzeugen so höchstens einen Benutzer.
+Umgesetzt im ASVS-Review (#56, Befund M1). `POST /api/auth/setup` ist nur erlaubt, solange kein Benutzer existiert, und verlangt einen **Setup-Code** (`apps/server-php/src/Auth/SetupCode.php`): `SETUP_TOKEN` aus der Umgebung oder – Standard – ein zufälliger Code (6×4 Base32, 120 Bit), den das Backend einmalig mit `FIRST-RUN SETUP CODE` ins Log schreibt (neuer Code: `php bin/setup-code.php`). Vergleich in konstanter Zeit, nach erfolgreichem Setup wird der Code verworfen; das Rate-Limit für `setup` greift zusätzlich. Prüfung „kein Benutzer" und INSERT laufen unter `GET_LOCK('fma-setup')`, parallele Anfragen erzeugen so höchstens einen Benutzer.
 
 ## Security Review (ASVS L2)
 
@@ -137,4 +137,4 @@ Der vollständige Audit nach OWASP ASVS 4.0.3 Level 2 mit Status jedes Befunds u
 ## Offene Punkte
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
-- Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy, Fastify-JSON-Schemas): siehe [asvs-l2.md](../security/asvs-l2.md).
+- Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy): siehe [asvs-l2.md](../security/asvs-l2.md).

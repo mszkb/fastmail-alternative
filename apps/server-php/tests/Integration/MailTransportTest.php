@@ -14,8 +14,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * IMAP/SMTP connection tests against GreenMail (GREENMAIL_HOST, plain ports
- * 3143/3025, TLS ports 3993/3465 with a self-signed certificate). Like
- * apps/api/test/connection-test-tls.test.ts: STARTTLS is mandatory on
+ * 3143/3025, TLS ports 3993/3465 with a self-signed certificate): STARTTLS
+ * is mandatory on
  * plain ports and certificates are verified unless MAIL_INSECURE_TRANSPORT.
  */
 final class MailTransportTest extends TestCase

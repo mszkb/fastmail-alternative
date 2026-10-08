@@ -17,8 +17,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * POST /api/messages/actions like apps/api/src/mail/message-actions.ts
- * (roadmap 2.4): read/unread, flag, archive, delete, move.
+ * POST /api/messages/actions (roadmap 2.4): read/unread, flag, archive, delete, move.
  *
  * Optimistic write-through: the change is applied to the database right
  * away (message_flag rows, moved/removed locations) and in the same

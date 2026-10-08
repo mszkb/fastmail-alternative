@@ -8,7 +8,7 @@ use Fma\Config;
 use Fma\Log\Logger;
 
 /**
- * IMAP/SMTP connection test like apps/api/src/mail/connection-test.ts:
+ * IMAP/SMTP connection test:
  * connect, TLS, login; the result carries a stable code and a fixed German
  * message, never a server text. Only stage and code are logged.
  */

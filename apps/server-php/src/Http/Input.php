@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Fma\Http;
 
 /**
- * JSON input helpers with the semantics of the Node backend, so validation
- * accepts and rejects the same values.
+ * JSON input helpers with JavaScript semantics (String.prototype.trim(),
+ * Number.isInteger()), so validation accepts and rejects the same values
+ * as the JavaScript clients.
  */
 final class Input
 {

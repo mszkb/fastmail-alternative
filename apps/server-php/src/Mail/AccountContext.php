@@ -9,8 +9,7 @@ use Fma\Db\Database;
 use Fma\Jobs\AccountErrorException;
 
 /**
- * An account's DEK and decrypted IMAP/SMTP logins for a job, like
- * apps/worker/src/accounts.ts. SMTP falls back to the IMAP login. Never
+ * An account's DEK and decrypted IMAP/SMTP logins for a job. SMTP falls back to the IMAP login. Never
  * log or persist these values.
  */
 final class AccountContext

@@ -1,7 +1,6 @@
 -- Schema for MySQL 8 / MariaDB 10.6+ (ADR-0013, #98): the state of the
--- PostgreSQL migrations 0001-0021 in packages/db/src/migrations, ported in
--- one step (no MySQL installation predates this). Existing installations
--- move their data over with the PostgreSQL -> MySQL migration (#108).
+-- former Node backend's PostgreSQL migrations 0001-0021, ported in one
+-- step (no MySQL installation predates this).
 --
 -- Mapping (details: docs/architecture/data-model.md, "MySQL/MariaDB"):
 -- - uuid            -> CHAR(36) ascii_bin, lowercase with hyphens (part of the encryption AAD)

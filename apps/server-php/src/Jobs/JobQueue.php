@@ -7,8 +7,7 @@ namespace Fma\Jobs;
 use Fma\Db\Database;
 
 /**
- * Job queue on the `job` table (ADR-0003), port of
- * packages/db/src/job-queue.ts and the scheduler queries of apps/worker:
+ * Job queue on the `job` table (ADR-0003), including the scheduler queries:
  * - claims with SELECT ... FOR UPDATE SKIP LOCKED, so parallel runners never
  *   take the same job;
  * - per-account isolation: one running job per account, no jobs of an

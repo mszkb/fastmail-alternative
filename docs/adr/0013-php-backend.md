@@ -1,6 +1,6 @@
 # ADR-0013: PHP-Backend mit Slim 4, MySQL/MariaDB und Cron
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-08, Owner)
 - **Datum:** 2026-10-06
 - **Roadmap:** Querschnitt (Epic #94), Milestone M3 Stable
 - **Ersetzt:** ADR-0002 (PostgreSQL), ADR-0008 (Fastify), ADR-0007 teilweise
@@ -132,3 +132,7 @@ Die nach ADR-0008/0010 vorgesehene OpenAPI-Spezifikation existiert noch nicht. S
 - Rate-Limits und Lockout kosten einen DB-Zugriff je Request; bei einem Single-User-System unkritisch.
 
 Folgeaufgaben: #96 bis #110 (Epic #94).
+
+## Umsetzung
+
+Mit #110 (2026-10-08) ist das PHP-Backend das einzige Backend: `apps/api`, `apps/worker`, `packages/db` und `packages/crypto` sind entfernt, `docker-compose.yml` startet caddy, web, php, worker und MariaDB. Abweichend von der Konsequenz oben verzichtet der Owner auf eine Datenübernahme (2026-10-08): Installationen mit dem Node-Backend werden neu aufgesetzt, die Mails kommen per IMAP wieder; der Import aus PostgreSQL (#108) ist deshalb ebenfalls entfernt.

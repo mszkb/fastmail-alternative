@@ -10,8 +10,7 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
- * Default security headers for every api response, like
- * apps/api/src/security/headers.ts. Only set when the route did not set the
+ * Default security headers for every api response. Only set when the route did not set the
  * header itself (attachment downloads and the HTML view bring their own).
  */
 final class SecurityHeaders implements MiddlewareInterface

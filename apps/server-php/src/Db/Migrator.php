@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Fma\Db;
 
 /**
- * Migration runner for MySQL/MariaDB (ADR-0013), counterpart of
- * packages/db/src/migrate.ts: plain SQL files `migrations/NNNN_name.sql`,
+ * Migration runner for MySQL/MariaDB (ADR-0013): plain SQL files `migrations/NNNN_name.sql`,
  * applied in name order, recorded in `schema_migrations`, serialized with
  * GET_LOCK so parallel starts (api + cron) do not race.
  *

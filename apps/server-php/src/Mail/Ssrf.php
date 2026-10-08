@@ -49,7 +49,7 @@ final class Ssrf
                 $addresses[] = $ip;
             }
         }
-        // getaddrinfo also reads /etc/hosts (like Node's dns.lookup); IPv4 only.
+        // getaddrinfo also reads /etc/hosts; IPv4 only.
         if ($addresses === []) {
             $addresses = gethostbynamel($host) ?: [];
         }

@@ -1,13 +1,13 @@
-# Installation mit dem PHP-Backend (Vorschau)
+# Installation auf Shared Hosting (Webspace)
 
-> **Vorschau:** Das PHP-Backend ([ADR-0013](../adr/0013-php-backend.md), `apps/server-php`) ist **noch nicht produktiv nutzbar** (Stand: [`ROADMAP.md`](../../ROADMAP.md), Epic #94). Diese Anleitung beschreibt die Installationswege, wie sie mit #109 entstehen. Für den Alltag weiterhin die [Docker-Installation mit dem Node-Backend](installation.md) verwenden.
+Das Backend ([ADR-0013](../adr/0013-php-backend.md), `apps/server-php`, PHP ≥ 8.2, Slim 4, MySQL/MariaDB) läuft nicht nur im Docker-Stack, sondern auch auf gewöhnlichem Webspace: hochladen per FTP, Hintergrundjobs per Cron. Diese Anleitung beschreibt diesen Weg.
 
-Zwei Wege:
+| Weg                                      | Für                                                  | Hintergrundjobs                                                   |
+| ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| [Webspace](#a-webspace-ftp--cron) (hier) | Shared Hosting mit PHP und MySQL/MariaDB, ohne Shell | Cron (jede Minute) oder Web-Cron; neue Mails mit Cron-Verzögerung |
+| [Docker Compose](installation.md)        | eigener Server (Raspberry Pi, VPS)                   | Dauer-Worker mit IMAP IDLE                                        |
 
-| Weg                                    | Für                                                  | Hintergrundjobs                                                   |
-| -------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| [A: Webspace](#a-webspace-ftp--cron)   | Shared Hosting mit PHP und MySQL/MariaDB, ohne Shell | Cron (jede Minute) oder Web-Cron; neue Mails mit Cron-Verzögerung |
-| [B: Docker Compose](#b-docker-compose) | eigener Server (Raspberry Pi, VPS)                   | Dauer-Worker mit IMAP IDLE                                        |
+Für einen eigenen Server ist die [Docker-Installation](installation.md) der Standard.
 
 ## A: Webspace (FTP + Cron)
 
@@ -85,54 +85,6 @@ scripts/build-php-release.sh                 # → dist/fma-<version>-php.zip
 
 Optionen: `--version X.Y.Z`, `--out <ordner>`, `--local-vendor` (nutzt das vorhandene `apps/server-php/vendor` statt Composer-Downloads, entfernt die Dev-Pakete; für Offline-Tests). Benötigt `composer` und `zip`.
 
-## B: Docker Compose
+## Docker Compose
 
-`docker-compose.php.yml` ist eine **Vorschau** neben der bisherigen `docker-compose.yml` (die unverändert bleibt). Dienste:
-
-| Dienst    | Image                        | Aufgabe                                                                            |
-| --------- | ---------------------------- | ---------------------------------------------------------------------------------- |
-| `caddy`   | `caddy:2-alpine`             | TLS, `/api/*` per FastCGI an `php:9000` (`Caddyfile.php`), Rest an `web`           |
-| `web`     | `apps/web/Dockerfile`        | PWA (nginx, Sicherheitsheader)                                                     |
-| `php`     | `apps/server-php/Dockerfile` | php-fpm für `/api/*`, wendet beim Start die Migrationen an                         |
-| `worker`  | dasselbe Image               | `php bin/worker.php`: Job-Schleife und IMAP IDLE statt Cron, Heartbeat-Healthcheck |
-| `mariadb` | `mariadb:11`                 | Datenbank (Volume `mariadb-data`)                                                  |
-
-Mails liegen verschlüsselt im Volume `mail-data` (`/data/mail`).
-
-```sh
-node scripts/setup-env.mjs          # erzeugt .env inkl. MARIADB_PASSWORD
-# bestehende .env: MARIADB_PASSWORD=<Zufallswert> ergänzen
-docker compose -f docker-compose.php.yml up -d --build
-docker compose -f docker-compose.php.yml exec php php bin/check.php
-docker compose -f docker-compose.php.yml exec php php bin/setup-code.php
-```
-
-Konfiguration über `.env`: `DOMAIN`, `MASTER_KEY`, `VAPID_*`, `MARIADB_PASSWORD` (optional `MARIADB_USER`, `MARIADB_DATABASE`, Standard `mail`), sonst wie in [Konfiguration](configuration.md). Der Web-Installer ist in dieser Variante nicht erreichbar (Caddy leitet nur `/api/*` an PHP); Check und Setup-Code laufen per `exec`.
-
-### Parallel zum Node-Stack ausprobieren (z. B. Raspberry Pi)
-
-`docker-compose.php.yml` hat einen eigenen Projektnamen (`fma-php`): Container und Volumes – vor allem `mail-data` – sind vom Node-Stack getrennt, auch im selben Verzeichnis. Damit beide gleichzeitig laufen, bekommt der PHP-Stack eigene Ports und für einen ersten Test HTTP im LAN. In der `.env` ergänzen:
-
-```sh
-MARIADB_PASSWORD=<Zufallswert>      # z. B. openssl rand -base64 24
-PHP_HTTP_PORT=8080
-PHP_HTTPS_PORT=8443
-PHP_DOMAIN=:80                       # nur HTTP; DOMAIN des Node-Stacks bleibt unberührt
-```
-
-```sh
-git fetch && git checkout claude/trusting-einstein-5dq416   # Branch mit dem PHP-Backend
-docker compose -f docker-compose.php.yml up -d --build       # erster Build auf dem Pi dauert
-docker compose -f docker-compose.php.yml ps                   # alle Dienste healthy?
-docker compose -f docker-compose.php.yml exec php php bin/check.php
-docker compose -f docker-compose.php.yml exec php php bin/setup-code.php
-```
-
-Danach `http://<pi>:8080` öffnen, Ersteinrichtung mit dem Setup-Code, Konten neu anlegen (Zugangsdaten werden getestet). Über HTTP funktionieren Service Worker, App-Installation und Push nicht (außer auf `localhost`) – zum Testen von Login, Sync, Lesen und Senden reicht es.
-
-- Derselbe `MASTER_KEY` wie im Node-Stack ist unkritisch: Die Datenbanken sind getrennt, es werden keine Daten geteilt.
-- Daten des Node-Stacks werden **nicht** übernommen; das Image enthält kein `pdo_pgsql` für den Import (#108).
-- Zurück zum Node-Stack: einfach weiterlaufen lassen. Aufräumen: `docker compose -f docker-compose.php.yml down -v` (löscht nur `fma-php_*`-Volumes).
-- Wer HTTPS testen will, stoppt den Node-Stack (`docker compose stop`) und startet den PHP-Stack ohne `PHP_*`-Ports mit der echten `DOMAIN`.
-
-Bestehende Daten aus PostgreSQL übernimmt `bin/import-postgres.php` (#108); eine fertige Umstellungsanleitung folgt mit #110.
+Der Docker-Stack (caddy, web, php, worker, mariadb) ist die Standard-Installation auf einem eigenen Server: [Installation](installation.md). Dort laufen Einrichtungs-Check und Setup-Code per `docker compose exec php php bin/check.php` bzw. `… bin/setup-code.php`; der Web-Installer ist im Docker-Stack nicht erreichbar (Caddy leitet nur `/api/*` an PHP).

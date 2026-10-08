@@ -1,18 +1,18 @@
 # PHP-Backend (`apps/server-php`)
 
-Neues Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+. Es entsteht parallel zu `apps/api` und `apps/worker` und spricht dasselbe HTTP-API unter `/api/*`, damit die PWA unverändert bleibt (Epic #94). **Noch nicht produktiv nutzbar** – portiert sind Grundgerüst, Verschlüsselung, Schema, Auth, Konten/Identitäten, Lese-API inkl. Suche, Mail-Sync (`folder_sync`, `message_sync`, `message_action`), Web Push, Aufräumen/Export, Job-Queue mit Cron, Backup/Restore und der PostgreSQL-Import. Ebenso Senden, Entwürfe und Uploads. Ebenso IMAP IDLE im Dauer-Worker. Es fehlt u. a. die Umstellung (#110); Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
+Das Backend nach [ADR-0013](../../docs/adr/0013-php-backend.md): PHP ≥ 8.2, Slim 4, MySQL 8 / MariaDB 10.6+, Hintergrundjobs per Cron oder Dauer-Worker (`bin/worker.php` mit IMAP IDLE). Es ist das einzige Backend (das frühere Node-Backend wurde mit #110 entfernt) und liefert das HTTP-API unter `/api/*`, das die PWA (`apps/web`) nutzt; der Vertrag steht in [`docs/api/openapi.yaml`](../../docs/api/README.md). Enthalten sind Auth, Konten/Identitäten, Lese-API inkl. Suche, Mail-Sync (`folder_sync`, `message_sync`, `message_action`, IMAP IDLE), Senden, Entwürfe und Uploads, Web Push, Aufräumen/Export, Job-Queue sowie Backup/Restore. Stand je Issue: [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Aufbau
 
-| Pfad                 | Inhalt                                                                                                                                 |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `public/`            | Einziger Ordner im Webroot: `index.php` (Front-Controller) und `.htaccess` (Apache)                                                    |
-| `src/`               | Code, Namespace `Fma\` (PSR-4)                                                                                                         |
-| `src/Crypto/`        | Envelope-Encryption und Backup-Stream, byte-kompatibel zu `packages/crypto`                                                            |
-| `src/Security/`      | Client-IP hinter Proxy, Rate-Limits und Login-Lockout (in der Datenbank)                                                               |
-| `src/Http/`          | Middleware (Sicherheitsheader, CSRF, Rate-Limit, Request-Log), Fehlerbehandlung                                                        |
-| `migrations/`        | SQL-Migrationen für MySQL/MariaDB (Abbildung der PostgreSQL-Typen: `docs/architecture/data-model.md`), `bin/migrate.php` wendet sie an |
-| `config.example.php` | Vorlage für `config.php` (Hoster ohne Umgebungsvariablen), liegt **außerhalb** von `public/`                                           |
+| Pfad                 | Inhalt                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `public/`            | Einziger Ordner im Webroot: `index.php` (Front-Controller) und `.htaccess` (Apache)                            |
+| `src/`               | Code, Namespace `Fma\` (PSR-4)                                                                                 |
+| `src/Crypto/`        | Envelope-Encryption und Backup-Stream (Format: `docs/architecture/data-model.md`)                              |
+| `src/Security/`      | Client-IP hinter Proxy, Rate-Limits und Login-Lockout (in der Datenbank)                                       |
+| `src/Http/`          | Middleware (Sicherheitsheader, CSRF, Rate-Limit, Request-Log), Fehlerbehandlung                                |
+| `migrations/`        | SQL-Migrationen für MySQL/MariaDB (Schema: `docs/architecture/data-model.md`), `bin/migrate.php` wendet sie an |
+| `config.example.php` | Vorlage für `config.php` (Hoster ohne Umgebungsvariablen), liegt **außerhalb** von `public/`                   |
 
 ## Konfiguration
 
@@ -31,13 +31,13 @@ Solange kein Benutzer existiert, verlangt `POST /api/auth/setup` einen Setup-Cod
 
 `php bin/check.php` prüft PHP-Version, Extensions (Pflicht: openssl, pdo_mysql, mbstring, json, hash, iconv; Argon2id), `MASTER_KEY` (gesetzt und gültig, Wert wird nie ausgegeben), Datenbankversion (MySQL ≥ 8.0.1 / MariaDB ≥ 10.6 wegen `SKIP LOCKED`), Schreibrechte für `MAIL_DATA_DIR` und – als Warnung – ausgehende Verbindungen zu IMAP 993 / SMTP 465/587. Exit-Code 0, wenn alle Pflichtprüfungen bestehen. Für Webspace ohne Shell zeigt `public/install.php` dieselben Prüfungen im Browser, schlägt eine `config.php` mit frischem `MASTER_KEY` vor (wird nie gespeichert), wendet Migrationen an und gibt nach Eingabe des `MASTER_KEY` einen Setup-Code aus; sobald ein Benutzer existiert, antwortet er mit 404 (`src/Install/Installer.php`). Anleitung und Paketaufbau: [`docs/operations/installation-php.md`](../../docs/operations/installation-php.md).
 
-## Docker (Vorschau)
+## Docker
 
-`Dockerfile` baut ein PHP-FPM-Image (Kontext `apps/server-php`), das beim Start migriert; derselbe Container startet mit `php bin/worker.php` den Dauer-Worker. Compose-Vorschau mit caddy → php-fpm per FastCGI, Worker und MariaDB: `docker-compose.php.yml` und `Caddyfile.php` im Repo-Root. Das Shared-Hosting-ZIP baut `scripts/build-php-release.sh`.
+`Dockerfile` baut ein PHP-FPM-Image (Kontext `apps/server-php`), das beim Start migriert; dasselbe Image startet mit `php bin/worker.php` den Dauer-Worker. `docker-compose.yml` im Repo-Root betreibt caddy (TLS, `/api/*` per FastCGI an php-fpm), web (statische PWA), php, worker und MariaDB (ADR-0007); erste Einrichtung mit `scripts/setup-env.sh`, Anleitung: [`docs/operations/installation.md`](../../docs/operations/installation.md). Das Shared-Hosting-ZIP baut `scripts/build-php-release.sh`.
 
 ## Hintergrundjobs (Cron)
 
-Ein Runner arbeitet die `job`-Tabelle ab (ADR-0013); es läuft immer nur einer (`GET_LOCK`), Jobs laufen nacheinander. Nur Job-Typen mit portiertem Handler werden abgeholt, alle anderen bleiben in der Warteschlange.
+Ein Runner arbeitet die `job`-Tabelle ab (ADR-0003, ADR-0013); es läuft immer nur einer (`GET_LOCK`), Jobs laufen nacheinander. Nur Job-Typen mit registriertem Handler (`src/Jobs/Bootstrap.php`) werden abgeholt.
 
 | Weg                | Aufruf                                                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------------------------------- |
@@ -75,12 +75,14 @@ php -S 127.0.0.1:3001 -t public public/index.php      # Dev-Server
 
 Unter Apache zeigt der DocumentRoot auf `public/` (`AllowOverride All` für die `.htaccess`). Die `.htaccess` im Paketordner sperrt alles, falls der ganze Ordner versehentlich im Webroot liegt.
 
-## Verschlüsselung: Testvektoren Node ↔ PHP
+## Verschlüsselung: Testvektoren
 
-`tests/fixtures/crypto-vectors-node.json` (von Node erzeugt) entschlüsselt der PHP-Test, `crypto-vectors-php.json` (von PHP erzeugt) der Node-Test `packages/crypto/test/php-compat.test.ts`. Neu erzeugen, wenn sich das Format ändert:
+`tests/Unit/Crypto/EnvelopeTest.php` prüft das Verschlüsselungsformat gegen zwei eingecheckte Fixtures:
+
+- `tests/fixtures/crypto-vectors-node.json` – Regressions-Fixture des Formats, einst von einer unabhängigen (Node-)Implementierung erzeugt; nicht neu erzeugen.
+- `tests/fixtures/crypto-vectors-php.json` – Schnappschuss der eigenen Ausgabe (`tests/Support/CryptoVectors.php`). Nur bei einer gewollten Formatänderung neu erzeugen:
 
 ```bash
-FMA_WRITE_VECTORS=1 pnpm --filter @fma/crypto exec vitest run test/php-compat.test.ts
 php apps/server-php/tests/fixtures/generate-php-vectors.php
 ```
 

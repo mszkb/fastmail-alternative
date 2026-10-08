@@ -7,8 +7,7 @@ namespace Fma\Security;
 use Fma\Db\Database;
 
 /**
- * Login lockout (ADR-0004), like apps/api/src/auth/lockout.ts but in the
- * table `login_lockout`: after 5 failed logins within 15 minutes the IP is
+ * Login lockout (ADR-0004), stored in the table `login_lockout`: after 5 failed logins within 15 minutes the IP is
  * locked out for 15 minutes.
  */
 final class LoginLockout

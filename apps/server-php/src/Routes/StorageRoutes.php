@@ -14,7 +14,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Storage usage per account like apps/api/src/mail/storage.ts (roadmap 5.4):
+ * Storage usage per account (roadmap 5.4):
  * GET /api/accounts/{id}/storage (one own account, 404 otherwise) and
  * GET /api/storage (all accounts plus the total). Summed from database
  * columns only (`message.size_bytes` of messages with a stored raw body,

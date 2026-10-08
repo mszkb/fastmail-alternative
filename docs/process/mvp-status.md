@@ -1,5 +1,7 @@
 # MVP-Status (M1)
 
+> Hinweis: Diese Bewertung bezieht sich auf das frühere Node-Backend (`apps/api`, `apps/worker`) mit PostgreSQL, das mit #110 entfernt wurde. Genannte Pfade und Tests stammen aus diesem Stand; die PHP-Entsprechungen liegen in `apps/server-php`.
+
 Stand: 2026-10-05 · Tracking-Issue: #70 · Quelle der Kriterien: [`ROADMAP.md` – MVP-Akzeptanzkriterien](../../ROADMAP.md#mvp-akzeptanzkriterien)
 
 Die Bewertung stützt sich auf Code und Tests im Repository, nicht nur auf die Status-Markierungen in der Roadmap. „Erfüllt“ heißt: Verhalten ist umgesetzt und durch automatisierte Tests (gegen echtes PostgreSQL bzw. GreenMail) abgedeckt. Was sich nur auf echter Hardware prüfen lässt, ist als „nicht verifizierbar ohne Gerät“ markiert.

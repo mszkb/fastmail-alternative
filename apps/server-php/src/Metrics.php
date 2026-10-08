@@ -7,7 +7,7 @@ namespace Fma;
 use Fma\Db\Database;
 
 /**
- * Prometheus metrics like apps/api/src/metrics.ts, kept in the table
+ * Prometheus metrics, kept in the table
  * `metric_counter` (no process memory between PHP requests). Only recorded
  * when METRICS_TOKEN is set. Process gauges (RSS, uptime) do not exist for
  * PHP requests and are omitted.

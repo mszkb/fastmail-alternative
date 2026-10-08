@@ -17,7 +17,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * /api/push/* like apps/api/src/push/routes.ts (roadmap 4.3, ADR-0005):
+ * /api/push/* (roadmap 4.3, ADR-0005):
  * - GET /api/push/vapid-public-key: the instance's VAPID public key or null;
  * - POST /api/push/subscriptions: this browser's PushSubscription for the
  *   current device (upsert by endpoint; 409 for another user's endpoint);

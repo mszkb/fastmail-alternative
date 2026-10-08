@@ -12,7 +12,7 @@ use Fma\Security\LoginLockout;
 use Fma\Security\RateLimiter;
 
 /**
- * `cleanup` job like apps/worker/src/jobs/cleanup.ts (roadmap 5.5),
+ * `cleanup` job (roadmap 5.5),
  * enqueued by the runner every CLEANUP_INTERVAL_HOURS.
  *
  * Steps, each in batches of BATCH_SIZE in short transactions; between
@@ -60,7 +60,7 @@ final class CleanupJob implements JobHandler
     /**
      * Retention settings in seconds (defaults: 7 d, 30 d, 7 d, 30 d, 24 h);
      * missing, invalid or non-positive values fall back to the default.
-     * Fractions are allowed like in Node (e.g. 0.5 hours).
+     * Fractions are allowed (e.g. 0.5 hours).
      *
      * @return array{jobRetention: int, failedJobRetention: int, uploadRetention: int, outboxRetention: int, orphanFileGrace: int}
      */

@@ -21,8 +21,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Attachments to send (roadmap 5.3), port of the upload part of
- * apps/api/src/mail/attachments.ts:
+ * Attachments to send (roadmap 5.3):
  * - POST /api/accounts/{id}/uploads: one file as the raw body
  *   (application/octet-stream, name percent-encoded in X-Filename, type in
  *   X-Content-Type), at most MAX_ATTACHMENT_BYTES, stored encrypted.
@@ -30,7 +29,7 @@ use Slim\App;
  * - POST /api/messages/{id}/attachments/copy: copies a received message's
  *   attachments into uploads of the sending account (forwarding).
  *
- * Unlike Node there is no per-process admission (MAX_CONCURRENT_UPLOADS):
+ * There is no per-process admission limit for concurrent uploads:
  * PHP-FPM bounds parallel requests itself, and the body is read in chunks
  * only up to the limit. File names are never logged.
  */

@@ -23,7 +23,7 @@ use Psr\Http\Message\ResponseInterface;
 
 /**
  * GET /api/accounts/{id}/search against GreenMail (GREENMAIL_HOST, IMAP
- * 3143), port of apps/api/test/search.test.ts.
+ * 3143).
  */
 final class SearchTest extends DatabaseTestCase
 {

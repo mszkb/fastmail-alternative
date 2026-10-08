@@ -17,7 +17,7 @@ use Fma\Mail\TransportPolicy;
 
 /**
  * IMAP IDLE in the long-running worker against GreenMail (GREENMAIL_HOST,
- * IMAP 3143, any login accepted). Port of apps/worker/test/idle.test.ts.
+ * IMAP 3143, any login accepted).
  */
 final class IdleTest extends DatabaseTestCase
 {

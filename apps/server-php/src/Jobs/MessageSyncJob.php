@@ -20,8 +20,7 @@ use Fma\Push\PushNotifyQueue;
 use ZBateson\MailMimeParser\MailMimeParser;
 
 /**
- * message_sync job, port of apps/worker/src/jobs/message-sync.ts
- * (payload {folderId, loadOlder?}). Per run:
+ * message_sync job (payload {folderId, loadOlder?}). Per run:
  * - discard locations of another uidvalidity (re-linked by Message-ID),
  * - list UIDs + flags (CONDSTORE: UID SEARCH ALL + CHANGEDSINCE only),
  *   update changed flags, remove vanished locations and orphaned messages,
@@ -46,9 +45,9 @@ use ZBateson\MailMimeParser\MailMimeParser;
  * the next run continues without duplicates), but without a follow-up job;
  * the job then ends as 'cancelled'.
  *
- * Metadata backfill (migration 0007 in Node): rows with an outdated
- * metadata_version (e.g. imported from PostgreSQL) get addresses, Reply-To
- * and threading headers re-derived from the stored raw mail, else from IMAP.
+ * Metadata backfill: rows with an outdated metadata_version get addresses,
+ * Reply-To and threading headers re-derived from the stored raw mail, else
+ * from IMAP.
  */
 final class MessageSyncJob implements JobHandler
 {
@@ -751,7 +750,7 @@ final class MessageSyncJob implements JobHandler
         return Envelope::encryptField($dek, $value, $aad);
     }
 
-    /** Deterministic id when the message has no Message-ID (same hash input as Node). */
+    /** Deterministic id when the message has no Message-ID (keep the hash input: stored rows are matched by it). */
     public static function fallbackMessageId(?\DateTimeImmutable $date, int $size, string $subjectHmac): string
     {
         $ms = $date === null ? '0' : $date->format('Uv');

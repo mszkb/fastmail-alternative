@@ -41,8 +41,8 @@ export default defineNuxtConfig({
       ],
     },
   },
-  // Local development: forward /api/* to the Fastify dev server (same paths
-  // as behind caddy in production).
+  // Local development: forward /api/* to the PHP dev server (`pnpm dev:api`;
+  // same paths as behind caddy in production).
   nitro: {
     devProxy: {
       '/api/': { target: 'http://localhost:3001/api/', changeOrigin: true },

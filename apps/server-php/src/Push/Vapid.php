@@ -8,8 +8,8 @@ use Fma\Config;
 
 /**
  * VAPID (RFC 8292) from VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT,
- * the raw base64url keys scripts/setup-env.mjs writes (same format as
- * web-push, so existing keys keep working). The JWT is ES256 with
+ * the raw base64url keys scripts/setup-env.sh writes (the format of the
+ * VAPID spec, as used by common Web Push libraries). The JWT is ES256 with
  * aud = origin of the endpoint, exp = now + 12 h (web-push default).
  */
 final class Vapid

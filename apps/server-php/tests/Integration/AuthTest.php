@@ -15,7 +15,7 @@ use Psr\Http\Message\ResponseInterface;
 
 final class AuthTest extends DatabaseTestCase
 {
-    /** Created by hash-wasm in apps/api (argon2id, m=19456, t=2, p=1). */
+    /** PHC string created by another Argon2id implementation (hash-wasm; m=19456, t=2, p=1). */
     private const NODE_HASH = '$argon2id$v=19$m=19456,t=2,p=1$BwcHBwcHBwcHBwcHBwcHBw$IKTQ7IZ/DDTn5kzWh8hSs7Til6OOKiVHqoEdW1tVAig';
     private const NODE_PASSWORD = 'node-hashed-password';
 

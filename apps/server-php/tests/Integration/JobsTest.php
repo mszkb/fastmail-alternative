@@ -17,7 +17,7 @@ use Fma\Jobs\Runner;
 use Fma\Log\Logger;
 use Fma\Tests\Support\Http;
 
-/** Port of apps/worker/test/scheduler.test.ts and account-isolation.test.ts. */
+/** Scheduler and per-account isolation of the job runner. */
 final class JobsTest extends DatabaseTestCase
 {
     private \PDO $pdo;

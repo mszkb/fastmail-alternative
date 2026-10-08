@@ -23,7 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Drafts API (roadmap 2.8), port of apps/api/src/mail/drafts.ts: PUT
+ * Drafts API (roadmap 2.8): PUT
  * creates or replaces a draft (client-generated id; `baseVersion` against
  * lost updates: 409 with the current draft unless `force`; a sent or
  * discarded draft answers 410), GET reads one or the account's list,

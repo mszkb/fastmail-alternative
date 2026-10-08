@@ -9,8 +9,8 @@ use Fma\Db\Database;
 use Fma\Db\Uuid;
 
 /**
- * Thread assignment (roadmap 2.5), port of apps/worker/src/threading.ts
- * and the pure rules of packages/shared/src/threading.ts (simplified JWZ:
+ * Thread assignment (roadmap 2.5) with the pure rules of
+ * packages/shared/src/threading.ts (simplified JWZ:
  * References/In-Reply-To, subject fallback for reply-prefixed messages
  * without references within SUBJECT_THREAD_WINDOW_SECONDS).
  *

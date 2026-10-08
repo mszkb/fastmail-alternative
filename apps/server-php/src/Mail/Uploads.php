@@ -10,8 +10,7 @@ use Fma\Db\Database;
 use Fma\Db\Uuid;
 
 /**
- * Encrypted attachment uploads (roadmap 5.3), port of the helpers in
- * apps/api/src/mail/attachments.ts and apps/worker/src/uploads.ts.
+ * Encrypted attachment uploads (roadmap 5.3).
  *
  * Per account at most MAX_PENDING_UPLOADS uploads without draft/message and
  * MAX_DRAFT_UPLOADS kept with drafts; "count + insert" is serialized by a

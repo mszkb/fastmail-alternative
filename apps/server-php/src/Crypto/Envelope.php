@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Fma\Crypto;
 
 /**
- * Envelope encryption for credentials and mail contents, byte-compatible
- * with packages/crypto/src/index.ts (ADR-0013, data model: see
- * docs/architecture/data-model.md#verschlüsselung).
+ * Envelope encryption for credentials and mail contents (ADR-0013;
+ * format regression vectors in tests/fixtures/crypto-vectors-node.json;
+ * data model: see docs/architecture/data-model.md#verschlüsselung).
  *
  * - One data key (DEK) per mail account (and per user), stored wrapped with
  *   the instance master key (KEK) from the environment/config only.
@@ -150,7 +150,7 @@ final class Envelope
     /** Derives an HMAC key (e.g. for subject_hash) from a DEK, independent from the encryption key. */
     public static function deriveHmacKey(string $dataKey, string $context): string
     {
-        // PHP: hash_hkdf(algo, ikm, length, info, salt) - Node: hkdfSync(digest, ikm, salt, info, length).
+        // hash_hkdf(algo, ikm, length, info, salt): the context is the salt, the info is fixed.
         return hash_hkdf('sha256', $dataKey, 32, 'fma-hmac-v1', $context);
     }
 
@@ -262,7 +262,7 @@ final class Envelope
     }
 
     /**
-     * Lenient base64 like Node's Buffer.from(s, 'base64'): accepts missing
+     * Lenient base64: accepts missing
      * padding and the URL-safe alphabet, ignores whitespace.
      */
     private static function base64Decode(string $value): ?string

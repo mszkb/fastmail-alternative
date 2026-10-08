@@ -9,8 +9,8 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
- * The session cookie `fma_session` (HttpOnly, SameSite=Strict, Path=/), as
- * set by apps/api. `Secure` unless the instance is plain HTTP
+ * The session cookie `fma_session` (HttpOnly, SameSite=Strict, Path=/).
+ * `Secure` unless the instance is plain HTTP
  * (`DOMAIN=:80`); COOKIE_SECURE=1/0 overrides.
  */
 final class SessionCookie

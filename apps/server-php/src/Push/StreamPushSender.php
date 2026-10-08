@@ -8,8 +8,7 @@ use Fma\Mail\MailException;
 use Fma\Mail\Ssrf;
 
 /**
- * HTTP/1.1 POST to a push service on plain PHP streams (port of
- * sendPushRequest in apps/worker/src/jobs/push-notify.ts):
+ * HTTP/1.1 POST to a push service on plain PHP streams:
  * - only https to a public host: the host is resolved exactly once, every
  *   address is checked (Fma\Mail\Ssrf) and the socket connects to a
  *   checked address, while TLS still verifies the original hostname (SNI,

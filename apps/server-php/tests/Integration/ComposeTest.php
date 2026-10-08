@@ -15,7 +15,7 @@ use Fma\Tests\Support\FakeConnectionTester;
 use Fma\Tests\Support\Http;
 use Psr\Http\Message\ResponseInterface;
 
-/** Outbox, drafts, uploads and attachment copies (#105), like apps/api's outbox/drafts/attachments tests. */
+/** Outbox, drafts, uploads and attachment copies (#105). */
 final class ComposeTest extends DatabaseTestCase
 {
     /** @var \Slim\App<\Psr\Container\ContainerInterface|null> */

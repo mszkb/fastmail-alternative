@@ -34,3 +34,4 @@ USER www-data
 # Migrations run on start; then php-fpm on 9000 (FastCGI, only in the compose network).
 CMD ["sh", "-c", "php bin/migrate.php && exec php-fpm"]
 EXPOSE 9000
+

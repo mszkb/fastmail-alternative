@@ -17,7 +17,7 @@ use Fma\Mail\TransportPolicy;
 use Fma\Mail\Uploads;
 
 /**
- * draft_sync job, port of apps/worker/src/jobs/draft-sync.ts: mirrors a
+ * draft_sync job: mirrors a
  * server-side draft into the account's IMAP Drafts folder and removes it
  * once discarded or sent.
  *
