@@ -9,7 +9,7 @@
 # downgrade is a rollback, see the docs) -> encrypted backup with the OLD
 # version -> update the checkout -> build the new images (old containers
 # keep running) -> start them and wait until all health checks pass. The
-# api applies pending migrations on startup (forward-only). The previous
+# php container applies pending migrations on startup (forward-only). The previous
 # commit and the path of the backup are written to backups/upgrade-previous
 # for a rollback (kept on a re-run after a failed build).
 set -eu
@@ -27,14 +27,24 @@ fi
 # Release images (COMPOSE_FILE with docker-compose.release.yml in .env)
 # have no build: the script would switch the checkout but keep the old
 # images running. Those upgrades are manual (FMA_VERSION in .env). Checked
-# per app service, so a build in an own override file does not count.
-CONFIG="$(docker compose config web api worker)"
-if [ "$(printf '%s\n' "$CONFIG" | grep -c '^    build:')" -ne 3 ]; then
-  echo "upgrade: web, api and worker are not all built locally (release images?) - upgrade by hand," >&2
+# per app service, so a build in an own override file does not count; the
+# worker runs the image of the php service.
+CONFIG="$(docker compose config web php)"
+if [ "$(printf '%s\n' "$CONFIG" | grep -c '^    build:')" -ne 2 ]; then
+  echo "upgrade: web and php are not both built locally (release images?) - upgrade by hand," >&2
   echo "upgrade: see 'Fertige Images statt lokal bauen' in docs/operations/upgrade.md" >&2
   exit 1
 fi
 PROJECT="$(printf '%s\n' "$CONFIG" | sed -n 's/^name: *//p' | tr -d "\"'")"
+
+# Still on the data of the former Node/PostgreSQL stack: starting the new
+# version would come up with an empty database. That move is its own script.
+if [ -n "$PROJECT" ] && docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1 &&
+  [ ! -f "$BACKUP_DIR/migrated-to-php" ]; then
+  echo "upgrade: this installation still has its data in PostgreSQL - run ./scripts/migrate-to-php.sh," >&2
+  echo "upgrade: see 'Umstieg auf das PHP-Backend' in docs/operations/migration.md" >&2
+  exit 1
+fi
 
 PREVIOUS="$(git rev-parse HEAD)"
 echo "upgrade: current version $(git describe --tags --always)"
@@ -159,9 +169,9 @@ echo "upgrade: new version $(git describe --tags --always)"
 echo "upgrade: 4/5 build images"
 docker compose build
 
-echo "upgrade: 5/5 start (migrations run in the api) and wait for health checks"
+echo "upgrade: 5/5 start (migrations run in the php container) and wait for health checks"
 if ! docker compose up -d --wait; then
-  echo "upgrade: services did not become healthy - check 'docker compose logs api worker'" >&2
+  echo "upgrade: services did not become healthy - check 'docker compose logs php worker'" >&2
   exit 1
 fi
 

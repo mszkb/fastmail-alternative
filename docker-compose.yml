@@ -1,15 +1,50 @@
-# Deployment per ADR-0007. Configuration via .env (see .env.example and
-# scripts/setup-env.mjs). Operators who bring their own reverse proxy can
-# remove the caddy service; everything else keeps working.
+# Deployment per ADR-0007/ADR-0013: caddy, web (static PWA), php (php-fpm
+# for /api/*), worker (job loop + IMAP IDLE, same image) and MariaDB.
+# Configuration via .env (see .env.example and scripts/setup-env.sh).
+# Operators who bring their own reverse proxy can remove the caddy service;
+# everything else keeps working.
 #
 # Resource policy (lean self-hosting): every service has a memory limit so
 # the stack cannot exhaust a small VPS/Raspberry Pi, and logs are rotated.
+#
+# No fixed project name: volumes (mail-data!) keep the names of the former
+# Node stack in the same directory, so an upgrade reuses them. The profile
+# "migration" (postgres-legacy, pg-import) is only for the one-time move from
+# PostgreSQL (scripts/migrate-to-php.sh, docs/operations/migration.md).
 
 x-logging: &default-logging
   driver: json-file
   options:
     max-size: '10m'
     max-file: '3'
+
+x-php-env: &php-env
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DOMAIN: ${DOMAIN:-:80}
+  COOKIE_SECURE: ${COOKIE_SECURE:-}
+  MAIL_DATA_DIR: /data/mail
+  MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.sh)}
+  MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
+  SETUP_TOKEN: ${SETUP_TOKEN:-}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
+  MAIL_EXTRA_PORTS: ${MAIL_EXTRA_PORTS:-}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
+  SYNC_MIN_INTERVAL_SECONDS: ${SYNC_MIN_INTERVAL_SECONDS:-10}
+  IMAP_IDLE: ${IMAP_IDLE:-1}
+  IMAP_IDLE_MAX_CONNECTIONS: ${IMAP_IDLE_MAX_CONNECTIONS:-50}
+  IMAP_MAX_CONNECTIONS_PER_HOST: ${IMAP_MAX_CONNECTIONS_PER_HOST:-4}
+  MAX_RAW_MESSAGE_BYTES: ${MAX_RAW_MESSAGE_BYTES:-20971520}
+  MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-10485760}
+  MAX_ATTACHMENTS_TOTAL_BYTES: ${MAX_ATTACHMENTS_TOTAL_BYTES:-14680064}
+  CLEANUP_INTERVAL_HOURS: ${CLEANUP_INTERVAL_HOURS:-6}
+  BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+  DB_HOST: mariadb
+  DB_PORT: '3306'
+  DB_NAME: ${MARIADB_DATABASE:-mail}
+  DB_USER: ${MARIADB_USER:-mail}
+  DB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
 
 services:
   caddy:
@@ -18,8 +53,8 @@ services:
     logging: *default-logging
     mem_limit: 64m
     ports:
-      - '80:80'
-      - '443:443'
+      - '${HTTP_PORT:-80}:80'
+      - '${HTTPS_PORT:-443}:443'
     environment:
       DOMAIN: ${DOMAIN:-:80}
     volumes:
@@ -29,7 +64,7 @@ services:
     depends_on:
       web:
         condition: service_healthy
-      api:
+      php:
         condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1']
@@ -54,146 +89,135 @@ services:
       retries: 6
       start_period: 10s
 
-  api:
+  # php-fpm for /api/* (FastCGI on 9000, only inside the compose network).
+  # Applies migrations on start (Dockerfile CMD).
+  php:
     build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+      context: apps/server-php
+    image: fma-server-php:local
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: 192m
+    mem_limit: 256m
     volumes:
-      # Read-only: the api decrypts raw mails on demand (HTML view, 2.9);
-      # only the worker writes the volume.
-      - mail-data:/app/mail-data:ro
+      # Encrypted raw mails, attachments and uploads (ADR-0001).
+      - mail-data:/data/mail
     environment:
-      NODE_ENV: production
-      DOMAIN: ${DOMAIN:-:80}
-      COOKIE_SECURE: ${COOKIE_SECURE:-}
-      MAIL_DATA_DIR: /app/mail-data
-      MAX_ATTACHMENT_BYTES: ${MAX_ATTACHMENT_BYTES:-10485760}
-      MAX_ATTACHMENTS_TOTAL_BYTES: ${MAX_ATTACHMENTS_TOTAL_BYTES:-14680064}
-      MAX_CONCURRENT_UPLOADS: ${MAX_CONCURRENT_UPLOADS:-2}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
-      SETUP_TOKEN: ${SETUP_TOKEN:-}
-      # Optional: mail server in the LAN (SSRF exception, TLS stays mandatory).
-      MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
-      MAIL_EXTRA_PORTS: ${MAIL_EXTRA_PORTS:-}
-      MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
-      MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
-      # Public key only: the api hands it to browsers; sending is the worker's job.
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-mail}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-mail}
+      <<: *php-env
     expose:
-      - '3001'
+      - '9000'
+    healthcheck:
+      test: ['CMD', 'php', '-r', 'exit(@fsockopen("127.0.0.1", 9000) ? 0 : 1);']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  # Long-running worker (job loop + IMAP IDLE) instead of cron; same image.
+  worker:
+    image: fma-server-php:local
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 384m
+    command: ['php', 'bin/worker.php']
+    volumes:
+      - mail-data:/data/mail
+    environment:
+      <<: *php-env
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      WORKER_HEARTBEAT_FILE: /tmp/worker-heartbeat
+    # The loop touches the heartbeat file after each pass; stale = stuck.
     healthcheck:
       test:
         [
           'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          'php',
+          '-r',
+          '$$f = "/tmp/worker-heartbeat"; exit(is_file($$f) && time() - filemtime($$f) < 120 ? 0 : 1);',
         ]
-      interval: 15s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
-    restart: unless-stopped
-    logging: *default-logging
-    # Headroom for IMAP sync peaks: a large body costs up to ~5x its size
-    # while it is downloaded, encrypted and parsed (MAX_RAW_MESSAGE_BYTES,
-    # default 20 MB -> ~100 MB), at most one per job slot (WORKER_CONCURRENCY).
-    mem_limit: 384m
-    volumes:
-      # Encrypted raw mails and attachments (ADR-0001).
-      - mail-data:/app/mail-data
-    environment:
-      NODE_ENV: production
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      MAIL_DATA_DIR: /app/mail-data
-      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-120}
-      SYNC_MIN_INTERVAL_SECONDS: ${SYNC_MIN_INTERVAL_SECONDS:-10}
-      IMAP_IDLE: ${IMAP_IDLE:-1}
-      IMAP_IDLE_MAX_CONNECTIONS: ${IMAP_IDLE_MAX_CONNECTIONS:-50}
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
-      IMAP_MAX_CONNECTIONS_PER_HOST: ${IMAP_MAX_CONNECTIONS_PER_HOST:-4}
-      MAX_RAW_MESSAGE_BYTES: ${MAX_RAW_MESSAGE_BYTES:-20971520}
-      CLEANUP_INTERVAL_HOURS: ${CLEANUP_INTERVAL_HOURS:-6}
-      JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-7}
-      FAILED_JOB_RETENTION_DAYS: ${FAILED_JOB_RETENTION_DAYS:-30}
-      UPLOAD_RETENTION_HOURS: ${UPLOAD_RETENTION_HOURS:-168}
-      OUTBOX_RETENTION_DAYS: ${OUTBOX_RETENTION_DAYS:-30}
-      ORPHAN_FILE_GRACE_HOURS: ${ORPHAN_FILE_GRACE_HOURS:-24}
-      # Optional: mail server in the LAN (SSRF exception, TLS stays mandatory).
-      MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
-      MAIL_EXTRA_PORTS: ${MAIL_EXTRA_PORTS:-}
-      MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.mjs)}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: ${POSTGRES_USER:-mail}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-mail}
-    # No HTTP port: the main loop writes a heartbeat file (/tmp/worker-heartbeat,
-    # WORKER_HEARTBEAT_FILE) every 30 s after a successful `SELECT 1`;
-    # dist/healthcheck.js fails if it is older than 120 s (loop stuck or
-    # database unreachable). start_period covers migrations on startup.
-    healthcheck:
-      test: ['CMD', 'node', 'dist/healthcheck.js']
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 120s
     depends_on:
-      postgres:
+      php:
         condition: service_healthy
 
-  postgres:
-    image: postgres:17-alpine
+  mariadb:
+    image: mariadb:11
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 256m
-    # Single-user tuning: small buffers, few connections.
+    # Single-user tuning: small buffer pool, few connections.
     command:
-      - -c
-      - shared_buffers=32MB
-      - -c
-      - effective_cache_size=128MB
-      - -c
-      - max_connections=20
+      [
+        '--innodb-buffer-pool-size=64M',
+        '--max-connections=30',
+        '--character-set-server=utf8mb4',
+        '--collation-server=utf8mb4_unicode_ci',
+      ]
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-mail}
+      MARIADB_USER: ${MARIADB_USER:-mail}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      # Root is not needed by the app; a random one is printed once to the log.
+      MARIADB_RANDOM_ROOT_PASSWORD: '1'
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # --- One-time move from the Node stack (profile "migration") ---
+  # The PostgreSQL of the former stack on its old volume, only reachable
+  # inside the compose network while scripts/migrate-to-php.sh runs.
+  postgres-legacy:
+    profiles: ['migration']
+    image: postgres:17-alpine
+    logging: *default-logging
+    mem_limit: 256m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mail}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-mail}
-    # Loopback-only port for local development and SSH-tunnel access to the
-    # Pi deployment (not reachable from the network). POSTGRES_HOST_PORT
-    # moves it when the host already runs a PostgreSQL on 5432.
-    ports:
-      - '127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 6
+      retries: 12
       start_period: 10s
 
+  # The PHP image plus pdo_pgsql: applies the migrations and imports the
+  # old database (apps/server-php/bin/import-postgres.php).
+  pg-import:
+    profiles: ['migration']
+    build:
+      context: apps/server-php
+      target: import
+    image: fma-server-php-import:local
+    logging: *default-logging
+    environment:
+      <<: *php-env
+      LEGACY_DATABASE_URL: postgres://${POSTGRES_USER:-mail}:${POSTGRES_PASSWORD:-}@postgres-legacy:5432/${POSTGRES_DB:-mail}
+    command: ['sh', '-c', 'php bin/migrate.php && php bin/import-postgres.php "$$LEGACY_DATABASE_URL"']
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      postgres-legacy:
+        condition: service_healthy
+
 volumes:
-  postgres-data:
-  # Encrypted mail bodies and attachments (ADR-0001), used from phase 2 on.
+  mariadb-data:
   mail-data:
   caddy-data:
   caddy-config:
+  # Only read by the migration profile; delete it after a successful move.
+  postgres-data:

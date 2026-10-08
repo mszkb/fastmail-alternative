@@ -8,7 +8,7 @@ COPY composer.json composer.lock ./
 # Extensions are installed in the runtime stage, not in this one.
 RUN composer install --no-dev --no-interaction --no-progress --no-scripts --prefer-dist --optimize-autoloader --ignore-platform-req='ext-*'
 
-FROM php:8.3-fpm-alpine
+FROM php:8.3-fpm-alpine AS runtime
 # pdo_mysql for MySQL/MariaDB, pcntl for the worker's signal handling;
 # openssl, mbstring, sodium and argon2 are part of the official image.
 RUN docker-php-ext-install pdo_mysql pcntl \
@@ -34,3 +34,18 @@ USER www-data
 # Migrations run on start; then php-fpm on 9000 (FastCGI, only in the compose network).
 CMD ["sh", "-c", "php bin/migrate.php && exec php-fpm"]
 EXPOSE 9000
+
+# One-time move from the former Node/PostgreSQL stack (bin/import-postgres.php,
+# scripts/migrate-to-php.sh): the runtime image plus pdo_pgsql. Never the
+# default target, so the running image stays without PostgreSQL libraries.
+FROM runtime AS import
+USER root
+RUN apk add --no-cache libpq \
+    && apk add --no-cache --virtual .pg-build postgresql-dev \
+    && docker-php-ext-install pdo_pgsql \
+    && apk del .pg-build
+USER www-data
+CMD ["php", "bin/import-postgres.php"]
+
+# Default target: the runtime image.
+FROM runtime
