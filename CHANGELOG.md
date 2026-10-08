@@ -68,6 +68,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - **Betreiber:** Der `php`-Container startet nicht mehr auf einer Datenbank, die eine neuere Version schon migriert hat (`migration refused` im Log), und Cron, Worker und Web-Cron arbeiten dann keine Jobs ab (`jobs refused`); zurück nur per Rollback mit Restore. `backup restore --force` baut das Schema in diesem Fall neu auf
 - **Betreiber:** `backup restore` als root übergibt die wiederhergestellten Dateien in `mail-data` selbst an `www-data`; das `chown` nach dem Restore entfällt
 - Mails über `MAX_RAW_MESSAGE_BYTES`, deren Inhalt bei einem früheren Lauf noch nicht gespeichert wurde, lädt der Sync beim Nachholen nicht mehr erst komplett herunter, sondern überspringt sie anhand der bekannten Größe (wie beim ersten Abgleich)
+- **Sync großer Postfächer:** Bei Ordnern mit mehr als etwa 12 000 Mails auf Servern mit CONDSTORE (z. B. Dovecot, Fastmail) hielt der inkrementelle Abgleich die meisten Mails für beim Server gelöscht und entfernte die lokalen Kopien – die IMAP-Antwort mit allen UIDs wurde nach 64 KB abgeschnitten, und das Auslesen der UID-Liste scheiterte bei sehr langen Zeilen am Regex-Limit. Auf dem Server ging nichts verloren. Jetzt werden Antwortzeilen vollständig gelesen, die Liste ohne Regex geparst, und ein Abgleich mit einer unvollständigen UID-Liste (weniger UIDs als der Server Mails meldet) bricht ab, statt zu löschen. Gefunden mit dem Lasttest gegen Dovecot (#60)
 
 ### Security
 

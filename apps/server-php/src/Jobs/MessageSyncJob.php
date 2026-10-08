@@ -185,6 +185,12 @@ final class MessageSyncJob implements JobHandler
                 $allUids = array_keys($serverFlags);
             }
         }
+        // A UID list shorter than the server's EXISTS count is incomplete (cut-off
+        // response, parser limit): reconciling with it would delete messages that
+        // are still there. Stop instead; the next run tries again.
+        if (\count($allUids) < $selected['exists']) {
+            throw new MailException('PROTOCOL', 'incomplete UID list');
+        }
         $serverUids = array_flip($allUids);
 
         $progress->report('expunge', $folderId);

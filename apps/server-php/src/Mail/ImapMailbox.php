@@ -68,17 +68,41 @@ final class ImapMailbox
     {
         $uids = [];
         foreach ($this->client->command("UID SEARCH {$criteria}") as $line) {
-            if (preg_match('/^\* SEARCH((?: \d+)*)/i', rtrim($line), $m) === 1) {
-                foreach (explode(' ', trim($m[1])) as $uid) {
-                    if ($uid !== '') {
-                        $uids[] = (int) $uid;
-                    }
-                }
+            foreach (self::searchResult($line) ?? [] as $uid) {
+                $uids[] = $uid;
             }
         }
         sort($uids);
 
         return array_values(array_unique($uids));
+    }
+
+    /**
+     * UIDs of a `* SEARCH` line, null for other lines. Parsed without a
+     * repeating regex: with tens of thousands of UIDs that hits the PCRE
+     * limits, preg_match() fails and every message would look expunged.
+     * Stops at the first non-number (e.g. CONDSTORE's `(MODSEQ n)`).
+     *
+     * @return list<int>|null
+     */
+    public static function searchResult(string $line): ?array
+    {
+        $line = rtrim($line, "\r\n");
+        if (strncasecmp($line, '* SEARCH', 8) !== 0 || (\strlen($line) > 8 && $line[8] !== ' ')) {
+            return null;
+        }
+        $uids = [];
+        foreach (explode(' ', substr($line, 9)) as $token) {
+            if ($token === '') {
+                continue;
+            }
+            if (!ctype_digit($token)) {
+                break;
+            }
+            $uids[] = (int) $token;
+        }
+
+        return $uids;
     }
 
     /** IMAP date of a SEARCH SINCE criterion (calendar day in UTC). */
