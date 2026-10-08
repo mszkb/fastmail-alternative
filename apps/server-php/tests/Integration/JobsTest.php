@@ -271,11 +271,11 @@ final class JobsTest extends DatabaseTestCase
         self::assertSame(0, $this->queue->enqueueDueSyncs(1));
     }
 
-    public function testPriorityTypesAreClaimedFirstAndUnportedTypesStayQueued(): void
+    public function testPriorityTypesAreClaimedFirstAndUnregisteredTypesStayQueued(): void
     {
         $this->queue->enqueue('cleanup');
         $send = $this->queue->enqueue('send_message', $this->account());
-        $unported = $this->queue->enqueue('push_notify');
+        $unregistered = $this->queue->enqueue('push_notify');
         $order = [];
         $record = static function (Job $job) use (&$order): bool {
             $order[] = $job->type;
@@ -285,7 +285,7 @@ final class JobsTest extends DatabaseTestCase
         $this->runner(cleanup: self::handler($record), send_message: self::handler($record))->runOnce(30);
         self::assertSame(['send_message', 'cleanup'], $order);
         self::assertSame('done', $this->state($send));
-        self::assertSame('queued', $this->state($unported));
+        self::assertSame('queued', $this->state($unregistered));
     }
 
     public function testCoalescesDraftSync(): void
