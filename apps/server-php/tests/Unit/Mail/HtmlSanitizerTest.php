@@ -356,7 +356,9 @@ final class HtmlSanitizerTest extends TestCase
             '<style>a::after { content: "</style><script>" }</style>',
         ] as $input) {
             $html = self::clean($input);
-            self::assertSame(1, preg_match('/^<style>(.*?)<\/style>/s', $html, $m), $html);
+            if (preg_match('/^<style>(.*?)<\/style>/s', $html, $m) !== 1) {
+                self::fail($html);
+            }
             self::assertStringNotContainsString('<', $m[1], $input);
             self::assertStringNotContainsString('<script', $html, $input);
         }

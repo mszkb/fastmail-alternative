@@ -57,7 +57,9 @@ final class CondstoreSyncTest extends DatabaseTestCase
         self::assertIsResource($process);
         $this->process = $process;
         stream_set_timeout($pipes[1], 5);
-        self::assertSame(1, preg_match('/^PORT (\d+)$/', trim((string) fgets($pipes[1])), $m), 'fake IMAP server did not start');
+        if (preg_match('/^PORT (\d+)$/', trim((string) fgets($pipes[1])), $m) !== 1) {
+            self::fail('fake IMAP server did not start');
+        }
         $this->port = (int) $m[1];
 
         $this->masterKey = base64_encode(random_bytes(32));
