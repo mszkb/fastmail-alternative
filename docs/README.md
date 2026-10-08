@@ -23,7 +23,7 @@
 | [operations/configuration.md](operations/configuration.md)             | Referenz aller Umgebungsvariablen (`.env`)                                            |
 | [operations/troubleshooting.md](operations/troubleshooting.md)         | Fehlersuche: Logs, Healthchecks, Kontostatus, TLS, Push, Migrationen                  |
 | [operations/system-requirements.md](operations/system-requirements.md) | Systemanforderungen und gemessener Ressourcenverbrauch                                |
-| [operations/load-test.md](operations/load-test.md)                     | Lasttest: viele Konten, große Postfächer (Methode, Messwerte)                         |
+| [operations/load-test.md](operations/load-test.md)                     | Lasttest (Node-Backend, historisch): Methode und Messwerte                            |
 | [operations/migration.md](operations/migration.md)                     | Umzug auf einen neuen Server, Konfigurations-Export/-Import                           |
 | [operations/backup-restore.md](operations/backup-restore.md)           | Verschlüsselte Backups, Cron, Restore, Restore-Test                                   |
 | [operations/upgrade.md](operations/upgrade.md)                         | Upgrade auf neue Version, Migrationen, Rollback                                       |

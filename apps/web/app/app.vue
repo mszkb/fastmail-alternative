@@ -576,8 +576,8 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...options,
     headers: {
-      // Only send a content-type when there is a body; Fastify rejects empty
-      // JSON bodies otherwise (broke DELETE logout/revocation before).
+      // Only send a content-type when there is a body; some servers reject
+      // empty JSON bodies otherwise (broke DELETE logout/revocation before).
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...(options.headers ?? {}),
     },

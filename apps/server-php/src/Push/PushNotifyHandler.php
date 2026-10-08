@@ -68,7 +68,7 @@ final class PushNotifyHandler implements JobHandler
             throw new \InvalidArgumentException('push_notify job without userId');
         }
         if ($this->vapid === null) {
-            // Nothing to retry: the instance has no VAPID keys (setup-env.mjs).
+            // Nothing to retry: the instance has no VAPID keys (scripts/setup-env.sh).
             $this->logger->warn('push_notify skipped: VAPID keys not configured');
 
             return 'not_configured';

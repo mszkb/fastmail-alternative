@@ -7,14 +7,14 @@ Doku für alle, die eine eigene Instanz betreiben. In dieser Reihenfolge lesen:
 | 1       | [Installation](installation.md)       | Voraussetzungen, `.env` erzeugen, Domain, Start, Ersteinrichtung, Konto, App und Push |
 | 2       | [Konfiguration](configuration.md)     | Alle Variablen der `.env` mit Standardwerten, Ports, Volumes, Speicherlimits          |
 | 3       | [Backup & Restore](backup-restore.md) | Verschlüsselte Backups, Cron, Offsite-Kopie, Restore, Bedeutung des `MASTER_KEY`      |
-| 4       | [Upgrade](upgrade.md)                 | Neue Version einspielen, Migrationen, Rollback                                        |
+| 4       | [Upgrade](upgrade.md)                 | Neue Version einspielen, Migrationen, Rollback, Installationen mit dem Node-Backend   |
 | 5       | [Troubleshooting](troubleshooting.md) | Logs, Healthchecks, Kontostatus, TLS, Push, Speicher, Migrationsfehler                |
 
 Außerdem:
 
-- [Installation mit dem PHP-Backend (Vorschau)](installation-php.md) – Webspace per FTP + Cron oder Docker mit MariaDB ([ADR-0013](../adr/0013-php-backend.md))
+- [Installation auf Shared Hosting](installation-php.md) – Webspace mit PHP und MySQL/MariaDB per FTP + Cron, ohne Docker ([ADR-0013](../adr/0013-php-backend.md))
 - [Systemanforderungen](system-requirements.md) – gemessener Ressourcenverbrauch, Hardware-Empfehlung
-- [Lasttest](load-test.md) – viele Konten, große Postfächer: Methode, Messwerte, Ausführung auf dem Pi
+- [Lasttest](load-test.md) – viele Konten, große Postfächer: historische Messwerte des früheren Node-Backends
 - [Umzug auf einen neuen Server](migration.md) – vollständig per Backup oder per Konfigurations-Export
 - [Master-Key-Rotation](../process/key-rotation.md)
 - [Changelog](../../CHANGELOG.md) – vor jedem Upgrade auf **Betreiber:**-Einträge prüfen

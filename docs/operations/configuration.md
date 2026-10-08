@@ -12,32 +12,32 @@ Dienst `php` ist php-fpm (`/api/*`), `worker` der Dauer-Worker mit demselben Ima
 
 ## Kern
 
-| Variable        | Standard | Pflicht | Dienst        | Zweck                                                                                                                                                                                                                       |
-| --------------- | -------- | ------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOMAIN`        | `:80`    | nein    | caddy, php    | Site-Adresse für Caddy. Domainname (z. B. `mail.example.org`) = automatisches Let's-Encrypt-TLS und `Secure`-Session-Cookie; `:80` = HTTP ohne TLS (nur Test im LAN).                                                       |
-| `COOKIE_SECURE` | leer     | nein    | php           | Überschreibt das `Secure`-Flag des Session-Cookies: `1` = immer setzen, z. B. hinter einem eigenen TLS-Proxy, der auf caddy mit `DOMAIN=:80` weiterleitet; `0` = nie. Leer = automatisch (`Secure` außer bei `DOMAIN=:80`). |
-| `LOG_LEVEL`     | `info`   | nein    | php, worker   | `debug`, `info`, `warn` oder `error`. Logs enthalten auch auf `debug` keine Mailinhalte oder Zugangsdaten.                                                                                                                  |
+| Variable        | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                       |
+| --------------- | -------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DOMAIN`        | `:80`    | nein    | caddy, php  | Site-Adresse für Caddy. Domainname (z. B. `mail.example.org`) = automatisches Let's-Encrypt-TLS und `Secure`-Session-Cookie; `:80` = HTTP ohne TLS (nur Test im LAN).                                                       |
+| `COOKIE_SECURE` | leer     | nein    | php         | Überschreibt das `Secure`-Flag des Session-Cookies: `1` = immer setzen, z. B. hinter einem eigenen TLS-Proxy, der auf caddy mit `DOMAIN=:80` weiterleitet; `0` = nie. Leer = automatisch (`Secure` außer bei `DOMAIN=:80`). |
+| `LOG_LEVEL`     | `info`   | nein    | php, worker | `debug`, `info`, `warn` oder `error`. Logs enthalten auch auf `debug` keine Mailinhalte oder Zugangsdaten.                                                                                                                  |
 
 ## Sicherheit und Verschlüsselung
 
-| Variable                   | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------------- | -------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MASTER_KEY`               | –        | **ja**  | php, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern.                                                                                                                                                                 |
-| `MASTER_KEY_ID`            | `v1`     | nein    | php, worker | Version des Master-Keys. Nur zusammen mit einer [Key-Rotation](../process/key-rotation.md) ändern.                                                                                                                                                                                                                                                            |
-| `METRICS_TOKEN`            | leer     | nein    | php         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                                                                                                                                                                                    |
+| Variable                   | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | -------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MASTER_KEY`               | –        | **ja**  | php, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern.                                                                                                                                                                                                    |
+| `MASTER_KEY_ID`            | `v1`     | nein    | php, worker | Version des Master-Keys. Nur zusammen mit einer [Key-Rotation](../process/key-rotation.md) ändern.                                                                                                                                                                                                                                                                                               |
+| `METRICS_TOKEN`            | leer     | nein    | php         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                                                                                                                                                                                                                       |
 | `SETUP_TOKEN`              | leer     | nein    | php         | Setup-Code für die [Ersteinrichtung](installation.md#6-benutzer-anlegen-ersteinrichtung). Leer = das Backend erzeugt beim ersten Aufruf der Einrichtung einen zufälligen Code und schreibt ihn einmalig ins Log (`docker compose logs php`); einen neuen gibt `docker compose exec php php bin/setup-code.php` aus. Gesetzt = dieser Wert (wird nie geloggt). Nach der Einrichtung ohne Wirkung. |
-| `MAIL_ALLOW_PRIVATE_HOSTS` | leer     | nein    | php, worker | `1` = private/interne Mail-Hosts erlauben (eigener Mailserver im LAN/Heimnetz). Schaltet den SSRF-Schutz für Mail-Hosts ab – nur setzen, wenn nötig. STARTTLS-Pflicht und Zertifikatsprüfung bleiben aktiv (gültiges Zertifikat für den Hostnamen nötig).                                                                                                     |
-| `MAIL_EXTRA_PORTS`         | leer     | nein    | php, worker | Zusätzlich erlaubte Mail-Ports, kommagetrennt (z. B. `1143,10465`). Standard sind nur IMAP 143/993 und SMTP 25/465/587/2525; andere Ports lehnen Verbindungstest, Import und Worker ab (Fehler „Port nicht erlaubt“).                                                                                                                                         |
+| `MAIL_ALLOW_PRIVATE_HOSTS` | leer     | nein    | php, worker | `1` = private/interne Mail-Hosts erlauben (eigener Mailserver im LAN/Heimnetz). Schaltet den SSRF-Schutz für Mail-Hosts ab – nur setzen, wenn nötig. STARTTLS-Pflicht und Zertifikatsprüfung bleiben aktiv (gültiges Zertifikat für den Hostnamen nötig).                                                                                                                                        |
+| `MAIL_EXTRA_PORTS`         | leer     | nein    | php, worker | Zusätzlich erlaubte Mail-Ports, kommagetrennt (z. B. `1143,10465`). Standard sind nur IMAP 143/993 und SMTP 25/465/587/2525; andere Ports lehnen Verbindungstest, Import und Worker ab (Fehler „Port nicht erlaubt“).                                                                                                                                                                            |
 
 > **Nur Entwicklung, niemals produktiv:** `MAIL_INSECURE_TRANSPORT=1` erlaubt IMAP/SMTP im Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Endpoints zu. Gedacht für Tests gegen GreenMail (`make check`, die CI); er wird von `docker-compose.yml` bewusst nicht durchgereicht.
 
 ## Datenbank
 
-| Variable           | Standard | Pflicht | Dienst               | Zweck                                                                         |
-| ------------------ | -------- | ------- | -------------------- | ----------------------------------------------------------------------------- |
-| `MARIADB_PASSWORD` | –        | **ja**  | mariadb, php, worker | Passwort des Datenbankbenutzers (von `setup-env.sh` zufällig erzeugt)        |
-| `MARIADB_USER`     | `mail`   | nein    | mariadb, php, worker | Datenbankbenutzer                                                             |
-| `MARIADB_DATABASE` | `mail`   | nein    | mariadb, php, worker | Datenbankname                                                                 |
+| Variable           | Standard | Pflicht | Dienst               | Zweck                                                                 |
+| ------------------ | -------- | ------- | -------------------- | --------------------------------------------------------------------- |
+| `MARIADB_PASSWORD` | –        | **ja**  | mariadb, php, worker | Passwort des Datenbankbenutzers (von `setup-env.sh` zufällig erzeugt) |
+| `MARIADB_USER`     | `mail`   | nein    | mariadb, php, worker | Datenbankbenutzer                                                     |
+| `MARIADB_DATABASE` | `mail`   | nein    | mariadb, php, worker | Datenbankname                                                         |
 
 Benutzer, Passwort und Datenbankname übernimmt MariaDB nur beim **allerersten** Start (leeres Volume `mariadb-data`). Spätere Änderungen in der `.env` ändern die Datenbank nicht – dann starten php und worker nicht mehr (Anmeldung an der Datenbank schlägt fehl). Das root-Passwort von MariaDB ist zufällig und wird von der App nicht gebraucht.
 
@@ -64,16 +64,16 @@ Intern (nicht in der `.env`): `WORKER_HEARTBEAT_FILE` (Standard `/tmp/worker-hea
 
 | Variable                      | Standard           | Pflicht | Dienst | Zweck                                                                                                                                          |
 | ----------------------------- | ------------------ | ------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_ATTACHMENT_BYTES`        | `10485760` (10 MB) | nein    | php    | Maximale Größe einer hochgeladenen Datei (php-fpm nimmt Uploads bis 16 MB an, Limit 256 MB RAM)                                               |
+| `MAX_ATTACHMENT_BYTES`        | `10485760` (10 MB) | nein    | php    | Maximale Größe einer hochgeladenen Datei (php-fpm nimmt Uploads bis 16 MB an, Limit 256 MB RAM)                                                |
 | `MAX_ATTACHMENTS_TOTAL_BYTES` | `14680064` (14 MB) | nein    | php    | Alle Anhänge einer Nachricht zusammen. base64 macht sie um ein Drittel größer, so bleibt die Kopie in „Gesendet“ unter `MAX_RAW_MESSAGE_BYTES` |
 
 ## Aufräumen (Cleanup)
 
 Der Worker räumt regelmäßig auf.
 
-| Variable                 | Standard | Pflicht | Dienst      | Zweck                                   |
-| ------------------------ | -------- | ------- | ----------- | --------------------------------------- |
-| `CLEANUP_INTERVAL_HOURS` | `6`      | nein    | worker      | Wie oft der Cleanup-Job läuft (Stunden) |
+| Variable                 | Standard | Pflicht | Dienst | Zweck                                   |
+| ------------------------ | -------- | ------- | ------ | --------------------------------------- |
+| `CLEANUP_INTERVAL_HOURS` | `6`      | nein    | worker | Wie oft der Cleanup-Job läuft (Stunden) |
 
 Die Aufbewahrungsfristen sind fest eingestellt: erledigte Jobs 7 Tage, fehlgeschlagene Jobs 30 Tage, nie verwendete Uploads 7 Tage (damit offline geschriebene Mails noch gesendet werden können), gesendete oder fehlgeschlagene Postausgangs-Einträge 30 Tage, nicht mehr referenzierte Dateien in `mail-data` nach 24 Stunden.
 
@@ -89,14 +89,12 @@ Leere Schlüssel = Push aus; die App zeigt dann „Auf dem Server sind keine VAP
 
 ## Backup-Skript
 
-`scripts/backup.sh` liest diese Variablen aus der Shell-Umgebung (z. B. in der Crontab), **nicht** aus der `.env`, siehe [Backup & Restore](backup-restore.md).
+`scripts/backup.sh` liest diese Variablen aus der Shell-Umgebung (z. B. in der Crontab); `BACKUP_KEEP_DAYS` ersatzweise aus der `.env`. Siehe [Backup & Restore](backup-restore.md).
 
 | Variable           | Standard    | Zweck                                                     |
 | ------------------ | ----------- | --------------------------------------------------------- |
 | `BACKUP_DIR`       | `./backups` | Zielverzeichnis auf dem Host                              |
 | `BACKUP_KEEP_DAYS` | `14`        | Ältere `fma-backup-*.fmabk` im Zielordner werden gelöscht |
-
-`BACKUP_KEEP_DAYS` in der `.env` wirkt nur, wenn `php bin/console backup create` direkt (ohne das Skript) aufgerufen wird.
 
 ## Release-Images (optional)
 
@@ -114,10 +112,10 @@ Folgende Werte sind in `docker-compose.yml`, `Caddyfile`, `apps/server-php/Docke
 
 | Was               | Wert                                                                                                                                                                                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Öffentliche Ports | 80, 443 (caddy); auf dem Host änderbar mit `HTTP_PORT`/`HTTPS_PORT` in der `.env`. MariaDB hat keinen Host-Port                                                                                       |
+| Öffentliche Ports | 80, 443 (caddy); auf dem Host änderbar mit `HTTP_PORT`/`HTTPS_PORT` in der `.env`. MariaDB hat keinen Host-Port                                                                                        |
 | Interne Ports     | web 3000 (HTTP), php 9000 (FastCGI), mariadb 3306 – nur im Compose-Netz                                                                                                                                |
 | Volumes           | `mariadb-data` (Datenbank; hochgeladene Anhänge liegen verschlüsselt in der Tabelle `attachment_upload`, also hier), `mail-data` (verschlüsselte Rohmails), `caddy-data` (Zertifikate), `caddy-config` |
-| Speicherlimits    | caddy 64 MB, web 64 MB, php 256 MB, worker 384 MB, mariadb 256 MB (Buffer-Pool 64 MB, max. 30 Verbindungen)                                                                                           |
+| Speicherlimits    | caddy 64 MB, web 64 MB, php 256 MB, worker 384 MB, mariadb 256 MB (Buffer-Pool 64 MB, max. 30 Verbindungen)                                                                                            |
 | Request-Timeouts  | Caddy: Header 30 s, Body 2 min                                                                                                                                                                         |
 | PHP               | `memory_limit` 256 MB, `upload_max_filesize`/`post_max_size` 16 MB                                                                                                                                     |
 | Logs              | json-file, 10 MB × 3 Dateien je Dienst                                                                                                                                                                 |
@@ -128,12 +126,12 @@ Wer einen eigenen Reverse Proxy betreibt, lässt am einfachsten caddy mit `DOMAI
 
 Auf Shared Hosting ([Installation](installation-php.md)) kommen hinzu:
 
-| Variable                                               | Standard | Zweck                                                                                                         |
-| ------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                         | –        | `mysql://benutzer:passwort@host:3306/datenbank` (alternativ `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) |
-| `MAIL_DATA_DIR`                                        | `data/`  | Verzeichnis der verschlüsselten Rohmails, außerhalb des Webroots                                              |
-| `CRON_TIME_BUDGET_SECONDS`                             | `50`     | Laufzeit je Cron-Aufruf; unter dem Laufzeitlimit des Hosters halten                                           |
-| `CRON_TOKEN`                                           | leer     | Geheimnis für den Web-Cron (`cron.php`); leer = Web-Cron aus                                                  |
-| `BACKUP_DIR`, `BACKUP_KEEP_DAYS`                       | `backups/`, `14` | Ziel und Aufbewahrung für `php bin/console backup create`                                             |
+| Variable                         | Standard         | Zweck                                                                                                                  |
+| -------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                   | –                | `mysql://benutzer:passwort@host:3306/datenbank` (alternativ `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) |
+| `MAIL_DATA_DIR`                  | `data/`          | Verzeichnis der verschlüsselten Rohmails, außerhalb des Webroots                                                       |
+| `CRON_TIME_BUDGET_SECONDS`       | `50`             | Laufzeit je Cron-Aufruf; unter dem Laufzeitlimit des Hosters halten                                                    |
+| `CRON_TOKEN`                     | leer             | Geheimnis für den Web-Cron (`cron.php`); leer = Web-Cron aus                                                           |
+| `BACKUP_DIR`, `BACKUP_KEEP_DAYS` | `backups/`, `14` | Ziel und Aufbewahrung für `php bin/console backup create`                                                              |
 
-Die Aufbewahrungsfristen des Cleanups liest das Backend aus `JOB_RETENTION_DAYS`, `FAILED_JOB_RETENTION_DAYS`, `UPLOAD_RETENTION_HOURS`, `OUTBOX_RETENTION_DAYS` und `ORPHAN_FILE_GRACE_HOURS`; im Docker-Stack reicht `docker-compose.yml` sie nicht durch (es gelten die Standardwerte oben), in `config.php` lassen sie sich setzen.
+Die Aufbewahrungsfristen des Cleanups liest das Backend aus `JOB_RETENTION_DAYS`, `FAILED_JOB_RETENTION_DAYS`, `UPLOAD_RETENTION_HOURS`, `OUTBOX_RETENTION_DAYS` und `ORPHAN_FILE_GRACE_HOURS`; im Docker-Stack über die `.env` (Standardwerte siehe `.env.example`: 7 / 30 Tage, 168 h, 30 Tage, 24 h), auf Webspace in `config.php`.

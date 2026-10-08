@@ -2,7 +2,9 @@
 
 > Gemessen auf dem Referenz-Deployment: Raspberry Pi (arm64, 2 GB RAM, SD-Karte), Debian 13, rootless Docker. Stand: 2026-10-02, Phase 1 (Skeleton ohne Mail-Daten).
 
-## Gemessener Verbrauch (Stack im Leerlauf, alles healthy)
+> **Hinweis:** Die Messwerte unten stammen noch vom **früheren Node-Backend** (api, worker, PostgreSQL). Der heutige Stack (caddy, web, php, worker, mariadb, [ADR-0013](../adr/0013-php-backend.md)) ist noch nicht neu gemessen; seine Obergrenzen setzen die Speicherlimits: caddy 64 MB, web 64 MB, php 256 MB, worker 384 MB, mariadb 256 MB (Buffer-Pool 64 MB).
+
+## Gemessener Verbrauch (Node-Backend, Stack im Leerlauf, alles healthy)
 
 | Service                 | RAM         | CPU (idle)                                |
 | ----------------------- | ----------- | ----------------------------------------- |
@@ -35,13 +37,13 @@ Der Build-Cache wächst bei jedem Image-Build (bis mehrere GB) und sollte gelege
 | Architektur | linux/arm64 oder linux/amd64 | –                                                                                               |
 | Netzwerk    | –                            | Ports 80/443 öffentlich erreichbar (für Let's-Encrypt-TLS, sobald eine Domain konfiguriert ist) |
 
-Software: Docker (Engine + Compose-Plugin) auf Linux; Rootless-Betrieb wird empfohlen und ist getestet.
+Software: Docker (Engine + Compose-Plugin) auf Linux; Rootless-Betrieb wird empfohlen und ist getestet. Ohne Docker: Webspace mit PHP ≥ 8.2 und MySQL ≥ 8.0.1 / MariaDB ≥ 10.6 ([Installation auf Shared Hosting](installation-php.md)).
 
 ## Wachstum im Betrieb
 
 - **`mail-data`-Volume** (verschlüsselte Rohmails und Anhänge, ADR-0001) skaliert mit der Summe aller verbundenen Postfächer – das ist der dominierende Speicherfaktor.
-- **postgres** bleibt bei Einzelbenutzer klein: Metadaten inkl. verschlüsselnder Betreff-/Snippet-Felder liegen im Bereich weniger MB bis ~100 MB bei großen Postfächern.
-- **RAM-Spitzen** nur beim IMAP-Initial-Sync (Verschlüsselung + Schreiben); danach kehrt der Stack ins Leerlauf-Niveau zurück. Memory-Limits in der `docker-compose.yml` deckeln jeden Service hart. Richtwert: Eine große Mail belegt beim Sync (Download, binäre Verschlüsselung, Text-Extraktion ohne Anhänge im Speicher) bis etwa das 5-Fache ihrer Größe – bei `MAX_RAW_MESSAGE_BYTES` = 20 MB rund 100 MB je gleichzeitig laufendem Job (`WORKER_CONCURRENCY`, Standard 4; Worker-Limit 384 MB). Die HTML-Ansicht der API braucht für eine 20-MB-Mail rund 60 MB (Anhänge werden gestreamt und verworfen, nur kleine Inline-Bilder bleiben im Speicher). Wer das Limit senkt (z. B. auf 1 GB-Systemen), setzt `MAX_RAW_MESSAGE_BYTES` und/oder `WORKER_CONCURRENCY` in der `.env` herunter.
+- **mariadb** (Volume `mariadb-data`) bleibt bei Einzelbenutzer klein: Metadaten inkl. verschlüsselnder Betreff-/Snippet-Felder liegen im Bereich weniger MB bis ~100 MB bei großen Postfächern.
+- **RAM-Spitzen** nur beim IMAP-Initial-Sync (Verschlüsselung + Schreiben); danach kehrt der Stack ins Leerlauf-Niveau zurück. Memory-Limits in der `docker-compose.yml` deckeln jeden Service hart. Richtwert: Eine große Mail belegt beim Sync (Download, binäre Verschlüsselung, Text-Extraktion ohne Anhänge im Speicher) bis etwa das 5-Fache ihrer Größe – bei `MAX_RAW_MESSAGE_BYTES` = 20 MB rund 100 MB (Worker-Limit 384 MB; der Worker arbeitet die Jobs nacheinander ab). Diese Richtwerte stammen aus dem Node-Backend. Wer den Speicher knapper halten will (z. B. auf 1 GB-Systemen), setzt `MAX_RAW_MESSAGE_BYTES` in der `.env` herunter.
 - **Logs** sind auf 10 MB × 3 Dateien pro Service rotiert.
 
 ## Hinweis zu Memory-Limits auf Raspberry-Pi-Systemen

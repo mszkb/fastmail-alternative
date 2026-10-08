@@ -8,13 +8,13 @@ Ohne eigenen Server, auf Webspace mit PHP und MySQL/MariaDB (FTP + Cron): [Insta
 
 ## 1. Voraussetzungen
 
-| Was          | Anforderung                                                                                                                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Betriebssys. | Linux, `linux/arm64` (z. B. Raspberry Pi 4/5 mit 64-Bit-OS) oder `linux/amd64`                                                                                                                |
-| Hardware     | min. 1 vCPU, 1 GB RAM (+ Swap/zram), 8 GB Disk **+ Postfachgröße**; empfohlen 2 GB RAM, 32 GB Disk – Details: [Systemanforderungen](system-requirements.md)                                   |
-| Software     | Docker Engine mit **Compose v2** (`docker compose version` funktioniert), `git`, `openssl` (für `scripts/setup-env.sh`). Rootless Docker ist getestet |
-| Domain       | ein DNS-Name (z. B. `mail.example.org`) mit A- bzw. AAAA-Eintrag auf die öffentliche IP des Servers                                                                                           |
-| Netzwerk     | Ports **80** und **443** aus dem Internet erreichbar (Let's Encrypt prüft über Port 80/443, Caddy holt das Zertifikat automatisch)                                                            |
+| Was          | Anforderung                                                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Betriebssys. | Linux, `linux/arm64` (z. B. Raspberry Pi 4/5 mit 64-Bit-OS) oder `linux/amd64`                                                                              |
+| Hardware     | min. 1 vCPU, 1 GB RAM (+ Swap/zram), 8 GB Disk **+ Postfachgröße**; empfohlen 2 GB RAM, 32 GB Disk – Details: [Systemanforderungen](system-requirements.md) |
+| Software     | Docker Engine mit **Compose v2** (`docker compose version` funktioniert), `git`, `openssl` (für `scripts/setup-env.sh`). Rootless Docker ist getestet       |
+| Domain       | ein DNS-Name (z. B. `mail.example.org`) mit A- bzw. AAAA-Eintrag auf die öffentliche IP des Servers                                                         |
+| Netzwerk     | Ports **80** und **443** aus dem Internet erreichbar (Let's Encrypt prüft über Port 80/443, Caddy holt das Zertifikat automatisch)                          |
 
 **Ohne Domain (nur Test im LAN):** Mit `DOMAIN=:80` läuft die Instanz per HTTP ohne TLS. Das reicht zum Ausprobieren im Browser am Rechner, aber **nicht** für den Alltag: Browser aktivieren Service Worker, App-Installation, Offline-Modus und Web Push nur über HTTPS (Ausnahme: `localhost`). Auf iPhone/iPad funktionieren Push und Installation also nur mit Domain und TLS.
 
@@ -87,12 +87,12 @@ docker compose up -d --build --wait     # oder: make up
 
 Das baut die Images (web und php; der worker nutzt das php-Image), startet alle Dienste und wartet, bis alle (caddy, web, php, worker, mariadb) `healthy` sind. Beim Start legt der php-Container das Datenbankschema an (`php bin/migrate.php`, danach php-fpm).
 
-| Dienst    | Image                        | Aufgabe                                                                                     |
-| --------- | ---------------------------- | ------------------------------------------------------------------------------------------- |
-| `caddy`   | `caddy:2-alpine`             | TLS (Let's Encrypt), `/api/*` per FastCGI an `php:9000`, alles andere an `web`              |
-| `web`     | `apps/web/Dockerfile`        | PWA (statisch, nginx, Sicherheitsheader)                                                    |
-| `php`     | `apps/server-php/Dockerfile` | php-fpm für `/api/*`; wendet beim Start ausstehende Migrationen an                          |
-| `worker`  | dasselbe Image wie `php`     | `php bin/worker.php`: Hintergrundjobs (Sync, Versand, Push, Aufräumen) und IMAP IDLE        |
+| Dienst    | Image                        | Aufgabe                                                                                   |
+| --------- | ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `caddy`   | `caddy:2-alpine`             | TLS (Let's Encrypt), `/api/*` per FastCGI an `php:9000`, alles andere an `web`            |
+| `web`     | `apps/web/Dockerfile`        | PWA (statisch, nginx, Sicherheitsheader)                                                  |
+| `php`     | `apps/server-php/Dockerfile` | php-fpm für `/api/*`; wendet beim Start ausstehende Migrationen an                        |
+| `worker`  | dasselbe Image wie `php`     | `php bin/worker.php`: Hintergrundjobs (Sync, Versand, Push, Aufräumen) und IMAP IDLE      |
 | `mariadb` | `mariadb:11`                 | Datenbank (Volume `mariadb-data`), nur im Compose-Netz erreichbar, kein Port auf dem Host |
 
 Verschlüsselte Rohmails liegen im Volume `mail-data`.

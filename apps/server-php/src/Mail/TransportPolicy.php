@@ -7,8 +7,7 @@ namespace Fma\Mail;
 use Fma\Config;
 
 /**
- * Transport policy for every IMAP/SMTP connection, port of
- * packages/shared/src/mail-transport.ts:
+ * Transport policy for every IMAP/SMTP connection:
  * - ports: IMAP 143/993, SMTP 25/465/587/2525 plus MAIL_EXTRA_PORTS;
  * - SSRF: resolve once, every address public, connect to the checked
  *   address with the original hostname for SNI and the certificate check

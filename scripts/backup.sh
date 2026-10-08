@@ -12,7 +12,9 @@ set -eu
 
 cd "$(dirname "$0")/.."
 BACKUP_DIR="${BACKUP_DIR:-$PWD/backups}"
-KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
+# BACKUP_KEEP_DAYS: from the environment, else from .env, else 14.
+KEEP_DAYS="${BACKUP_KEEP_DAYS:-$(sed -n 's/^BACKUP_KEEP_DAYS=//p' .env 2>/dev/null | tail -n 1)}"
+KEEP_DAYS="${KEEP_DAYS:-14}"
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
 

@@ -2,10 +2,10 @@
 
 Das Backend ([ADR-0013](../adr/0013-php-backend.md), `apps/server-php`, PHP ≥ 8.2, Slim 4, MySQL/MariaDB) läuft nicht nur im Docker-Stack, sondern auch auf gewöhnlichem Webspace: hochladen per FTP, Hintergrundjobs per Cron. Diese Anleitung beschreibt diesen Weg.
 
-| Weg                                       | Für                                                  | Hintergrundjobs                                                   |
-| ----------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| [Webspace](#a-webspace-ftp--cron) (hier)  | Shared Hosting mit PHP und MySQL/MariaDB, ohne Shell | Cron (jede Minute) oder Web-Cron; neue Mails mit Cron-Verzögerung |
-| [Docker Compose](installation.md)         | eigener Server (Raspberry Pi, VPS)                   | Dauer-Worker mit IMAP IDLE                                        |
+| Weg                                      | Für                                                  | Hintergrundjobs                                                   |
+| ---------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| [Webspace](#a-webspace-ftp--cron) (hier) | Shared Hosting mit PHP und MySQL/MariaDB, ohne Shell | Cron (jede Minute) oder Web-Cron; neue Mails mit Cron-Verzögerung |
+| [Docker Compose](installation.md)        | eigener Server (Raspberry Pi, VPS)                   | Dauer-Worker mit IMAP IDLE                                        |
 
 Für einen eigenen Server ist die [Docker-Installation](installation.md) der Standard.
 

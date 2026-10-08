@@ -1,5 +1,7 @@
 # Security Review – OWASP ASVS 4.0.3 Level 2
 
+> Hinweis: Dieser Review bezieht sich auf das frühere Node-Backend (`apps/api`, `apps/worker`, `packages/crypto`, `packages/db`) mit PostgreSQL, das mit #110 entfernt wurde. Befunde und Pfadangaben bleiben als Stand des Reviews unverändert; die Entsprechungen liegen heute in `apps/server-php` (aktueller Stand der Maßnahmen: [architecture/security.md](../architecture/security.md)).
+
 Audit für Roadmap 6.1 / Issue #56, Stand 2026-10-04. Leitfaden ist [OWASP ASVS 4.0.3](https://owasp.org/www-project-application-security-verification-standard/) Level 2; geprüft wurden Code in `apps/api`, `apps/worker`, `apps/web`, `packages/crypto`, `packages/db`, `packages/shared` sowie `Caddyfile`, `apps/web/nginx.conf`, `docker-compose.yml`, Dockerfiles und CI. Zeilenangaben beziehen sich auf den Stand **vor** den Fixes. Das Daten- und Sicherheitsmodell selbst steht in [architecture/security.md](../architecture/security.md).
 
 ## Status der Befunde
