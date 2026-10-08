@@ -80,19 +80,22 @@ final class MessageSyncTest extends DatabaseTestCase
         return ImapClient::connect($this->policy, new HostConfig($this->greenmail, 3143, false, $user, 'pw'));
     }
 
-    private function append(string $user, string $subject, string $messageId, string $flags = '', string $extraHeaders = '', string $body = "Hallo Welt\r\n"): void
+    private function append(string $user, string $subject, string $messageId, string $flags = '', string $extraHeaders = '', string $body = "Hallo Welt\r\n", string $date = 'Mon, 5 Oct 2026 10:00:00 +0000', string $mailbox = 'INBOX'): void
     {
         $mail = "From: \"Alice Example\" <alice@example.org>\r\nTo: Bob <bob@example.org>\r\nSubject: {$subject}\r\nMessage-ID: {$messageId}\r\n"
-            . "Date: Mon, 5 Oct 2026 10:00:00 +0000\r\n{$extraHeaders}Content-Type: text/plain; charset=utf-8\r\n\r\n{$body}";
+            . "Date: {$date}\r\n{$extraHeaders}Content-Type: text/plain; charset=utf-8\r\n\r\n{$body}";
         $imap = $this->imap($user);
-        $imap->command('APPEND INBOX (' . $flags . ') {' . \strlen($mail) . "+}\r\n" . $mail);
+        $imap->command("APPEND {$mailbox} ({$flags}) {" . \strlen($mail) . "+}\r\n" . $mail);
         $imap->logout();
     }
 
-    /** @param array<string, mixed> $payload */
-    private function sync(string $account, array $payload, float $seconds = 60, int $limit = MessageSyncJob::MESSAGE_SYNC_LIMIT): bool
+    /**
+     * @param array<string, mixed>  $payload
+     * @param array<string, string> $env     extra configuration
+     */
+    private function sync(string $account, array $payload, float $seconds = 60, int $limit = MessageSyncJob::MESSAGE_SYNC_LIMIT, array $env = []): bool
     {
-        $config = Config::fromArray(['MASTER_KEY' => $this->masterKey, 'MAIL_DATA_DIR' => $this->dataDir]);
+        $config = Config::fromArray(['MASTER_KEY' => $this->masterKey, 'MAIL_DATA_DIR' => $this->dataDir] + $env);
         $job = new MessageSyncJob(self::$db, $config, new JobQueue(self::$db), new FileStore($this->dataDir), new Logger('test', 'debug', $this->logStream), $this->policy, $limit);
 
         return $job->run(new Job('1', 'message_sync', $account, $payload, 1), new Deadline($seconds));
@@ -254,6 +257,98 @@ final class MessageSyncTest extends DatabaseTestCase
         self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']]));
         self::assertSame(['<chain-1@example.org>', '<chain-2@example.org>'], $references());
         self::assertSame(3, (int) Database::run($pdo, 'SELECT metadata_version FROM message WHERE id = ?', [$id])->fetchColumn());
+    }
+
+    /** @return array<string, ?string> Message-ID header -> thread id */
+    private function threads(string $account): array
+    {
+        $rows = Database::run(self::$db->pdo(), 'SELECT message_id_header, thread_id FROM message WHERE account_id = ?', [$account])->fetchAll();
+
+        return array_column($rows, 'thread_id', 'message_id_header');
+    }
+
+    public function testMergesThreadsWhenTheParentArrivesLaterInAnotherFolder(): void
+    {
+        $a = $this->setUpAccount();
+        // The reply to <p@thread.test> arrives first; the parent only shows up later in Sent.
+        $this->append($a['user'], 'Re: Re: Planung', '<c@thread.test>', '', "In-Reply-To: <p@thread.test>\r\nReferences: <p@thread.test>\r\n", "Kind\r\n", 'Thu, 3 Sep 2026 08:00:00 +0000');
+        $this->append($a['user'], 'Planung', '<r@thread.test>', '', '', "Wurzel\r\n", 'Tue, 1 Sep 2026 08:00:00 +0000');
+        // Same subject, no reply prefix, no references: unrelated.
+        $this->append($a['user'], 'Planung', '<u@thread.test>', '', '', "Fremd\r\n", 'Wed, 2 Sep 2026 08:00:00 +0000');
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']]));
+        $threads = $this->threads($a['account']);
+        self::assertCount(3, array_filter($threads));
+        self::assertNotSame($threads['<r@thread.test>'], $threads['<c@thread.test>']);
+        self::assertNotSame($threads['<r@thread.test>'], $threads['<u@thread.test>']);
+
+        $imap = $this->imap($a['user']);
+        $imap->command('CREATE Sent');
+        $imap->logout();
+        $this->append($a['user'], 'Re: Planung', '<p@thread.test>', '\\Seen', "In-Reply-To: <r@thread.test>\r\nReferences: <r@thread.test>\r\n", "Elternteil\r\n", 'Wed, 2 Sep 2026 08:00:00 +0000', 'Sent');
+        $sent = Uuid::v4();
+        Database::run(self::$db->pdo(), "INSERT INTO folder (id, account_id, path, special_use) VALUES (?, ?, 'Sent', 'sent')", [$sent, $a['account']]);
+        self::assertTrue($this->sync($a['account'], ['folderId' => $sent]));
+
+        $threads = $this->threads($a['account']);
+        $root = $threads['<r@thread.test>'];
+        self::assertNotNull($root);
+        self::assertSame($root, $threads['<p@thread.test>']);
+        self::assertSame($root, $threads['<c@thread.test>']);
+        self::assertNotSame($root, $threads['<u@thread.test>']);
+        // The merged-away thread is gone; last_message_at follows the newest message.
+        self::assertSame(2, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM thread WHERE account_id = ?', [$a['account']])->fetchColumn());
+        self::assertSame('2026-09-03 08:00:00.000000', Database::run(self::$db->pdo(), 'SELECT last_message_at FROM thread WHERE id = ?', [$root])->fetchColumn());
+    }
+
+    public function testRemovesThreadsLeftWithoutMessages(): void
+    {
+        $a = $this->setUpAccount();
+        $this->append($a['user'], 'Bleibt', '<keep@thread.test>');
+        $this->append($a['user'], 'Verschwindet', '<gone@thread.test>');
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']]));
+        $threads = $this->threads($a['account']);
+        $gone = $threads['<gone@thread.test>'];
+        self::assertNotNull($gone);
+        self::assertNotSame($threads['<keep@thread.test>'], $gone);
+
+        $imap = $this->imap($a['user']);
+        $imap->command('SELECT INBOX');
+        $imap->command('UID STORE ' . $this->messages($a['folder'], $a['dek'])[1]['uid'] . ' +FLAGS (\\Deleted)');
+        $imap->command('EXPUNGE');
+        $imap->logout();
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']]));
+
+        self::assertSame(['<keep@thread.test>'], array_keys($this->threads($a['account'])));
+        self::assertFalse(Database::run(self::$db->pdo(), 'SELECT 1 FROM thread WHERE id = ?', [$gone])->fetchColumn());
+        self::assertSame(1, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM thread WHERE account_id = ?', [$a['account']])->fetchColumn());
+    }
+
+    public function testSkipsBodiesAboveMaxRawMessageBytes(): void
+    {
+        $a = $this->setUpAccount();
+        $this->append($a['user'], 'Klein', '<small@example.org>');
+        $this->append($a['user'], 'Riesig', '<large@example.org>', '', '', str_repeat("Zeile mit Inhalt\r\n", 200));
+        $env = ['MAX_RAW_MESSAGE_BYTES' => '2000'];
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']], env: $env));
+
+        // Both messages are listed with their metadata ...
+        $messages = $this->messages($a['folder'], $a['dek']);
+        self::assertSame(['Klein', 'Riesig'], array_column($messages, 'subject'));
+        $pdo = self::$db->pdo();
+        $body = static fn(string $id): mixed => Database::run($pdo, 'SELECT storage_ref, skip_reason FROM message_body WHERE message_id = ?', [$id])->fetch();
+        self::assertSame(['storage_ref' => FileStore::storageRef($a['account'], $messages[0]['id']), 'skip_reason' => null], $body($messages[0]['id']));
+        // ... but the oversized raw mail is neither downloaded nor stored: a skip marker instead.
+        $large = $messages[1]['id'];
+        self::assertSame(['storage_ref' => null, 'skip_reason' => 'too_large'], $body($large));
+        self::assertDirectoryDoesNotExist("{$this->dataDir}/{$a['account']}/{$large}");
+        self::assertSame('', Envelope::decryptField($a['dek'], (string) Database::run($pdo, 'SELECT snippet_enc FROM message WHERE id = ?', [$large])->fetchColumn(), Envelope::messageFieldAad('snippet', $large)));
+        rewind($this->logStream);
+        self::assertStringContainsString('too_large', (string) stream_get_contents($this->logStream));
+
+        // The marker sticks: the next run does not try again (no duplicate rows, no file).
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']], env: $env));
+        self::assertSame(1, (int) Database::run($pdo, 'SELECT COUNT(*) FROM message_body WHERE message_id = ?', [$large])->fetchColumn());
+        self::assertDirectoryDoesNotExist("{$this->dataDir}/{$a['account']}/{$large}");
     }
 
     public function testParsesFetchResponses(): void

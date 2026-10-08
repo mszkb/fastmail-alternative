@@ -52,7 +52,7 @@ Benutzer, Passwort und Datenbankname übernimmt MariaDB nur beim **allerersten**
 | `IMAP_IDLE`                     | `1`                | nein    | worker      | IMAP IDLE für den Posteingang: neue Mails in Sekunden. `0` = nur periodischer Abgleich                                                                                        |
 | `IMAP_IDLE_MAX_CONNECTIONS`     | `50`               | nein    | worker      | Höchstzahl gleichzeitiger IDLE-Verbindungen (eine je aktivem Konto)                                                                                                           |
 | `IMAP_MAX_CONNECTIONS_PER_HOST` | `4`                | nein    | php, worker | Gleichzeitig laufende Jobs (= IMAP-Verbindungen) gegen denselben IMAP-Host über alle Konten; IDLE zählt nicht mit. Senken, wenn ein Anbieter über zu viele Verbindungen klagt |
-| `MAX_RAW_MESSAGE_BYTES`         | `20971520` (20 MB) | nein    | worker      | Größere Rohmails werden nicht gespeichert (nur Kopfzeilen und Vorschau). Eine große Mail braucht beim Abgleich ein Mehrfaches ihrer Größe im Worker-RAM (Limit 384 MB)        |
+| `MAX_RAW_MESSAGE_BYTES`         | `20971520` (20 MB) | nein    | worker      | Größere Rohmails werden nicht gespeichert (nur Metadaten, ohne Vorschau). Eine große Mail braucht beim Abgleich ein Mehrfaches ihrer Größe im Worker-RAM (Limit 384 MB)       |
 
 Der Worker arbeitet die Jobs **nacheinander** ab (ein Runner, höchstens ein laufender Job je Konto); eine Einstellung für parallele Jobs gibt es nicht.
 
