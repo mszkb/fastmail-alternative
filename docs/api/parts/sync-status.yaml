@@ -5,7 +5,6 @@ paths:
   /api/sync/status:
     get:
       operationId: getSyncStatus
-      x-backends: [php]
       tags: [accounts]
       summary: Sync state and progress of all accounts
       description: |
@@ -26,7 +25,6 @@ paths:
   /api/sync/cancel:
     post:
       operationId: cancelAllSyncs
-      x-backends: [php]
       tags: [accounts]
       summary: Stop the syncs of all accounts
       description: |
@@ -47,7 +45,6 @@ paths:
       - $ref: '#/components/parameters/Id'
     post:
       operationId: cancelAccountSync
-      x-backends: [php]
       tags: [accounts]
       summary: Stop the sync of one account
       description: |

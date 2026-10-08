@@ -7,7 +7,7 @@ namespace Fma\Mail;
 use Fma\Config;
 
 /**
- * Layout of the mail-data directory, same as the Node worker (ADR-0001):
+ * Layout of the mail-data directory (ADR-0001):
  * `<MAIL_DATA_DIR>/<account uuid>/<message uuid>/raw.eml.enc`, with
  * `message_body.storage_ref` = `<account>/<message>/raw.eml.enc` relative
  * to the root. Only paths, deletion and scanning live here; nothing is

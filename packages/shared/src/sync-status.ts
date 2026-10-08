@@ -7,7 +7,7 @@
  *   folder name from its folder list (principles 5/6).
  * - Polling runs only while a sync of some account is active (queued,
  *   running, cancelling), every SYNC_STATUS_POLL_MS; afterwards it stops.
- * - Backends without the endpoints (the Node backend, ADR-0013) answer 404:
+ * - Backends without the endpoints (e.g. an older server) answer 404:
  *   the client then derives the state from the `syncing` flag of
  *   GET /api/accounts (syncStatusFromAccounts) and offers no stop button.
  *

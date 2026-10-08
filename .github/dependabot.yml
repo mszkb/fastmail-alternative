@@ -16,6 +16,15 @@ updates:
         dependency-type: development
         update-types: [minor, patch]
 
+  - package-ecosystem: composer
+    directory: /apps/server-php
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      composer:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -26,8 +35,7 @@ updates:
 
   - package-ecosystem: docker
     directories:
-      - /apps/api
-      - /apps/worker
+      - /apps/server-php
       - /apps/web
     schedule:
       interval: weekly

@@ -14,7 +14,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * GET/PUT /api/settings like apps/api/src/mail/unified.ts (roadmap 3.7,
+ * GET/PUT /api/settings (roadmap 3.7,
  * principle 8): the unified inbox is off until the user switches it on.
  */
 final class SettingsRoutes

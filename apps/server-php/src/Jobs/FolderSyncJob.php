@@ -15,7 +15,7 @@ use Fma\Mail\MailException;
 use Fma\Mail\TransportPolicy;
 
 /**
- * folder_sync job, port of apps/worker/src/jobs/folder-sync.ts: lists the
+ * folder_sync job: lists the
  * mailboxes, upserts them with uidnext/unread and the detected role, removes
  * vanished folders (their messages without any other location are removed
  * by the next cleanup run) and resolves the effective roles. Chains one

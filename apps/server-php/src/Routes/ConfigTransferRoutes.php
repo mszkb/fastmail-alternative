@@ -21,8 +21,7 @@ use Slim\App;
 use Slim\Exception\HttpException;
 
 /**
- * Configuration export/import like apps/api/src/mail/config-transfer.ts
- * (roadmap 4.7, docs/operations/migration.md).
+ * Configuration export/import (roadmap 4.7, docs/operations/migration.md).
  *
  * - GET /api/export/config: accounts (name, address, IMAP/SMTP host, port,
  *   user name), identities with signatures, manual folder mappings and
@@ -372,7 +371,7 @@ final class ConfigTransferRoutes
             $entry = self::object($raw);
             $path = self::str($entry['path'] ?? null, 1000);
             $delimiter = \is_string($entry['delimiter'] ?? null) ? self::jsSlice($entry['delimiter'], 4) : null;
-            // VARCHAR(700) in MySQL: longer paths cannot be stored (Node: 1000).
+            // VARCHAR(700) in MySQL: longer paths cannot be stored (the format allows 1000).
             if (!\in_array($role, self::FOLDER_ROLES, true) || $path === null || $path === '' || mb_strtoupper($path) === 'INBOX' || mb_strlen($path) > 700) {
                 return ['error' => "{$label}: ungültige Ordnerzuordnung."];
             }
@@ -446,7 +445,7 @@ final class ConfigTransferRoutes
         ];
     }
 
-    /** Trimmed string of at most `max` UTF-16 units, else null (like `str` in Node). */
+    /** Trimmed string of at most `max` UTF-16 units, else null. */
     private static function str(mixed $value, int $max): ?string
     {
         if (!\is_string($value)) {

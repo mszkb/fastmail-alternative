@@ -3,16 +3,12 @@ info:
   title: fastmail-alternative API
   version: 0.0.0
   description: |
-    HTTP API of the self-hosted multi-account mail client (ADR-0008/0010,
-    ADR-0013). Contract for the PWA (`apps/web`), the Node backend
-    (`apps/api`) and the PHP backend (`apps/server-php`). All routes live
-    under `/api`. Authentication is a server-side session in the HttpOnly,
+    HTTP API of the self-hosted multi-account mail client (ADR-0010,
+    ADR-0013). Contract between the PWA (`apps/web`) and the backend
+    (`apps/server-php`). All routes live under `/api`. Authentication is a server-side session in the HttpOnly,
     SameSite=Strict cookie `fma_session` (ADR-0004). State-changing
     requests from browsers must be same-origin (`Sec-Fetch-Site` or
     `Origin`), otherwise 403. Rate limits answer 429 with `Retry-After`.
-    Operations with `x-backends: [php]` exist only in the PHP backend
-    (new features after ADR-0013); the Node backend answers 404 there and
-    clients fall back to the older behavior.
   license:
     name: ISC
 servers:

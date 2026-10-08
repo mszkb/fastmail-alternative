@@ -11,7 +11,7 @@ final class Body
 {
     /**
      * The JSON request body as an array; an empty body is an empty array.
-     * Invalid JSON answers 400 like Fastify's body parser.
+     * Invalid JSON answers 400.
      *
      * @return array<mixed>
      */

@@ -16,8 +16,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Sender identities of an account like apps/api/src/mail/identities.ts
- * (roadmap 2.6, 3.6): list, add an alias (unique per account,
+ * Sender identities of an account (roadmap 2.6, 3.6): list, add an alias (unique per account,
  * case-insensitive, 409), change name/signature or make it the default,
  * remove (not the default one, 409).
  *

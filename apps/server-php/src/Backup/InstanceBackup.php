@@ -18,9 +18,7 @@ use Fma\Jobs\Runner;
  * Fma\Crypto\Backup (key from MASTER_KEY + per-backup salt).
  *
  * Inside the encrypted stream: a sequence of records, each
- * `type[1 ASCII] | length[uint32 BE] | payload[length]` (same framing as
- * apps/worker/src/backup.ts; the contents differ, PHP and Node backups are
- * not interchangeable):
+ * `type[1 ASCII] | length[uint32 BE] | payload[length]`:
  *
  *   H header   JSON {format: "fma-backup-mysql", version: 1, createdAt,
  *              migrations: [schema_migrations names]}

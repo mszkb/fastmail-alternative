@@ -14,8 +14,7 @@ use Fma\Mail\MailException;
 use Fma\Mail\TransportPolicy;
 
 /**
- * IMAP IDLE for the INBOX in the long-running worker (ADR-0013, port of
- * apps/worker/src/idle.ts). IDLE is a worker-managed connection, not a job:
+ * IMAP IDLE for the INBOX in the long-running worker (ADR-0013). IDLE is a worker-managed connection, not a job:
  * one connection per active account with the INBOX open in IDLE; any change
  * the server reports (EXISTS, EXPUNGE, FETCH) only enqueues a message_sync
  * for that INBOX (deduplicated and debounced by enqueueMessageSync). The

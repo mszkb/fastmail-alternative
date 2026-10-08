@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Fma\Crypto;
 
 /**
- * Backup encryption, byte-compatible with the `fma.bk1` stream in
- * packages/crypto/src/index.ts.
+ * Backup encryption: the `fma.bk1` stream format.
  *
  * Layout: `fma.bk1` | salt[16] | chunk*, each chunk is
  * ciphertext(<= CHUNK_BYTES) | tag[16]; only the last one may be shorter.

@@ -36,8 +36,8 @@ use Slim\Routing\RoutingResults;
 
 /**
  * Builds the Slim app (ADR-0013). All routes live under /api/* with the
- * same paths, status codes and JSON shapes as apps/api, so the PWA works
- * unchanged.
+ * paths, status codes and JSON shapes of the OpenAPI contract
+ * (docs/api/openapi.yaml), which the PWA relies on.
  *
  * Middleware order (outermost first): request log/metrics, security
  * headers, error handler, rate limits, CSRF, routing - rejected requests

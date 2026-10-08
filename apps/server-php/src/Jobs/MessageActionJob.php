@@ -15,8 +15,7 @@ use Fma\Mail\MailException;
 use Fma\Mail\TransportPolicy;
 
 /**
- * message_action job, port of apps/worker/src/jobs/message-action.ts
- * (roadmap 2.4): writes a user action that POST /api/messages/actions has
+ * message_action job (roadmap 2.4): writes a user action that POST /api/messages/actions has
  * already applied optimistically to the database back to the IMAP server -
  * flags (\Seen, \Flagged), moves (move/archive/delete to Trash) and
  * permanent deletes (\Deleted + EXPUNGE inside Trash).

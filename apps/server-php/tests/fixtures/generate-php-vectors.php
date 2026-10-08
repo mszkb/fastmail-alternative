@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-// Writes crypto-vectors-php.json, which packages/crypto/test/php-compat.test.ts decrypts with Node.
+// Writes crypto-vectors-php.json, the committed snapshot that EnvelopeTest checks
+// (testCommittedPhpVectorsAreCurrent). Regenerate only for an intended format change.
 // Usage: php tests/fixtures/generate-php-vectors.php
 
 require __DIR__ . '/../../vendor/autoload.php';

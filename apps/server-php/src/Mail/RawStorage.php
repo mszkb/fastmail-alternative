@@ -9,8 +9,8 @@ use Fma\Crypto\Envelope;
 use Fma\Log\Logger;
 
 /**
- * Read path of the encrypted raw mails in MAIL_DATA_DIR (ADR-0001), like
- * readRaw() in apps/api/src/mail/message-html.ts: message_body.storage_ref
+ * Read path of the encrypted raw mails in MAIL_DATA_DIR (ADR-0001):
+ * message_body.storage_ref
  * is relative to the root, the file holds Envelope::encryptBytes() output
  * bound to the AAD `message.body:<messageId>`.
  */

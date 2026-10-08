@@ -6,8 +6,7 @@ namespace Fma\Push;
 
 /**
  * Web Push message encryption (RFC 8291) with the aes128gcm content coding
- * (RFC 8188) and the P-256 key handling VAPID needs, on ext-openssl only
- * (replaces the `web-push` package of apps/worker).
+ * (RFC 8188) and the P-256 key handling VAPID needs, on ext-openssl only.
  *
  * One record per message: the push payload is tiny, the record size is
  * 4096 like web-push, the padding delimiter is 0x02 (last record).

@@ -241,7 +241,7 @@ final class AccountRoutesTest extends DatabaseTestCase
             self::assertSame($message, Http::json($response));
         }
         self::assertSame([], $this->tester->calls);
-        // A float port with an integral value is a JSON integer for Node, too.
+        // A float port with an integral value counts as an integer (Number.isInteger semantics).
         self::assertSame(201, $this->call('POST', '/api/accounts', raw: str_replace('993', '993.0', json_encode(self::validBody(), JSON_THROW_ON_ERROR)))->getStatusCode());
     }
 

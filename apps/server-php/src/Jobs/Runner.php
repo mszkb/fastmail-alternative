@@ -18,8 +18,8 @@ use Fma\Log\Logger;
  * - Before claiming: lost 'running' jobs are re-queued, due folder_syncs
  *   and the cleanup job are enqueued (scheduler).
  * - Priority types (message_action, send_message, draft_sync) first.
- * - Only types with a registered handler are claimed, so jobs whose PHP
- *   port does not exist yet stay queued.
+ * - Only types with a registered handler are claimed; jobs of unknown
+ *   types stay queued.
  * - A new job starts only while enough budget is left; handlers check the
  *   Deadline for long work.
  * - Cancellation (#119): a handler that stopped on a cancel request throws
@@ -31,7 +31,7 @@ final class Runner
 {
     public const LOCK = 'fma-runner';
     public const PRIORITY_TYPES = ['message_action', 'send_message', 'draft_sync'];
-    /** Hard timeout per type (seconds) like apps/worker; used to detect lost jobs. */
+    /** Hard timeout per type (seconds); used to detect lost jobs. */
     public const TIMEOUTS = [
         'folder_sync' => 180, 'message_sync' => 900, 'message_action' => 180, 'send_message' => 300,
         'draft_sync' => 120, 'account_cleanup' => 300, 'push_notify' => 120, 'cleanup' => 600,

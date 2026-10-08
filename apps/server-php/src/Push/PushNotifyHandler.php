@@ -13,8 +13,7 @@ use Fma\Jobs\JobHandler;
 use Fma\Log\Logger;
 
 /**
- * push_notify job, port of apps/worker/src/jobs/push-notify.ts (roadmap
- * 4.3, ADR-0005, ADR-0013: sent from the cron runner):
+ * push_notify job (roadmap 4.3, ADR-0005, ADR-0013: sent from the cron runner):
  * - sends a content-free Web Push to every active subscription of the
  *   user whose device still has a valid session;
  * - payload ONLY {type, installationId, badge} (PushPayload, principle 4);
@@ -69,7 +68,7 @@ final class PushNotifyHandler implements JobHandler
             throw new \InvalidArgumentException('push_notify job without userId');
         }
         if ($this->vapid === null) {
-            // Nothing to retry: the instance has no VAPID keys (setup-env.mjs).
+            // Nothing to retry: the instance has no VAPID keys (scripts/setup-env.sh).
             $this->logger->warn('push_notify skipped: VAPID keys not configured');
 
             return 'not_configured';

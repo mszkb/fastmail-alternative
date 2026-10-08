@@ -12,7 +12,7 @@ use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
- * CSRF protection without tokens, like apps/api/src/security/csrf.ts:
+ * CSRF protection without tokens:
  * every request other than GET/HEAD/OPTIONS must come from the same origin.
  * - `Sec-Fetch-Site` present: only `same-origin` is accepted.
  * - otherwise `Origin` present: its host must equal the `Host` header.

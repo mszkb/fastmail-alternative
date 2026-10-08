@@ -8,7 +8,7 @@ Self-hosted Multi-Account-Mail-Client: bündelt bestehende IMAP-/SMTP-Konten in 
 
 ## Status
 
-Phase 0 (Discovery), ADRs entschieden. Es gibt noch keinen Anwendungscode. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
+Phase 0 (Discovery), ADRs entschieden. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.md). Detaildokumentation: [`docs/`](docs/README.md).
 
 ## Wo steht was
 
@@ -49,18 +49,18 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
 ## Tech-Stack (entschieden, siehe ADRs)
 
-> **Umstieg geplant ([ADR-0013](docs/adr/0013-php-backend.md), Proposed, Epic #94):** Backend wird in PHP ≥ 8.2 mit Slim 4, MySQL 8 / MariaDB 10.6+ und Cron neu geschrieben (`apps/server-php`, parallel zum Node-Backend bis zur Umstellung). Bis dahin gilt der Stand unten; neue Features nicht mehr ins Node-Backend.
-
-- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache, offline-first (ADR-0008, ADR-0010)
-- Backend: Fastify (Node/TypeScript) für API und Worker (ADR-0008)
-- API-Vertrag: OpenAPI, Basis für spätere native Clients (ADR-0010)
-- Datenbank: PostgreSQL (ADR-0002)
-- Queue: eigene `job`-Tabelle in PostgreSQL mit `SKIP LOCKED` (ADR-0003)
-- Mail-Speicher: Server speichert alle Mails, verschlüsselt im Docker-Volume `mail-data` (ADR-0001)
+- Frontend: Nuxt/Vue PWA, Service Worker, IndexedDB-Cache, offline-first (ADR-0008, ADR-0010); Styling Tailwind + daisyUI (ADR-0014)
+- Backend: PHP ≥ 8.2 mit Slim 4 in `apps/server-php`, API (php-fpm) und Worker (`bin/worker.php` mit IMAP IDLE oder `bin/cron.php`) (ADR-0013)
+- API-Vertrag: OpenAPI (`docs/api/openapi.yaml`), Basis für spätere native Clients (ADR-0010)
+- Datenbank: MySQL 8 / MariaDB 10.6+ (ADR-0013)
+- Queue: eigene `job`-Tabelle mit `SKIP LOCKED` (ADR-0003, ADR-0013)
+- Mail-Speicher: Server speichert alle Mails, verschlüsselt im Volume `mail-data` (ADR-0001)
 - Suche: IMAP `SEARCH` beim Provider (ADR-0006)
 - Auth: Single-User, Passwort, serverseitige Sessions (ADR-0004); Mailanbieter per Passwort oder OAuth2 (ADR-0011)
 - Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
-- Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007)
+- Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007); alternativ Shared Hosting mit PHP + MySQL und Cron (ADR-0013)
+
+Das frühere Node-Backend (Fastify, PostgreSQL) ist mit #110 entfernt; eine Datenübernahme daraus gibt es nicht.
 
 ## Autonomer Agent
 
@@ -71,17 +71,21 @@ Issues mit dem Label `ready` arbeitet ein lokaler Runner autonom ab (Ablauf, Lab
 
 ## Befehle
 
-Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (`npm i -g pnpm` oder Corepack).
+Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (PWA, Tests; `npm i -g pnpm` oder Corepack), PHP ≥ 8.2 mit `pdo_mysql` und Composer (Backend).
 
-| Befehl                                    | Wirkung                                             |
-| ----------------------------------------- | --------------------------------------------------- |
-| `pnpm install`                            | Abhängigkeiten installieren                         |
-| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`) |
-| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc) |
-| `pnpm test`                               | Tests (Vitest) über alle Pakete                     |
-| `pnpm build`                              | Alle Apps bauen (web, api, worker)                  |
-| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der jeweiligen App                       |
+| Befehl                                    | Wirkung                                                         |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| `pnpm install`                            | JS-Abhängigkeiten installieren                                  |
+| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`)             |
+| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc)             |
+| `pnpm test`                               | Tests (Vitest) über alle Pakete                                 |
+| `pnpm build`                              | PWA bauen (statische Dateien)                                   |
+| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der PWA / PHP-API (`php -S`, Port 3001) / PHP-Worker |
+| `composer install` (in `apps/server-php`) | PHP-Abhängigkeiten installieren                                 |
+| `composer cs` / `analyse` / `test`        | PHP-CS-Fixer / PHPStan / PHPUnit (Unit-Tests)                   |
+| `composer test:integration`               | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail      |
+| `make check`                              | alles wie in CI, plus PHP-Integrationstests                     |
 
-Struktur: `apps/web` (Nuxt-PWA), `apps/api` (Fastify, Port 3001), `apps/worker` (Jobs), `packages/shared` (geteilte Typen/Domänenlogik), `packages/crypto` (Envelope-Encryption), `packages/db` (pg-Pool + Migration-Runner) – Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
+Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 
-Deployment (ADR-0007): `docker compose` mit caddy/web/api/worker/postgres. Erstes Setup: `node scripts/setup-env.mjs` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.
+Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `./scripts/setup-env.sh` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Installationen mit dem früheren Node-Backend werden neu aufgesetzt (`docs/operations/upgrade.md`). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.

@@ -18,8 +18,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Mail read API like apps/api/src/mail/messages.ts and unified.ts
- * (roadmap 2.3, 2.5, 3.7): folder tree, paginated message lists, message
+ * Mail read API (roadmap 2.3, 2.5, 3.7): folder tree, paginated message lists, message
  * details, threads and the optional unified inbox.
  *
  * - Every query is scoped via mail_account.user_id; foreign or unknown ids

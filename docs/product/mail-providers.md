@@ -4,14 +4,14 @@ Welche Anbieter die App ansprechen kann, mit welchen Zugangsdaten, und welche IM
 
 ## Was die App von einem Server braucht
 
-| Erweiterung  | Wofür in der App                                                            | Ohne die Erweiterung                                                                                |
-| ------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| IDLE         | Neue Mails im Posteingang binnen Sekunden (`apps/worker/src/idle.ts`)       | Nur der periodische Abgleich (`SYNC_INTERVAL_SECONDS`, Standard 120 s)                              |
-| CONDSTORE    | Nur geänderte Flags abgleichen (`CHANGEDSINCE`, #28)                        | Vollständiger Flag-Abgleich je Lauf – funktioniert, kostet bei großen Ordnern mehr Zeit und Traffic |
-| QRESYNC      | Derzeit **nicht genutzt** (Löschungen werden über den UID-Abgleich erkannt) | –                                                                                                   |
-| MOVE         | Verschieben, Archivieren, Löschen in den Papierkorb (`messageMove`)         | imapflow weicht auf `COPY` + `\Deleted` + `EXPUNGE` aus                                             |
-| SPECIAL-USE  | Ordnerrollen (Posteingang, Gesendet, Entwürfe, Papierkorb, Archiv, Spam)    | Rollen über übliche Ordnernamen; sonst manuelle Zuordnung in den Einstellungen                      |
-| STARTTLS/TLS | **Pflicht** – Port 993/465 mit TLS oder STARTTLS auf 143/587/25             | Verbindung wird vor dem Login abgebrochen (`TLS_REQUIRED`)                                          |
+| Erweiterung  | Wofür in der App                                                                       | Ohne die Erweiterung                                                                                |
+| ------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| IDLE         | Neue Mails im Posteingang binnen Sekunden (`apps/server-php/src/Jobs/IdleManager.php`) | Nur der periodische Abgleich (`SYNC_INTERVAL_SECONDS`, Standard 120 s)                              |
+| CONDSTORE    | Nur geänderte Flags abgleichen (`CHANGEDSINCE`, #28)                                   | Vollständiger Flag-Abgleich je Lauf – funktioniert, kostet bei großen Ordnern mehr Zeit und Traffic |
+| QRESYNC      | Derzeit **nicht genutzt** (Löschungen werden über den UID-Abgleich erkannt)            | –                                                                                                   |
+| MOVE         | Verschieben, Archivieren, Löschen in den Papierkorb (`messageMove`)                    | Ausweichen auf `UID COPY` + `\Deleted` + `EXPUNGE`                                                  |
+| SPECIAL-USE  | Ordnerrollen (Posteingang, Gesendet, Entwürfe, Papierkorb, Archiv, Spam)               | Rollen über übliche Ordnernamen; sonst manuelle Zuordnung in den Einstellungen                      |
+| STARTTLS/TLS | **Pflicht** – Port 993/465 mit TLS oder STARTTLS auf 143/587/25                        | Verbindung wird vor dem Login abgebrochen (`TLS_REQUIRED`)                                          |
 
 Erlaubte Ports: IMAP 143/993, SMTP 25/465/587/2525; weitere nur mit `MAIL_EXTRA_PORTS` ([Konfiguration](../operations/configuration.md)).
 
@@ -41,10 +41,10 @@ Erlaubte Ports: IMAP 143/993, SMTP 25/465/587/2525; weitere nur mit `MAIL_EXTRA_
 
 ## Prüfen, was ein Server wirklich kann
 
-Beim Anlegen eines Kontos und beim Ändern seiner Verbindung liest die api im Verbindungstest die IMAP-Fähigkeiten und speichert sie unverschlüsselt (keine Mailinhalte) in `mail_account.capabilities`. Auf der eigenen Instanz:
+Beim Anlegen eines Kontos und beim Ändern seiner Verbindung liest das Backend im Verbindungstest die IMAP-Fähigkeiten und speichert sie unverschlüsselt (keine Mailinhalte) in `mail_account.capabilities`. Auf der eigenen Instanz:
 
 ```sh
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$MARIADB_PASSWORD" "$MARIADB_DATABASE" -e "
   SELECT imap_host, capabilities FROM mail_account ORDER BY imap_host"'
 ```
 

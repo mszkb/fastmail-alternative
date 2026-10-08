@@ -9,7 +9,7 @@ use Fma\Db\Database;
 use Fma\Log\Logger;
 
 /**
- * Setup code for the first-run setup, like apps/api/src/auth/setup-code.ts:
+ * Setup code for the first-run setup:
  * while no user exists, POST /api/auth/setup needs this code.
  *
  * - `SETUP_TOKEN` from the configuration, if set (never logged), else

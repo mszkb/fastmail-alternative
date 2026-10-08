@@ -24,8 +24,8 @@ use Fma\Tests\Support\FakeConnectionTester;
 use Fma\Tests\Support\Http;
 
 /**
- * message_action write-back against GreenMail (GREENMAIL_HOST, IMAP 3143),
- * port of apps/worker/test/message-action.test.ts. Actions go through
+ * message_action write-back against GreenMail (GREENMAIL_HOST, IMAP 3143).
+ * Actions go through
  * POST /api/messages/actions, the enqueued job is run directly.
  */
 final class MessageActionJobTest extends DatabaseTestCase

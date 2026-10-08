@@ -28,7 +28,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [api, worker, web]
+        include:
+          # server-php: php-fpm api and worker (same image); web: static PWA.
+          - app: server-php
+            context: apps/server-php
+          - app: web
+            context: .
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
@@ -71,7 +76,7 @@ jobs:
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: apps/${{ matrix.app }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true

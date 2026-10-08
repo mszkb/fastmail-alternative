@@ -115,7 +115,7 @@ flowchart TD
 
 - Der Ring dreht sich, solange ein Abgleich wartet oder läuft, und füllt sich mit dem Fortschritt des aktiven Kontos; ein roter Punkt zeigt ein Konto mit Fehler. Unter der Kopfzeile der Liste steht während des Abgleichs Ordner und Fortschritt des aktiven Kontos.
 - Gestoppt wird nur der laufende Abgleich: Bereits geladene Nachrichten bleiben, der nächste Abgleich setzt ohne Duplikate fort; der regelmäßige Abgleich startet das Konto zum nächsten Termin wieder. Andere Konten laufen weiter.
-- Die App fragt den Status nur ab, solange ein Abgleich läuft (alle 2,5 s). Ohne Status-Endpunkt (Node-Backend bis zur Umstellung #110) zeigt das Panel nur „Wird synchronisiert“/„Aktuell“, ohne „Stoppen“.
+- Die App fragt den Status nur ab, solange ein Abgleich läuft (alle 2,5 s). Liefert der Server keinen Status-Endpunkt (`GET /api/sync/status`), zeigt das Panel nur „Wird synchronisiert“/„Aktuell“, ohne „Stoppen“.
 - Statuswechsel werden Screenreadern angesagt (`aria-live`), der Fortschritt ist ein `progressbar`; Escape schließt das Panel.
 - Tests: `sync-panel.spec.ts`, `gestures.spec.ts`. Abnahme auf einem echten iOS-Gerät steht noch aus (#74).
 

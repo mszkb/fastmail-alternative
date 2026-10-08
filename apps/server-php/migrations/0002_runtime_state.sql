@@ -1,5 +1,5 @@
--- Request state that the Node api kept in process memory (ADR-0013):
--- rate limits, login lockout and metrics counters. Times are unix seconds.
+-- Request state shared by all PHP requests (ADR-0013): rate limits,
+-- login lockout and metrics counters. Times are unix seconds.
 
 CREATE TABLE IF NOT EXISTS rate_limit (
   bucket       VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,

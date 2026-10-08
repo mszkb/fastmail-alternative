@@ -8,8 +8,7 @@ use Fma\Db\Database;
 use Fma\Db\Uuid;
 
 /**
- * Server-side sessions on the session/device tables (ADR-0004), like
- * apps/api/src/auth/sessions.ts:
+ * Server-side sessions on the session/device tables (ADR-0004):
  * - the cookie carries a random token, the database only its SHA-256;
  * - absolute timeout 30 days after login (expires_at never moves);
  * - rotation after 24 h; a session not rotated for 14 days is idle and

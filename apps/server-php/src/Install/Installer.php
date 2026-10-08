@@ -67,7 +67,7 @@ final class Installer
     }
 
     /**
-     * Fresh VAPID key pair (P-256) in the base64url format of scripts/setup-env.mjs.
+     * Fresh VAPID key pair (P-256) in the base64url format of scripts/setup-env.sh.
      *
      * @return array{public: string, private: string}|null
      */

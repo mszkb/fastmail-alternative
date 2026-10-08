@@ -7,7 +7,7 @@ namespace Fma\Security;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
- * Client IP behind the reverse proxy, like apps/api/src/security/client-ip.ts:
+ * Client IP behind the reverse proxy:
  * only a direct peer with a loopback/private address is trusted as proxy,
  * and then only the right-most X-Forwarded-For entry (the address that
  * proxy saw) is used. Requests from public addresses ignore the header.

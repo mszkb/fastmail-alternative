@@ -1,5 +1,7 @@
 # Testbericht 2026-10-05 – lokale Verifikation
 
+> Hinweis: Dieser Bericht bezieht sich auf den damaligen Stack mit Node-Backend (`apps/api`, `apps/worker`) und PostgreSQL, der mit #110 entfernt wurde. Die Ergebnisse gelten für diesen Stand; heute betreibt Docker Compose das PHP-Backend (`apps/server-php`) mit MariaDB.
+
 Umgebung: macOS (arm64), Docker Desktop 27.3.1 / Compose 2.29.7, Node 25.2.1, pnpm 12.8.1. Der PC ersetzt den Raspberry Pi als Testumgebung; jedes Szenario lief in einem eigenen Compose-Projekt (`install`, `upgrade`, `restore`) unter `~/Documents/work/fma-local-test/`. Ausgaben ohne Secrets und Mailinhalte; Testdaten nur mit GreenMail (`greenmail/standalone:2.1.14`).
 
 Dauern mit warmem Build-Cache – nicht repräsentativ für den Pi.

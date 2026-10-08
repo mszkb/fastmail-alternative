@@ -7,7 +7,7 @@ namespace Fma\Jobs;
 use Fma\Db\Database;
 
 /**
- * Account circuit breaker like apps/worker/src/account-health.ts:
+ * Account circuit breaker:
  * - auth errors: status 'auth_error', no automatic retry until the
  *   credentials change (PATCH /api/accounts/{id} resets it);
  * - unreachable/throttled: backoff via next_retry_at, 1 min doubling up to
