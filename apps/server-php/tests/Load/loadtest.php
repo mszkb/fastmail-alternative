@@ -25,6 +25,7 @@ use Fma\Db\Migrator;
 use Fma\Db\Uuid;
 use Fma\Jobs\Bootstrap;
 use Fma\Jobs\Deadline;
+use Fma\Jobs\Runner;
 use Fma\Log\Logger;
 use Fma\Mail\HostConfig;
 use Fma\Mail\ImapClient;
@@ -41,6 +42,27 @@ require __DIR__ . '/../../vendor/autoload.php';
 function queuedJobs(PDO $pdo): int
 {
     return (int) Database::run($pdo, "SELECT COUNT(*) FROM job WHERE state IN ('queued', 'running')")->fetchColumn();
+}
+
+/**
+ * Runs jobs until none is queued or running. A job waiting for its retry
+ * time is not claimable yet: then wait a moment instead of polling.
+ *
+ * @return array{done: int, failed: int}
+ */
+function drain(Runner $runner, PDO $pdo): array
+{
+    $total = ['done' => 0, 'failed' => 0];
+    while (queuedJobs($pdo) > 0) {
+        $result = $runner->work(new Deadline(300));
+        $total['done'] += $result['done'];
+        $total['failed'] += $result['failed'];
+        if ($result['done'] + $result['failed'] === 0) {
+            usleep(500_000);
+        }
+    }
+
+    return $total;
 }
 
 /**
@@ -151,13 +173,7 @@ $runner = Bootstrap::runner($config, $logger, $db);
 $memoryBefore = memory_get_usage(true);
 $start = microtime(true);
 $runner->schedule();
-$done = 0;
-$failed = 0;
-while (queuedJobs($pdo) > 0) {
-    $result = $runner->work(new Deadline(300));
-    $done += $result['done'];
-    $failed += $result['failed'];
-}
+['done' => $done, 'failed' => $failed] = drain($runner, $pdo);
 $initial = microtime(true) - $start;
 $synced = (int) Database::run($pdo, 'SELECT COUNT(*) FROM message')->fetchColumn();
 $retried = (int) Database::run($pdo, 'SELECT COUNT(*) FROM job WHERE attempts > 1')->fetchColumn();
@@ -167,9 +183,7 @@ Database::run($pdo, "DELETE FROM job WHERE state IN ('done', 'failed')");
 $start = microtime(true);
 $runner->schedule();
 Database::run($pdo, "INSERT INTO job (type, account_id, payload) SELECT 'folder_sync', id, '{}' FROM mail_account WHERE NOT EXISTS (SELECT 1 FROM job j WHERE j.account_id = mail_account.id AND j.state = 'queued')");
-while (queuedJobs($pdo) > 0) {
-    $runner->work(new Deadline(300));
-}
+drain($runner, $pdo);
 $incremental = microtime(true) - $start;
 
 $out->add("Lauf: {$accounts} Konten, {$messages} Mails im Postfach, PHP " . PHP_VERSION . ', ' . php_uname('s') . '/' . php_uname('m') . ', '
@@ -237,9 +251,7 @@ if ($fullHistory) {
         if ($app->handle($request)->getStatusCode() !== 202) {
             throw new RuntimeException('load-older failed');
         }
-        while (queuedJobs($pdo) > 0) {
-            $runner->work(new Deadline(300));
-        }
+        drain($runner, $pdo);
         ++$rounds;
     } while (locations($pdo, $inbox) < $messages && locations($pdo, $inbox) > $last);
     $elapsed = microtime(true) - $start;
