@@ -1,27 +1,8 @@
-// Sync status and stopping (#119). The endpoints exist only in the PHP
-// backend (x-backends: [php]); against the Node backend they answer 404 and
-// the tests below only check that (the PWA falls back to `syncing`).
+// Sync status and stopping (#119).
 import { describe, expect, it } from 'vitest'
 import { API_URL, Client } from '../src/client'
-import { spec } from '../src/openapi'
 
-const probe = API_URL ? (await fetch(`${API_URL}/api/sync/status`)).status : 0
-const supported = probe !== 0 && probe !== 404
-
-describe.skipIf(!API_URL || supported)('sync status on a backend without it', () => {
-  it('answers 404 and the spec marks the operations as PHP-only', async () => {
-    expect(probe).toBe(404)
-    for (const [path, method] of [
-      ['/api/sync/status', 'get'],
-      ['/api/sync/cancel', 'post'],
-      ['/api/accounts/{id}/sync/cancel', 'post'],
-    ] as const) {
-      expect(spec.paths[path]?.[method]).toMatchObject({ 'x-backends': ['php'] })
-    }
-  })
-})
-
-describe.skipIf(!API_URL || !supported)('sync status and stop', () => {
+describe.skipIf(!API_URL)('sync status and stop', () => {
   const client = new Client()
 
   it('all need a session', async () => {

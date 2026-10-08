@@ -207,7 +207,8 @@ services:
     environment:
       <<: *php-env
       LEGACY_DATABASE_URL: postgres://${POSTGRES_USER:-mail}:${POSTGRES_PASSWORD:-}@postgres-legacy:5432/${POSTGRES_DB:-mail}
-    command: ['sh', '-c', 'php bin/migrate.php && php bin/import-postgres.php "$$LEGACY_DATABASE_URL"']
+    command:
+      ['sh', '-c', 'php bin/migrate.php && php bin/import-postgres.php "$$LEGACY_DATABASE_URL"']
     depends_on:
       mariadb:
         condition: service_healthy

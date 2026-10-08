@@ -14,10 +14,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "build": "pnpm -r build",
-    "dev:web": "pnpm --filter @fma/web dev",
-    "dev:api": "pnpm --filter @fma/api dev",
-    "dev:worker": "pnpm --filter @fma/worker dev",
-    "loadtest": "pnpm --filter @fma/worker loadtest"
+    "dev:web": "pnpm --filter @fma/web dev"
   },
   "devDependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",

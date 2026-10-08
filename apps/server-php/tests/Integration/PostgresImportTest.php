@@ -14,9 +14,9 @@ use Fma\Tests\Support\Http;
 
 /**
  * Import from PostgreSQL (#108). Needs POSTGRES_URL to a throwaway
- * database: its schema is rebuilt from the Node migrations in
- * packages/db/src/migrations, filled with encrypted test data, then
- * imported into MySQL.
+ * database: its schema is the final schema of the former Node backend
+ * (tests/fixtures/node-postgres-schema.sql), filled with encrypted test
+ * data, then imported into MySQL.
  */
 final class PostgresImportTest extends DatabaseTestCase
 {
@@ -31,14 +31,7 @@ final class PostgresImportTest extends DatabaseTestCase
         }
         $this->pg = PostgresImporter::connectPostgres($url);
         $this->pg->exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
-        $files = glob(__DIR__ . '/../../../../packages/db/src/migrations/*.ts') ?: [];
-        sort($files);
-        foreach ($files as $file) {
-            if (preg_match('/sql: \/\* sql \*\/ `(.*?)`,/s', (string) file_get_contents($file), $m) !== 1) {
-                self::fail('no SQL in ' . basename($file));
-            }
-            $this->pg->exec($m[1]);
-        }
+        $this->pg->exec((string) file_get_contents(__DIR__ . '/../fixtures/node-postgres-schema.sql'));
         $this->masterKey = base64_encode(random_bytes(32));
     }
 
