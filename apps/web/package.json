@@ -21,7 +21,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "daisyui": "^5.7.47",
     "tailwindcss": "^4.3.3",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "vue-tsc": "^3.3.12"
   }
 }
