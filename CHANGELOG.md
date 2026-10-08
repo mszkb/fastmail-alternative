@@ -66,6 +66,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - **Betreiber:** Restore-Anleitung startete den Worker sofort und verschickte dabei ungesendete Postausgangs-Einträge aus dem Backup ohne Prüfung; jetzt erst ohne Worker starten und den Postausgang prüfen ([Backup & Restore](docs/operations/backup-restore.md#restore-auf-einer-frischen-instanz)). Installations-, Konfigurations- und Upgrade-Doku nach einem Testlauf korrigiert ([Testbericht](docs/operations/test-report-2026-10-05.md))
 - **Betreiber:** Der `php`-Container startet nicht mehr auf einer Datenbank, die eine neuere Version schon migriert hat (`migration refused` im Log); zurück nur per Rollback mit Restore. `backup restore --force` baut das Schema in diesem Fall neu auf
 - **Betreiber:** `backup restore` als root übergibt die wiederhergestellten Dateien in `mail-data` selbst an `www-data`; das `chown` nach dem Restore entfällt
+- Mails über `MAX_RAW_MESSAGE_BYTES`, deren Inhalt bei einem früheren Lauf noch nicht gespeichert wurde, lädt der Sync beim Nachholen nicht mehr erst komplett herunter, sondern überspringt sie anhand der bekannten Größe (wie beim ersten Abgleich)
 
 ### Security
 
