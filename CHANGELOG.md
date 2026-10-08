@@ -64,6 +64,8 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Ein neu verbundenes Konto zeigte keine Ordner („Noch keine Ordner synchronisiert“), bis die Seite neu geladen wurde, wenn es während des ersten Abgleichs geöffnet wurde; außerdem bemerkt die App das Ende des ersten Abgleichs eines neu hinzugefügten oder importierten Kontos jetzt binnen Sekunden statt erst beim nächsten 60-s-Kontenabgleich
 - Beim Verfassen erschien „Entwurf gespeichert“ nie, und Schließen speicherte einen unveränderten Entwurf erneut
 - **Betreiber:** Restore-Anleitung startete den Worker sofort und verschickte dabei ungesendete Postausgangs-Einträge aus dem Backup ohne Prüfung; jetzt erst ohne Worker starten und den Postausgang prüfen ([Backup & Restore](docs/operations/backup-restore.md#restore-auf-einer-frischen-instanz)). Installations-, Konfigurations- und Upgrade-Doku nach einem Testlauf korrigiert ([Testbericht](docs/operations/test-report-2026-10-05.md))
+- **Betreiber:** Der `php`-Container startet nicht mehr auf einer Datenbank, die eine neuere Version schon migriert hat (`migration refused` im Log); zurück nur per Rollback mit Restore. `backup restore --force` baut das Schema in diesem Fall neu auf
+- **Betreiber:** `backup restore` als root übergibt die wiederhergestellten Dateien in `mail-data` selbst an `www-data`; das `chown` nach dem Restore entfällt
 
 ### Security
 
