@@ -20,12 +20,12 @@ jobs:
     # Unit tests only: without DATABASE_URL/GREENMAIL_HOST the integration tests
     # skip themselves. They run in the Gitea nightly (msz/gitea-workflows).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         # reads the pinned pnpm version from the packageManager field
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -62,7 +62,7 @@ jobs:
       run:
         working-directory: apps/server-php
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
