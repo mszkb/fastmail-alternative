@@ -24,12 +24,18 @@ final class Password
         return str_starts_with($hash, '$argon2id$') && password_verify($password, $hash);
     }
 
+    /**
+     * Hash of a random, discarded password with OPTIONS. A constant, not
+     * computed per request: PHP-FPM keeps no state between requests, so a
+     * lazily created dummy would cost an extra hash and make unknown emails
+     * slower than wrong passwords.
+     */
+    private const DUMMY_HASH = '$argon2id$v=19$m=19456,t=2,p=1$cmpoSFkyN1dncFU2ZzM4UA$68NWLxd9AEKiKWuvxcTCSIEecV7sp08x9bLDrTvod3A';
+
     /** Equalizes timing when the email is unknown (no user enumeration by time). */
     public static function dummyVerify(string $password): void
     {
-        static $dummy = null;
-        $dummy ??= self::hash(bin2hex(random_bytes(12)));
-        password_verify($password, $dummy);
+        password_verify($password, self::DUMMY_HASH);
     }
 
     /** Minimum requirements for a new password (setup and password change). */
