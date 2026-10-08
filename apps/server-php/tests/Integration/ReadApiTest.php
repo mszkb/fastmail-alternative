@@ -9,8 +9,10 @@ use Fma\Auth\Sessions;
 use Fma\Config;
 use Fma\Crypto\Envelope;
 use Fma\Db\Database;
+use Fma\Db\Migrator;
 use Fma\Db\Uuid;
 use Fma\Log\Logger;
+use Fma\Routes\MessageRoutes;
 use Fma\Tests\Support\FakeConnectionTester;
 use Fma\Tests\Support\Http;
 use Psr\Http\Message\ResponseInterface;
@@ -109,7 +111,13 @@ final class ReadApiTest extends DatabaseTestCase
             ],
         );
         $locationId = Uuid::v4();
-        Database::run($pdo, 'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid) VALUES (?, ?, ?, 1, ?)', [$locationId, $id, $folderId, $uid]);
+        // sort_at as the sync sets it.
+        Database::run(
+            $pdo,
+            'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid, sort_at)
+             SELECT ?, id, ?, 1, ?, ' . MessageRoutes::SORT_AT . ' FROM message m WHERE m.id = ?',
+            [$locationId, $folderId, $uid, $id],
+        );
         foreach ($flags as $flag) {
             Database::run($pdo, 'INSERT INTO message_flag (location_id, flag) VALUES (?, ?)', [$locationId, $flag]);
         }
@@ -199,6 +207,29 @@ final class ReadApiTest extends DatabaseTestCase
         $unified = Http::json($this->call('GET', '/api/unified/inbox'));
         \assert(\is_array($unified['messages']));
         self::assertSame([$this->accountId, $inbox], [$unified['messages'][0]['accountId'], $unified['messages'][0]['folderId']]);
+    }
+
+    public function testSortKeyMigrationFillsMissingKeysAndCanRunAgain(): void
+    {
+        $inbox = $this->folder('INBOX');
+        $older = $this->message($inbox, 1, 'Older', '2026-10-01 10:00:00');
+        $newer = $this->message($inbox, 2, 'Newer', '2026-10-02 10:00:00');
+        // Rows from before migration 0005 have no key.
+        Database::run(self::$db->pdo(), 'UPDATE message_location SET sort_at = NULL');
+        for ($run = 0; $run < 2; ++$run) {
+            foreach (Migrator::statements((string) file_get_contents(__DIR__ . '/../../migrations/0005_message_sort_key.sql')) as $sql) {
+                self::$db->pdo()->exec($sql);
+            }
+        }
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM message_location WHERE sort_at IS NULL')->fetchColumn());
+        $list = Http::json($this->call('GET', "/api/folders/{$inbox}/messages"));
+        \assert(\is_array($list['messages']));
+        self::assertSame([$newer, $older], array_column($list['messages'], 'id'));
+        self::assertSame(1, (int) Database::run(
+            self::$db->pdo(),
+            "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message_location' AND INDEX_NAME = 'message_location_folder_sort_idx'",
+        )->fetchColumn());
     }
 
     public function testAnotherUsersMailIsNotFound(): void

@@ -46,6 +46,13 @@ final class MessageRoutes
     public const SORT_AT = 'COALESCE(m.sent_at, m.received_at, m.created_at)';
 
     /**
+     * The same date copied into the location (migration 0005), indexed with
+     * the folder: lists read a page in index order instead of sorting the
+     * whole folder.
+     */
+    public const LOCATION_SORT_AT = 'ml.sort_at';
+
+    /**
      * List columns of a message location (alias `ml`) joined with its
      * message (alias `m`).
      */
@@ -53,7 +60,7 @@ final class MessageRoutes
         EXISTS (SELECT 1 FROM message_flag mf WHERE mf.location_id = ml.id AND LOWER(CONVERT(mf.flag USING utf8mb4)) = '\\\\seen') AS flag_seen,
         EXISTS (SELECT 1 FROM message_flag mf WHERE mf.location_id = ml.id AND LOWER(CONVERT(mf.flag USING utf8mb4)) = '\\\\flagged') AS flag_flagged,
         EXISTS (SELECT 1 FROM message_flag mf WHERE mf.location_id = ml.id AND LOWER(CONVERT(mf.flag USING utf8mb4)) = '\\\\answered') AS flag_answered,
-        " . self::SORT_AT . ' AS sort_at,
+        " . self::LOCATION_SORT_AT . ' AS sort_at,
         m.thread_id,
         CASE WHEN m.thread_id IS NULL THEN 1
              ELSE (SELECT COUNT(*) FROM message t WHERE t.thread_id = m.thread_id)
@@ -152,7 +159,7 @@ final class MessageRoutes
              FROM message_location ml
              JOIN message m ON m.id = ml.message_id
              WHERE ml.folder_id = ?' . $where . '
-             ORDER BY ' . self::SORT_AT . ' DESC, ml.id DESC
+             ORDER BY ' . self::LOCATION_SORT_AT . ' DESC, ml.id DESC
              LIMIT ' . ($limit + 1),
             [$folderId, ...$params],
         )->fetchAll();
@@ -253,7 +260,7 @@ final class MessageRoutes
              JOIN message_location ml ON ml.folder_id = f.id
              JOIN message m ON m.id = ml.message_id
              WHERE a.user_id = ?' . $where . '
-             ORDER BY ' . self::SORT_AT . ' DESC, ml.id DESC
+             ORDER BY ' . self::LOCATION_SORT_AT . ' DESC, ml.id DESC
              LIMIT ' . ($limit + 1),
             [$userId, ...$params],
         )->fetchAll();
@@ -427,7 +434,7 @@ final class MessageRoutes
         }
 
         return [
-            ' AND (' . self::SORT_AT . ' < ? OR (' . self::SORT_AT . ' = ? AND ml.id < ?))',
+            ' AND (' . self::LOCATION_SORT_AT . ' < ? OR (' . self::LOCATION_SORT_AT . ' = ? AND ml.id < ?))',
             [$cursor[0], $cursor[0], $cursor[1]],
         ];
     }
