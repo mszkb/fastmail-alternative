@@ -11,7 +11,7 @@ declare(strict_types=1);
 // message list on a very large folder.
 //
 //   LOADTEST_DATABASE_URL=mysql://root:root@127.0.0.1:33306/fma_load \
-//   GREENMAIL_HOST=127.0.0.1 composer loadtest -- --accounts=3 --messages=5000 --synthetic=50000
+//   GREENMAIL_HOST=127.0.0.1 composer loadtest -- --accounts=3 --messages=5000 --synthetic=50000 [--full-history]
 //
 // The database in LOADTEST_DATABASE_URL is WIPED. GreenMail must accept any
 // login (greenmail.auth.disabled, see `make test-services`). Prints Markdown.
@@ -33,12 +33,13 @@ use Fma\Tests\Support\Http;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-$options = getopt('', ['accounts::', 'messages::', 'synthetic::', 'runs::']);
+$options = getopt('', ['accounts::', 'messages::', 'synthetic::', 'runs::', 'full-history']);
 $option = static fn(string $name, int $default): int => \is_array($options) && \is_string($options[$name] ?? null) ? (int) $options[$name] : $default;
 $accounts = max(1, $option('accounts', 3));
 $messages = max(1, $option('messages', 1000));
 $synthetic = max(0, $option('synthetic', 0));
 $runs = max(5, $option('runs', 30));
+$fullHistory = \is_array($options) && \array_key_exists('full-history', $options);
 $url = getenv('LOADTEST_DATABASE_URL');
 $host = getenv('GREENMAIL_HOST');
 if (!is_string($url) || $url === '' || !is_string($host) || $host === '') {
@@ -47,6 +48,8 @@ if (!is_string($url) || $url === '' || !is_string($host) || $host === '') {
 }
 $imapPort = (int) (getenv('GREENMAIL_IMAP_PORT') ?: 3143);
 $smtpPort = (int) (getenv('GREENMAIL_SMTP_PORT') ?: 3025);
+// Any password works with GreenMail (auth disabled); the Dovecot test image wants `pass`.
+$imapPassword = getenv('LOADTEST_IMAP_PASSWORD') ?: 'pw';
 
 $dataDir = sys_get_temp_dir() . '/fma-loadtest-' . bin2hex(random_bytes(4));
 mkdir($dataDir, 0o700);
@@ -94,7 +97,7 @@ $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
 // Fill one GreenMail mailbox.
 $mailbox = 'load-' . bin2hex(random_bytes(4)) . '@example.org';
 $policy = new TransportPolicy(allowPrivateHosts: true, insecureTransport: true, extraPorts: [$imapPort, $smtpPort]);
-$imap = ImapClient::connect($policy, new HostConfig($host, $imapPort, false, $mailbox, 'pw'));
+$imap = ImapClient::connect($policy, new HostConfig($host, $imapPort, false, $mailbox, $imapPassword));
 $start = microtime(true);
 for ($i = 1; $i <= $messages; ++$i) {
     $date = gmdate('D, j M Y H:i:s +0000', 1_780_000_000 + $i * 60);
@@ -118,7 +121,7 @@ for ($a = 0; $a < $accounts; ++$a) {
         'INSERT INTO mail_account (id, user_id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [$id, $userId, "Konto {$a}", $mailbox, $host, $imapPort, $host, $smtpPort, Envelope::wrapDataKey(Envelope::loadMasterKey($masterKey), $dek, 'v1'), 'v1',
-            Envelope::encryptField($dek, json_encode(['imapUser' => $mailbox, 'imapPassword' => 'pw'], JSON_THROW_ON_ERROR), Envelope::credentialAad($id)), $a],
+            Envelope::encryptField($dek, json_encode(['imapUser' => $mailbox, 'imapPassword' => $imapPassword], JSON_THROW_ON_ERROR), Envelope::credentialAad($id)), $a],
     );
     $accountIds[] = $id;
 }
@@ -202,6 +205,30 @@ foreach ($endpoints as $name => $path) {
         $times[] = $call($path);
     }
     $out->add("| {$name} | " . $ms($percentile($times, 0.5)) . ' | ' . $ms($percentile($times, 0.95)) . ' | ' . $ms(max($times)) . ' |');
+}
+
+// Full history of one account: "load older" until the whole mailbox is synced.
+if ($fullHistory) {
+    $count = static fn(): int => (int) Database::run($pdo, 'SELECT COUNT(*) FROM message_location WHERE folder_id = ?', [$inbox])->fetchColumn();
+    $before = $count();
+    $start = microtime(true);
+    $rounds = 0;
+    do {
+        $last = $count();
+        $request = Http::request('POST', "/api/folders/{$inbox}/load-older", ['Sec-Fetch-Site' => 'same-origin'])->withCookieParams(['fma_session' => $token]);
+        if ($app->handle($request)->getStatusCode() !== 202) {
+            throw new RuntimeException('load-older failed');
+        }
+        while ($queued() > 0) {
+            $runner->work(new Deadline(300));
+        }
+        ++$rounds;
+    } while ($count() < $messages && $count() > $last);
+    $elapsed = microtime(true) - $start;
+    $loaded = $count() - $before;
+    $out->add('');
+    $out->add("Volle Historie (1 Konto, „Ältere laden“ bis alles da ist): {$loaded} weitere Mails in " . number_format($elapsed, 1, ',', '')
+        . " s ({$rounds} Runden, ≈ " . (int) round($loaded / max($elapsed, 0.001)) . ' Mails/s), jetzt ' . $count() . ' im Ordner; Spitzen-Speicher ' . $mb(memory_get_peak_usage(true)) . ' MB.');
 }
 
 // Very large folder: synthetic rows (valid encryption, no raw files).
