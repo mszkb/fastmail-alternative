@@ -98,7 +98,7 @@ Ohne Eintrag in `.env` funktionieren die Release-Images auch pro Befehl (`FMA_VE
 - Der php-Container führt sie bei jedem Start aus (`php bin/migrate.php`, danach php-fpm); auf Webspace der Installer bzw. `php bin/migrate.php`. Eine Datenbanksperre (`GET_LOCK`) verhindert, dass zwei Prozesse gleichzeitig migrieren.
 - **MySQL/MariaDB kennt keine transaktionalen Schemaänderungen:** Eine fehlgeschlagene Migration kann teilweise angewendet sein. Jede Anweisung ist deshalb wiederholbar geschrieben (`IF NOT EXISTS` usw.); nach Behebung der Ursache wird die Migration beim nächsten Start einfach erneut angewendet. Schlägt sie fehl, startet php-fpm nicht (`migration failed` im Log, Healthcheck schlägt fehl).
 - Migrationen sind **nur vorwärts** (keine Down-Migrationen).
-- **Kein Startschutz gegen zu alte Versionen:** Die App prüft beim Start nicht, ob die Datenbank schon von einer neueren Version migriert wurde. Ein bloßes Zurückwechseln des Codes läuft deshalb auf einem unbekannten Schema weiter – ein Rückschritt immer als [Rollback](#rollback) mit Restore. Das Einspielen von Backups einer neueren Version lehnt `backup restore` dagegen ab.
+- **Startschutz gegen zu alte Versionen:** Kennt die App Migrationen in der Datenbank nicht (eine neuere Version hat sie schon migriert), bricht `bin/migrate.php` mit `migration refused` ab und der `php`-Container startet nicht. Ein Rückschritt deshalb immer als [Rollback](#rollback) mit Restore (`--force` baut das Schema der alten Version neu auf). Versionen vor dieser Prüfung starten auf dem neueren Schema trotzdem – auch dann nur per Rollback zurückwechseln. Das Einspielen von Backups einer neueren Version lehnt `backup restore` ab.
 
 ## Rollback
 
@@ -114,6 +114,7 @@ docker compose build
 docker compose stop php worker
 docker compose run --rm --no-deps --user root -v "$BACKUP_DIR:/backups" php \
   php bin/console backup restore "/backups/$(basename "$PREVIOUS_BACKUP")" --force
+# Nur nötig, wenn die alte Version die Dateien nach dem Restore noch nicht selbst übergibt (harmlos sonst):
 docker compose run --rm --no-deps --user root php chown -R www-data:www-data /data/mail
 docker compose up -d --wait caddy web php mariadb   # Worker bleibt gestoppt
 # Nicht gesendete Postausgangs-Einträge anzeigen (nur IDs/Zeiten, keine Inhalte):

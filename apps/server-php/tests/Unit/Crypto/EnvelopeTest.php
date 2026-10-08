@@ -15,9 +15,9 @@ use PHPUnit\Framework\TestCase;
 final class EnvelopeTest extends TestCase
 {
     /** @return array<string, mixed> */
-    private static function nodeVectors(): array
+    private static function referenceVectors(): array
     {
-        $json = file_get_contents(CryptoVectors::FIXTURE_DIR . 'crypto-vectors-node.json');
+        $json = file_get_contents(CryptoVectors::FIXTURE_DIR . 'crypto-vectors-reference.json');
         self::assertIsString($json);
         $vectors = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($vectors);
@@ -89,9 +89,9 @@ final class EnvelopeTest extends TestCase
         return (string) stream_get_contents($out);
     }
 
-    public function testDecryptsEverythingNodeEncrypted(): void
+    public function testDecryptsTheReferenceVectors(): void
     {
-        self::verify(self::nodeVectors());
+        self::verify(self::referenceVectors());
     }
 
     public function testVerifiesItsOwnVectors(): void
@@ -108,14 +108,14 @@ final class EnvelopeTest extends TestCase
 
     public function testWrongDataKeyFails(): void
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $this->expectException(CryptoException::class);
         Envelope::decryptField(random_bytes(32), $v['fields'][0]['envelope'], $v['fields'][0]['aad']);
     }
 
     public function testWrongAadFails(): void
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $dataKey = (string) base64_decode($v['dataKey'], true);
         $this->expectException(CryptoException::class);
         Envelope::decryptField($dataKey, $v['fields'][0]['envelope'], Envelope::messageFieldAad('subject', CryptoVectors::ACCOUNT_ID));
@@ -123,7 +123,7 @@ final class EnvelopeTest extends TestCase
 
     public function testWrongMasterKeyFails(): void
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $this->expectException(CryptoException::class);
         Envelope::unwrapDataKey(random_bytes(32), $v['wrappedDek']);
     }
@@ -131,7 +131,7 @@ final class EnvelopeTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function tamperedFields(): iterable
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $raw = (string) base64_decode(substr($v['fields'][0]['envelope'], 7), true);
         $flip = static fn(string $s, int $pos): string => substr_replace($s, \chr(\ord($s[$pos]) ^ 1), $pos, 1);
         yield 'tag modified' => ['fma.f1.' . base64_encode($flip($raw, \strlen($raw) - 1))];
@@ -145,7 +145,7 @@ final class EnvelopeTest extends TestCase
     #[DataProvider('tamperedFields')]
     public function testTamperedFieldFails(string $envelope): void
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $dataKey = (string) base64_decode($v['dataKey'], true);
         $this->expectException(CryptoException::class);
         Envelope::decryptField($dataKey, $envelope, $v['fields'][0]['aad']);
@@ -153,7 +153,7 @@ final class EnvelopeTest extends TestCase
 
     public function testTamperedBytesFail(): void
     {
-        $v = self::nodeVectors();
+        $v = self::referenceVectors();
         $dataKey = (string) base64_decode($v['dataKey'], true);
         $env = (string) base64_decode($v['bytes']['envelope'], true);
         $env[\strlen($env) - 1] = \chr(\ord($env[\strlen($env) - 1]) ^ 0x80);

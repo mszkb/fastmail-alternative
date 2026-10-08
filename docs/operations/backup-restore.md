@@ -33,7 +33,7 @@ Mailinhalte und Zugangsdaten sind in der Datenbank ohnehin mit Konto-DEKs versch
 | `php bin/console backup restore DATEI --force`      | bestehende Datenbank und mail-data **ersetzen** (alles Vorhandene wird gelöscht – erst nachdem das Backup vollständig geprüft wurde) |
 
 - **Konsistenz:** Während `create` hält das Werkzeug die Runner-Sperre (Jobs pausieren, laufende werden bis zu 2 Minuten abgewartet) und liest alle Tabellen in einer Transaktion mit konsistentem Snapshot.
-- **Restore:** Ohne `--force` verweigert `restore` das Einspielen, sobald die Datenbank Daten oder das Volume Dateien enthält (frisch migrierte Tabellen und ein offener Setup-Code zählen als leer). Backups einer **neueren** App-Version (unbekannte Migrationen) werden abgelehnt – erst die App aktualisieren. Backups älterer Versionen werden in das aktuelle Schema eingespielt. Vor jedem Schreiben wird das ganze Backup geprüft (Key, Formatversion, Migrationsstand, Prüfsummen, Manifest); ein falscher `MASTER_KEY`, eine beschädigte Datei oder ein Backup einer neueren Version lassen bestehende Daten also unangetastet (der Restore liest die Datei dafür zweimal).
+- **Restore:** Ohne `--force` verweigert `restore` das Einspielen, sobald die Datenbank Daten oder das Volume Dateien enthält (frisch migrierte Tabellen und ein offener Setup-Code zählen als leer). Backups einer **neueren** App-Version (unbekannte Migrationen) werden abgelehnt – erst die App aktualisieren. Wurde umgekehrt die Datenbank schon von einer neueren Version migriert (Rollback), verlangt `restore` `--force` und baut die Tabellen dieser Version dann neu auf; Tabellen, die nur die neuere Version angelegt hat, bleiben unberührt. Backups älterer Versionen werden in das aktuelle Schema eingespielt. Vor jedem Schreiben wird das ganze Backup geprüft (Key, Formatversion, Migrationsstand, Prüfsummen, Manifest); ein falscher `MASTER_KEY`, eine beschädigte Datei oder ein Backup einer neueren Version lassen bestehende Daten also unangetastet (der Restore liest die Datei dafür zweimal).
 - **Aufbewahrung:** Nach jedem `create` werden `fma-backup-*.fmabk` im Zielordner gelöscht, die älter als `BACKUP_KEEP_DAYS` Tage sind (Standard 14; `0` = nichts löschen). `scripts/backup.sh` erledigt das selbst (siehe unten).
 
 ## Backup erstellen
@@ -98,14 +98,10 @@ Die Dateien sind verschlüsselt und dürfen auf fremdem Speicher liegen – **di
      php bin/console backup restore /backups/fma-backup-….fmabk
    ```
 
-4. Die wiederhergestellten Dateien gehören jetzt root; php-fpm und Worker laufen als `www-data`. Einmal übergeben:
+   Läuft `restore` als root (wie hier), übergibt es die wiederhergestellten Dateien selbst an den Besitzer des `mail-data`-Verzeichnisses (`www-data`, unter dem php-fpm und Worker laufen); ein `chown` von Hand ist nicht nötig.
 
-   ```sh
-   docker compose run --rm --no-deps --user root php chown -R www-data:www-data /data/mail
-   ```
-
-5. Erst ohne Worker starten: `docker compose up -d --wait caddy web php mariadb`. Hat `restore` `warning: N unsent outbox message(s)` gemeldet, die ungesendeten Postausgangs-Einträge wie unter [Upgrade – Rollback](upgrade.md#rollback) prüfen und bereits Gesendetes entfernen – **der Worker würde sie sonst sofort (erneut) senden**. Läuft die alte Instanz noch, sie vorher stoppen, sonst senden beide.
-6. Dann den Worker starten: `docker compose up -d --wait worker`. Anmeldung mit dem bisherigen Benutzer; Konten und Mails sind sofort da, der Worker holt Neues vom Anbieter nach.
+4. Erst ohne Worker starten: `docker compose up -d --wait caddy web php mariadb`. Hat `restore` `warning: N unsent outbox message(s)` gemeldet, die ungesendeten Postausgangs-Einträge wie unter [Upgrade – Rollback](upgrade.md#rollback) prüfen und bereits Gesendetes entfernen – **der Worker würde sie sonst sofort (erneut) senden**. Läuft die alte Instanz noch, sie vorher stoppen, sonst senden beide.
+5. Dann den Worker starten: `docker compose up -d --wait worker`. Anmeldung mit dem bisherigen Benutzer; Konten und Mails sind sofort da, der Worker holt Neues vom Anbieter nach.
 
 Lief die Instanz schon (z. B. Einrichtung schon erledigt), ist die Datenbank nicht mehr leer: dann `restore … --force` verwenden (vorher `docker compose stop worker`) – das löscht die vorhandene Datenbank und den Inhalt von `mail-data` vollständig. Falscher Key, beschädigte Datei oder zu neue Version fallen bereits in der Prüfung vor dem Löschen auf. Bricht ein Restore danach ab (z. B. Platte voll), ist die Instanz eventuell halb befüllt; nach Behebung der Ursache mit `--force` wiederholen.
 

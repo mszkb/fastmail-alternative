@@ -12,6 +12,10 @@ namespace Fma\Db;
  * MySQL commits DDL implicitly, so a migration is not atomic: every
  * statement must be safe to re-run (IF NOT EXISTS etc.), then a failed
  * migration can simply be applied again after fixing the cause.
+ *
+ * A database that already carries migrations this code does not know
+ * (a newer version ran against it, e.g. before a rollback without
+ * restore) is refused with SchemaTooNewException instead of being used.
  */
 final class Migrator
 {
@@ -37,6 +41,10 @@ final class Migrator
                 static fn(mixed $name): string => (string) $name,
                 Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
             );
+            $unknown = array_values(array_diff($done, array_keys($this->files())));
+            if ($unknown !== []) {
+                throw new SchemaTooNewException($unknown);
+            }
             $applied = [];
             foreach ($this->pending($done) as $name => $file) {
                 foreach (self::statements((string) file_get_contents($file)) as $sql) {
@@ -59,17 +67,20 @@ final class Migrator
      */
     private function pending(array $done): array
     {
+        return array_diff_key($this->files(), array_flip($done));
+    }
+
+    /** @return array<string, string> name => file, in name order */
+    private function files(): array
+    {
         $files = glob($this->dir . '/[0-9][0-9][0-9][0-9]_*.sql') ?: [];
         sort($files, SORT_STRING);
-        $pending = [];
+        $byName = [];
         foreach ($files as $file) {
-            $name = basename($file, '.sql');
-            if (!\in_array($name, $done, true)) {
-                $pending[$name] = $file;
-            }
+            $byName[basename($file, '.sql')] = $file;
         }
 
-        return $pending;
+        return $byName;
     }
 
     /**

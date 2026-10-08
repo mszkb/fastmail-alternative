@@ -273,7 +273,7 @@ final class SearchTest extends DatabaseTestCase
         self::assertSame(200, $response->getStatusCode());
     }
 
-    public function testParsesQueryLikeNode(): void
+    public function testParsesQueryAndBuildsImapCriteria(): void
     {
         self::assertSame(['q' => 'a b', 'folderId' => 'abcdef01-2345-4789-8abc-def012345678'], SearchRoutes::parseQuery(['q' => " a\x01b ", 'folderId' => 'ABCDEF01-2345-4789-8ABC-DEF012345678', 'since' => '']));
         self::assertSame('Ungültiger Suchbegriff.', SearchRoutes::parseQuery(['q' => ['x']]));

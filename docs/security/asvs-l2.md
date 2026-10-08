@@ -64,21 +64,21 @@ Legende: ✅ erfüllt · ◐ teilweise · ❌ offen · n. a. nicht anwendbar
 
 ### V3 Session-Management
 
-| ASVS                                                              | Status | Beleg                                                                                                                   |
-| ----------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
-| 3.1.1 Token nie in URL                                            | ✅     | nur Cookie `fma_session` (`routes.ts:90-98`)                                                                            |
-| 3.2.1 neues Token bei Login                                       | ✅     | `routes.ts:233-241` (alte Session wird gelöscht)                                                                        |
-| 3.2.2 ≥ 64 Bit Entropie                                           | ✅     | 32 Byte `randomBytes` (`auth/sessions.ts:33-35`), DB speichert nur SHA-256 (`sessions.ts:29-31`)                        |
-| 3.3.1 Logout invalidiert serverseitig                             | ✅     | `routes.ts:301-305`, `sessions.ts:98-110`                                                                               |
-| 3.3.2 Re-Auth nach 12 h / 30 min Idle (L2)                        | ❌     | absolut 30 d, Idle 14 d (`sessions.ts:18-19`) – bewusste Abweichung (PWA/Push)                                          |
-| 3.3.3 Option „alle anderen Sessions beenden" nach Passwortwechsel | ✅     | `sessions.ts:164-206`                                                                                                   |
-| 3.3.4 aktive Sessions sichtbar/widerrufbar                        | ✅     | `GET/DELETE /api/auth/devices` (`routes.ts:307-327`)                                                                    |
-| 3.4.1 Secure                                                      | ◐      | nur wenn `DOMAIN != :80` (`routes.ts:35-37`); hinter eigenem TLS-Proxy mit `DOMAIN=:80` fehlt `Secure` (Konfig-Hinweis) |
-| 3.4.2 HttpOnly / 3.4.3 SameSite                                   | ✅     | `httpOnly: true`, `sameSite: 'strict'` (`routes.ts:93-94`)                                                              |
-| 3.4.4 `__Host-`-Präfix                                            | ❌     | Cookie heißt `fma_session` (`routes.ts:31`) – Niedrig, siehe N7                                                         |
-| 3.4.5 Path                                                        | ✅     | `path: '/'` bewusst, Origin dediziert                                                                                   |
-| 3.5.x Token-Rotation                                              | ✅     | alle 24 h (`routes.ts:71-74`)                                                                                           |
-| 3.7.1 Re-Auth vor sensiblen Aktionen                              | ◐      | Passwortwechsel ja; Konto anlegen/löschen, Export, Geräte-Widerruf ohne Re-Auth                                         |
+| ASVS                                                              | Status | Beleg                                                                                                                                  |
+| ----------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1.1 Token nie in URL                                            | ✅     | nur Cookie `fma_session` (`routes.ts:90-98`)                                                                                           |
+| 3.2.1 neues Token bei Login                                       | ✅     | `routes.ts:233-241` (alte Session wird gelöscht)                                                                                       |
+| 3.2.2 ≥ 64 Bit Entropie                                           | ✅     | 32 Byte `randomBytes` (`auth/sessions.ts:33-35`), DB speichert nur SHA-256 (`sessions.ts:29-31`)                                       |
+| 3.3.1 Logout invalidiert serverseitig                             | ✅     | `routes.ts:301-305`, `sessions.ts:98-110`                                                                                              |
+| 3.3.2 Re-Auth nach 12 h / 30 min Idle (L2)                        | ❌     | absolut 30 d, Idle 14 d (`sessions.ts:18-19`) – bewusste Abweichung (PWA/Push)                                                         |
+| 3.3.3 Option „alle anderen Sessions beenden" nach Passwortwechsel | ✅     | `sessions.ts:164-206`                                                                                                                  |
+| 3.3.4 aktive Sessions sichtbar/widerrufbar                        | ✅     | `GET/DELETE /api/auth/devices` (`routes.ts:307-327`)                                                                                   |
+| 3.4.1 Secure                                                      | ✅     | automatisch, wenn `DOMAIN != :80`; hinter eigenem TLS-Proxy mit `DOMAIN=:80` per `COOKIE_SECURE=1` (N7, PHP: `Auth/SessionCookie.php`) |
+| 3.4.2 HttpOnly / 3.4.3 SameSite                                   | ✅     | `httpOnly: true`, `sameSite: 'strict'` (`routes.ts:93-94`)                                                                             |
+| 3.4.4 `__Host-`-Präfix                                            | ❌     | Cookie heißt `fma_session` (`routes.ts:31`) – Niedrig, siehe N7                                                                        |
+| 3.4.5 Path                                                        | ✅     | `path: '/'` bewusst, Origin dediziert                                                                                                  |
+| 3.5.x Token-Rotation                                              | ✅     | alle 24 h (`routes.ts:71-74`)                                                                                                          |
+| 3.7.1 Re-Auth vor sensiblen Aktionen                              | ◐      | Passwortwechsel ja; Konto anlegen/löschen, Export, Geräte-Widerruf ohne Re-Auth                                                        |
 
 ### V4 Zugriffskontrolle
 
@@ -95,7 +95,7 @@ Legende: ✅ erfüllt · ◐ teilweise · ❌ offen · n. a. nicht anwendbar
 | --------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 5.1.3/5.1.4 Allowlist-Validierung             | ◐      | IDs per `UUID_RE` (`accounts.ts:100`, `message-html.ts:26`), Ports `1..65535` (`accounts.ts:118-120`), Hosts in `accounts.ts` **ohne** Format-Prüfung (`accounts.ts:136-150`, Import hat `HOST_RE` `config-transfer.ts:48`) |
 | 5.2.1 HTML-Sanitizing (HTML-Mails)            | ✅     | sanitize-html-Allowlist, CSS-Filter, URL-Policy (`mail/html-sanitizer.ts:39-401`)                                                                                                                                           |
-| 5.2.6 SSRF                                    | ◐      | DNS-Prüfung vor jeder Verbindung, Verbindung an die geprüfte Adresse (M3, N1 behoben); offen: alle Ports erlaubt (N2)                                                                                                       |
+| 5.2.6 SSRF                                    | ✅     | DNS-Prüfung vor jeder Verbindung, Verbindung an die geprüfte Adresse (M3, N1 behoben); Port-Allowlist (N2 behoben, PHP: `Mail/TransportPolicy.php`)                                                                         |
 | 5.2.7 SVG/Script in Inhalten                  | ✅     | Inline-Bilder nur Raster (`html-sanitizer.ts:165`, `message-html.ts:27-35`)                                                                                                                                                 |
 | 5.3.1 kontextbezogenes Output-Encoding        | ✅     | Vue-Interpolation, kein `v-html` (`MessageBody.vue:138`); Mail-HTML nur via `srcdoc`                                                                                                                                        |
 | 5.3.3 XSS-Schutz Mail-HTML (Defense in Depth) | ✅     | iframe `sandbox="allow-popups allow-popups-to-escape-sandbox"` + eigene CSP (`MessageBody.vue:47-53,126`)                                                                                                                   |
