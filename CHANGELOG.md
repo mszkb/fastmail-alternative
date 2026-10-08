@@ -51,6 +51,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
 - Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 - Weiterleiten übernimmt eingebettete Bilder (cid:, PNG/JPEG/GIF/WebP) der Originalmail als normale Anhänge, da die Weiterleitung als Text versendet wird; SVG/HTML-Inline-Teile werden nicht übernommen, Größen- und Anzahlgrenzen gelten wie bisher (#53)
+- Nachrichtenliste großer Ordner deutlich schneller (Lasttest #60: 50 000 Mails in einem Ordner 475 ms → 4 ms je Seite auf MariaDB): Die Liste liest eine Seite jetzt direkt aus einem Index statt den ganzen Ordner zu sortieren. **Betreiber:** Migration `0005_message_sort_key` ergänzt `message_location` um die Spalte `sort_at` samt Index und füllt sie für alle vorhandenen Mails (läuft automatisch mit `bin/migrate.php`, wiederholbar; bei sehr großen Datenbanken einige Sekunden bis Minuten); keine `.env`-Änderung. Neues Lasttest-Werkzeug `composer loadtest` ([Lasttest](docs/operations/load-test.md))
 
 ### Removed
 
