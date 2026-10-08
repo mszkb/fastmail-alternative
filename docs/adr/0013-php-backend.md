@@ -135,4 +135,4 @@ Folgeaufgaben: #96 bis #110 (Epic #94).
 
 ## Umsetzung
 
-Mit #110 (2026-10-08) ist das PHP-Backend das einzige Backend: `apps/api`, `apps/worker`, `packages/db` und `packages/crypto` sind entfernt, `docker-compose.yml` startet caddy, web, php, worker und MariaDB. Bestehende Docker-Installationen ziehen einmalig mit `scripts/migrate-to-php.sh` um ([Anleitung](../operations/migration.md#umstieg-auf-das-php-backend-postgresql--mysqlmariadb)); der Import aus PostgreSQL (`bin/import-postgres.php`) bleibt dafür erhalten.
+Mit #110 (2026-10-08) ist das PHP-Backend das einzige Backend: `apps/api`, `apps/worker`, `packages/db` und `packages/crypto` sind entfernt, `docker-compose.yml` startet caddy, web, php, worker und MariaDB. Abweichend von der Konsequenz oben verzichtet der Owner auf eine Datenübernahme (2026-10-08): Installationen mit dem Node-Backend werden neu aufgesetzt, die Mails kommen per IMAP wieder; der Import aus PostgreSQL (#108) ist deshalb ebenfalls entfernt.

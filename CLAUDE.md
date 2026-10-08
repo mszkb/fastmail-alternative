@@ -60,7 +60,7 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
 - Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007); alternativ Shared Hosting mit PHP + MySQL und Cron (ADR-0013)
 
-Das frühere Node-Backend (Fastify, PostgreSQL) ist mit #110 entfernt; `apps/server-php/bin/import-postgres.php` bleibt nur für den einmaligen Umzug alter Installationen.
+Das frühere Node-Backend (Fastify, PostgreSQL) ist mit #110 entfernt; eine Datenübernahme daraus gibt es nicht.
 
 ## Autonomer Agent
 
@@ -88,4 +88,4 @@ Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (PWA, Tests; `npm i -g pnpm` oder 
 
 Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 
-Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `./scripts/setup-env.sh` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Bestehende Installationen mit dem früheren Node-Backend ziehen einmalig mit `./scripts/migrate-to-php.sh` um. Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.
+Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `./scripts/setup-env.sh` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Installationen mit dem früheren Node-Backend werden neu aufgesetzt (`docs/operations/upgrade.md`). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.

@@ -13,7 +13,7 @@ git clone https://github.com/mszkb/fastmail-alternative.git && cd fastmail-alter
 docker compose up -d --build --wait
 ```
 
-Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md). Umstieg einer bestehenden Installation vom früheren Node-Backend: [Migration](docs/operations/migration.md#umstieg-auf-das-php-backend-postgresql--mysqlmariadb).
+Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md).
 
 Ausführlich (Voraussetzungen, Ersteinrichtung, Push, Backup, Upgrade, Troubleshooting): [Betreiber-Doku](docs/operations/README.md)
 

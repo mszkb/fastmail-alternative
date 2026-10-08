@@ -37,12 +37,11 @@ if [ "$(printf '%s\n' "$CONFIG" | grep -c '^    build:')" -ne 2 ]; then
 fi
 PROJECT="$(printf '%s\n' "$CONFIG" | sed -n 's/^name: *//p' | tr -d "\"'")"
 
-# Still on the data of the former Node/PostgreSQL stack: starting the new
-# version would come up with an empty database. That move is its own script.
-if [ -n "$PROJECT" ] && docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1 &&
-  [ ! -f "$BACKUP_DIR/migrated-to-php" ]; then
-  echo "upgrade: this installation still has its data in PostgreSQL - run ./scripts/migrate-to-php.sh," >&2
-  echo "upgrade: see 'Umstieg auf das PHP-Backend' in docs/operations/migration.md" >&2
+# Installation of the former Node/PostgreSQL stack: there is no data
+# migration; it is set up again (docs/operations/upgrade.md).
+if [ -n "$PROJECT" ] && docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; then
+  echo "upgrade: this is an installation of the former Node backend (volume ${PROJECT}_postgres-data)," >&2
+  echo "upgrade: there is no migration - see 'Installationen mit dem früheren Node-Backend' in docs/operations/upgrade.md" >&2
   exit 1
 fi
 

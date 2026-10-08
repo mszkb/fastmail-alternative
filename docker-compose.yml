@@ -6,11 +6,6 @@
 #
 # Resource policy (lean self-hosting): every service has a memory limit so
 # the stack cannot exhaust a small VPS/Raspberry Pi, and logs are rotated.
-#
-# No fixed project name: volumes (mail-data!) keep the names of the former
-# Node stack in the same directory, so an upgrade reuses them. The profile
-# "migration" (postgres-legacy, pg-import) is only for the one-time move from
-# PostgreSQL (scripts/migrate-to-php.sh, docs/operations/migration.md).
 
 x-logging: &default-logging
   driver: json-file
@@ -174,51 +169,8 @@ services:
       retries: 6
       start_period: 30s
 
-  # --- One-time move from the Node stack (profile "migration") ---
-  # The PostgreSQL of the former stack on its old volume, only reachable
-  # inside the compose network while scripts/migrate-to-php.sh runs.
-  postgres-legacy:
-    profiles: ['migration']
-    image: postgres:17-alpine
-    logging: *default-logging
-    mem_limit: 256m
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mail}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
-      POSTGRES_DB: ${POSTGRES_DB:-mail}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-
-  # The PHP image plus pdo_pgsql: applies the migrations and imports the
-  # old database (apps/server-php/bin/import-postgres.php).
-  pg-import:
-    profiles: ['migration']
-    build:
-      context: apps/server-php
-      target: import
-    image: fma-server-php-import:local
-    logging: *default-logging
-    environment:
-      <<: *php-env
-      LEGACY_DATABASE_URL: postgres://${POSTGRES_USER:-mail}:${POSTGRES_PASSWORD:-}@postgres-legacy:5432/${POSTGRES_DB:-mail}
-    command:
-      ['sh', '-c', 'php bin/migrate.php && php bin/import-postgres.php "$$LEGACY_DATABASE_URL"']
-    depends_on:
-      mariadb:
-        condition: service_healthy
-      postgres-legacy:
-        condition: service_healthy
-
 volumes:
   mariadb-data:
   mail-data:
   caddy-data:
   caddy-config:
-  # Only read by the migration profile; delete it after a successful move.
-  postgres-data:
