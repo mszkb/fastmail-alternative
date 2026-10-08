@@ -1,6 +1,6 @@
 # API-Vertrag (OpenAPI)
 
-[`openapi.yaml`](openapi.yaml) beschreibt das HTTP-API unter `/api/*` (OpenAPI 3.1, ADR-0008/0010): alle Routen, Request-Bodies, Statuscodes, JSON-Formen und das Session-Cookie `fma_session`. Es ist der Vertrag zwischen der PWA (und späteren nativen Clients) und dem Backend `apps/server-php` ([ADR-0013](../adr/0013-php-backend.md)). Ein zweites Backend gibt es nicht mehr: das frühere Node-Backend (`apps/api`, `apps/worker`) wurde mit #110 entfernt.
+[`openapi.yaml`](openapi.yaml) beschreibt das HTTP-API unter `/api/*` (OpenAPI 3.1, ADR-0010, ADR-0013): alle Routen, Request-Bodies, Statuscodes, JSON-Formen und das Session-Cookie `fma_session`. Es ist der Vertrag zwischen der PWA (und späteren nativen Clients) und dem Backend `apps/server-php` ([ADR-0013](../adr/0013-php-backend.md)). Ein zweites Backend gibt es nicht mehr: das frühere Node-Backend (`apps/api`, `apps/worker`) wurde mit #110 entfernt.
 
 - **Quelle sind die Teile in [`parts/`](parts/)** (`_base.yaml` mit gemeinsamen Komponenten, je Bereich eine Datei). `openapi.yaml` wird daraus erzeugt – nicht von Hand ändern:
   ```bash
