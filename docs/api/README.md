@@ -13,13 +13,15 @@
 
 `packages/contract-tests` ruft ein laufendes Backend über HTTP auf (`API_URL`) und prüft jede JSON-Antwort gegen die Spezifikation. Testdaten entstehen nur über die API (Ersteinrichtung mit dem Setup-Code `SETUP_TOKEN`). Ohne `API_URL` werden die HTTP-Tests übersprungen.
 
-| Variable                 | Standard               | Zweck                                                                       |
-| ------------------------ | ---------------------- | --------------------------------------------------------------------------- |
-| `API_URL`                | –                      | Basis-URL des Backends, z. B. `http://127.0.0.1:3102`                       |
-| `SETUP_TOKEN`            | `e2e-setup-code`       | Setup-Code des Backends (muss dort ebenso gesetzt sein)                     |
-| `CONTRACT_EMAIL`         | `contract@example.org` | Benutzer, den die Tests anlegen bzw. mit dem sie sich anmelden              |
-| `CONTRACT_PASSWORD`      | `contract-password-1`  | dessen Passwort                                                             |
-| `CONTRACT_METRICS_TOKEN` | leer                   | gesetzt = `/api/metrics` mit diesem Token prüfen, leer = muss 404 antworten |
+| Variable                 | Standard               | Zweck                                                                                                                                                                                     |
+| ------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `API_URL`                | –                      | Basis-URL des Backends, z. B. `http://127.0.0.1:3102`                                                                                                                                     |
+| `SETUP_TOKEN`            | `e2e-setup-code`       | Setup-Code des Backends (muss dort ebenso gesetzt sein)                                                                                                                                   |
+| `CONTRACT_EMAIL`         | `contract@example.org` | Benutzer, den die Tests anlegen bzw. mit dem sie sich anmelden                                                                                                                            |
+| `CONTRACT_PASSWORD`      | `contract-password-1`  | dessen Passwort                                                                                                                                                                           |
+| `CONTRACT_METRICS_TOKEN` | leer                   | gesetzt = `/api/metrics` mit diesem Token prüfen, leer = muss 404 antworten                                                                                                               |
+| `GREENMAIL_HOST`         | –                      | GreenMail (Ports 3143/3025, jede Anmeldung erlaubt) für Konten- und Mail-Tests; leer = übersprungen                                                                                       |
+| `CONTRACT_CRON_CMD`      | –                      | Befehl, der die Jobs einmal abarbeitet, z. B. `php apps/server-php/bin/cron.php`; nötig für `mail.test.ts` (Senden, Sync, Lesen, Aktionen, Suche, Entwürfe, Uploads), leer = übersprungen |
 
 Jeder Test-Client schickt eine eigene `X-Forwarded-For`-Adresse; das Backend vertraut ihr nur von einer Loopback-/privaten Adresse. So stören sich Rate-Limit- und Lockout-Tests nicht gegenseitig. Das Backend muss deshalb direkt (ohne fremden Proxy) auf `127.0.0.1` laufen und eine **Wegwerf-Datenbank** (MySQL 8 / MariaDB 10.6+) nutzen.
 
@@ -27,11 +29,14 @@ Jeder Test-Client schickt eine eigene `X-Forwarded-For`-Adresse; das Backend ver
 # Backend mit leerer Wegwerf-Datenbank starten (composer install in apps/server-php vorausgesetzt)
 export DATABASE_URL=mysql://fma:fma@127.0.0.1:3306/fma_contract
 export MASTER_KEY=$(openssl rand -base64 32) SETUP_TOKEN=e2e-setup-code MAIL_DATA_DIR=$(mktemp -d)
+export MAIL_ALLOW_PRIVATE_HOSTS=1 MAIL_INSECURE_TRANSPORT=1
 php apps/server-php/bin/migrate.php
 PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:3102 -t apps/server-php/public apps/server-php/public/index.php &
 
-# Contract-Tests
-API_URL=http://127.0.0.1:3102 pnpm --filter @fma/contract-tests test
+# Contract-Tests (für Konten und Mail-Endpunkte zusätzlich GreenMail und MAIL_ALLOW_PRIVATE_HOSTS=1
+# MAIL_INSECURE_TRANSPORT=1 am Backend; der Cron-Befehl erbt die Umgebung dieses Prozesses)
+API_URL=http://127.0.0.1:3102 GREENMAIL_HOST=127.0.0.1 \
+  CONTRACT_CRON_CMD="php apps/server-php/bin/cron.php" pnpm --filter @fma/contract-tests test
 ```
 
 ## Browser-Tests (Playwright)

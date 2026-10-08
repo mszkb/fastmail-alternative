@@ -35,7 +35,13 @@ export class Client {
   async request(
     method: string,
     path: string,
-    options: { body?: unknown; headers?: Record<string, string>; pattern?: string } = {},
+    options: {
+      body?: unknown
+      /** Sent as is (e.g. an upload); set the content type in `headers`. */
+      raw?: string
+      headers?: Record<string, string>
+      pattern?: string
+    } = {},
   ): Promise<ApiResponse> {
     const headers: Record<string, string> = {
       'x-forwarded-for': this.ip,
@@ -48,7 +54,7 @@ export class Client {
     const response = await fetch(`${API_URL}${path}`, {
       method,
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: options.raw ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
       redirect: 'manual',
     })
     const setCookie = response.headers.getSetCookie().find((c) => c.startsWith('fma_session='))

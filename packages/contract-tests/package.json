@@ -5,7 +5,7 @@
   "type": "module",
   "description": "HTTP contract tests against any backend (API_URL), checked against docs/api/openapi.yaml",
   "scripts": {
-    "test": "vitest run --exclude test/rate-limit.test.ts && vitest run test/rate-limit.test.ts",
+    "test": "vitest run --exclude test/rate-limit.test.ts --exclude test/mail.test.ts && vitest run test/mail.test.ts && vitest run test/rate-limit.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -37,7 +37,9 @@ describe.skipIf(!API_URL)('settings, storage, export, sync, push', () => {
     expect((await client.request('GET', '/api/storage')).status).toBe(200)
     const exported = await client.request('GET', '/api/export/config')
     expect(exported.status).toBe(200)
-    expect(exported.text).not.toMatch(/password/i)
+    // No credential fields or values (`credentialKind: "password"` is fine).
+    expect(exported.text).not.toMatch(/"\w*password"\s*:/i)
+    expect(exported.text).not.toContain('contract-pw')
   })
 
   it('POST /api/sync answers', async () => {
