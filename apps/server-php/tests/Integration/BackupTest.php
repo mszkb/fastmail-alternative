@@ -143,6 +143,47 @@ final class BackupTest extends DatabaseTestCase
         self::assertFileDoesNotExist($this->dataDir . '/extra');
     }
 
+    public function testForceRestoreRebuildsASchemaFromANewerVersion(): void
+    {
+        $this->wipe();
+        $this->fill();
+        $before = $this->snapshot();
+        $file = $this->create();
+        // A newer version migrated the database (and changed a table) after the backup.
+        $pdo = self::$db->pdo();
+        Database::run($pdo, "INSERT INTO schema_migrations (name) VALUES ('9999_newer')");
+        $pdo->exec('ALTER TABLE mail_account ADD COLUMN newer_column INT NULL');
+        try {
+            $this->backup()->restore($file);
+            self::fail('expected refusal');
+        } catch (BackupException $e) {
+            self::assertStringContainsString('newer app version', $e->getMessage());
+        }
+
+        $this->backup()->restore($file, true);
+        self::assertEquals($before, $this->snapshot());
+        self::assertFalse(Database::run($pdo, "SELECT 1 FROM schema_migrations WHERE name = '9999_newer'")->fetchColumn());
+        self::assertSame(0, (int) Database::run($pdo, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'mail_account' AND column_name = 'newer_column'")->fetchColumn());
+    }
+
+    public function testRestoreAsRootHandsTheFilesToTheDirectoryOwner(): void
+    {
+        if (!\function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('needs root');
+        }
+        $this->wipe();
+        $this->fill();
+        $file = $this->create();
+        $this->wipe();
+        chown($this->dataDir, 65534);
+        chgrp($this->dataDir, 65534);
+        $this->backup()->restore($file);
+        foreach (['/acc', '/acc/msg', '/acc/msg/raw.eml.enc', '/small'] as $path) {
+            self::assertSame(65534, fileowner($this->dataDir . $path), $path);
+            self::assertSame(65534, filegroup($this->dataDir . $path), $path);
+        }
+    }
+
     public function testWrongKeyAndDamagedFilesFailWithoutTouchingTheDatabase(): void
     {
         $this->wipe();

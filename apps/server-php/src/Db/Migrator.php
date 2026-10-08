@@ -12,12 +12,39 @@ namespace Fma\Db;
  * MySQL commits DDL implicitly, so a migration is not atomic: every
  * statement must be safe to re-run (IF NOT EXISTS etc.), then a failed
  * migration can simply be applied again after fixing the cause.
+ *
+ * A database that already carries migrations this code does not know
+ * (a newer version ran against it, e.g. before a rollback without
+ * restore) is refused with SchemaTooNewException instead of being used.
  */
 final class Migrator
 {
     private const LOCK = 'fma-migrations';
 
-    public function __construct(private readonly \PDO $pdo, private readonly string $dir) {}
+    /** The migrations shipped with this version. */
+    public const DEFAULT_DIR = __DIR__ . '/../../migrations';
+
+    public function __construct(private readonly \PDO $pdo, private readonly string $dir = self::DEFAULT_DIR) {}
+
+    /**
+     * Read-only check for entry points that do not migrate (cron, worker):
+     * throws SchemaTooNewException if a newer version migrated the
+     * database. A database without schema_migrations passes.
+     */
+    public function assertNotNewer(): void
+    {
+        $exists = Database::run(
+            $this->pdo,
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'schema_migrations'",
+        )->fetchColumn();
+        if ($exists === false) {
+            return;
+        }
+        $this->assertKnown(array_map(
+            static fn(mixed $name): string => (string) $name,
+            Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
+        ));
+    }
 
     /** @return list<string> names applied in this run */
     public function migrate(): array
@@ -37,6 +64,7 @@ final class Migrator
                 static fn(mixed $name): string => (string) $name,
                 Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
             );
+            $this->assertKnown($done);
             $applied = [];
             foreach ($this->pending($done) as $name => $file) {
                 foreach (self::statements((string) file_get_contents($file)) as $sql) {
@@ -52,6 +80,15 @@ final class Migrator
         }
     }
 
+    /** @param array<string> $done */
+    private function assertKnown(array $done): void
+    {
+        $unknown = array_values(array_diff($done, array_keys($this->files())));
+        if ($unknown !== []) {
+            throw new SchemaTooNewException($unknown);
+        }
+    }
+
     /**
      * @param array<string> $done
      *
@@ -59,17 +96,20 @@ final class Migrator
      */
     private function pending(array $done): array
     {
+        return array_diff_key($this->files(), array_flip($done));
+    }
+
+    /** @return array<string, string> name => file, in name order */
+    private function files(): array
+    {
         $files = glob($this->dir . '/[0-9][0-9][0-9][0-9]_*.sql') ?: [];
         sort($files, SORT_STRING);
-        $pending = [];
+        $byName = [];
         foreach ($files as $file) {
-            $name = basename($file, '.sql');
-            if (!\in_array($name, $done, true)) {
-                $pending[$name] = $file;
-            }
+            $byName[basename($file, '.sql')] = $file;
         }
 
-        return $pending;
+        return $byName;
     }
 
     /**

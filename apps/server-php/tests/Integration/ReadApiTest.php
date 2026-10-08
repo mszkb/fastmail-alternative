@@ -201,6 +201,57 @@ final class ReadApiTest extends DatabaseTestCase
         self::assertSame([$this->accountId, $inbox], [$unified['messages'][0]['accountId'], $unified['messages'][0]['folderId']]);
     }
 
+    public function testAnotherUsersMailIsNotFound(): void
+    {
+        $inbox = $this->folder('INBOX');
+        $trash = $this->folder('Trash', 'trash');
+        $threadId = Uuid::v4();
+        Database::run(self::$db->pdo(), 'INSERT INTO thread (id, account_id) VALUES (?, ?)', [$threadId, $this->accountId]);
+        $raw = "From: a@example.org\r\nSubject: x\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n"
+            . "--b\r\nContent-Type: text/html\r\n\r\n<p>Hi</p>\r\n--b\r\nContent-Type: text/plain; name=\"a.txt\"\r\nContent-Disposition: attachment; filename=\"a.txt\"\r\n\r\nA\r\n--b--\r\n";
+        $id = $this->message($inbox, 1, 'Mine', '2026-10-01 10:00:00', raw: $raw, threadId: $threadId);
+        // Sanity check with the owner's session.
+        self::assertSame(200, $this->call('GET', "/api/messages/{$id}")->getStatusCode());
+
+        $otherUser = Uuid::v4();
+        Database::run(self::$db->pdo(), 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [$otherUser, 'other@example.org', 'unused']);
+        $otherAccount = Uuid::v4();
+        Database::run(
+            self::$db->pdo(),
+            "INSERT INTO mail_account (id, user_id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, key_id, credential_enc)
+             VALUES (?, ?, 'Other', 'other@example.org', 'imap.example.org', 993, 'smtp.example.org', 587, 'x', 'v1', 'x')",
+            [$otherAccount, $otherUser],
+        );
+        $this->token = (new Sessions(self::$db))->createDeviceWithSession($otherUser, 'Other', 'desktop');
+
+        foreach ([
+            ['GET', "/api/accounts/{$this->accountId}/folders", null],
+            ['GET', "/api/accounts/{$this->accountId}/search?q=Mine", null],
+            ['GET', "/api/folders/{$inbox}/messages", null],
+            ['PATCH', "/api/folders/{$inbox}", ['specialUse' => 'archive']],
+            ['POST', "/api/folders/{$inbox}/load-older", null],
+            ['GET', "/api/messages/{$id}", null],
+            ['GET', "/api/messages/{$id}/html", null],
+            ['GET', "/api/messages/{$id}/attachments", null],
+            ['GET', "/api/messages/{$id}/attachments/0", null],
+            ['POST', "/api/messages/{$id}/attachments/copy", ['accountId' => $otherAccount]],
+            ['POST', "/api/messages/{$id}/draft", null],
+            ['POST', '/api/messages/actions', ['folderId' => $inbox, 'messageIds' => [$id], 'action' => 'read']],
+            ['POST', '/api/messages/actions', ['folderId' => $inbox, 'messageIds' => [$id], 'action' => 'move', 'targetFolderId' => $trash]],
+            ['GET', "/api/threads/{$threadId}", null],
+        ] as [$method, $path, $body]) {
+            $response = $this->call($method, $path, $body);
+            self::assertSame(404, $response->getStatusCode(), "{$method} {$path}");
+            self::assertStringNotContainsString('Mine', (string) $response->getBody(), "{$method} {$path}");
+        }
+        // Nothing changed or was queued for the owner's message.
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM message_flag')->fetchColumn());
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM job')->fetchColumn());
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM draft')->fetchColumn());
+        self::assertSame($inbox, Database::run(self::$db->pdo(), 'SELECT folder_id FROM message_location WHERE message_id = ?', [$id])->fetchColumn());
+        self::assertNull(Database::run(self::$db->pdo(), 'SELECT special_use FROM folder WHERE id = ?', [$inbox])->fetchColumn());
+    }
+
     public function testActions(): void
     {
         $inbox = $this->folder('INBOX');

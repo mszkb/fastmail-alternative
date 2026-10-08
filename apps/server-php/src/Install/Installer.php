@@ -8,6 +8,7 @@ use Fma\Auth\SetupCode;
 use Fma\Config;
 use Fma\Db\Database;
 use Fma\Db\Migrator;
+use Fma\Db\SchemaTooNewException;
 use Fma\Http\Middleware\CsrfProtection;
 use Fma\Log\Logger;
 use Psr\Http\Message\ResponseInterface;
@@ -136,6 +137,8 @@ final class Installer
             $applied = (new Migrator($this->db->pdo(), $this->migrationsDir))->migrate();
 
             return self::notice(true, \count($applied) . ' migration(s) applied.');
+        } catch (SchemaTooNewException $e) {
+            return self::notice(false, 'The database was migrated by a newer version (' . self::e(implode(', ', $e->unknown)) . '). Upload that version again or restore a backup.');
         } catch (\Throwable $e) {
             // No message: driver errors may contain connection details.
             return self::notice(false, 'Migration failed (' . $e::class . '). Check the database settings.');

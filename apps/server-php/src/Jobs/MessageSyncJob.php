@@ -259,7 +259,8 @@ final class MessageSyncJob implements JobHandler
             // Bodies missing from earlier (interrupted) runs.
             $missing = Database::run(
                 $pdo,
-                'SELECT ml.message_id, MIN(ml.uid) AS uid FROM message_location ml
+                'SELECT ml.message_id, MIN(ml.uid) AS uid, MAX(m.size_bytes) AS size_bytes FROM message_location ml
+                 JOIN message m ON m.id = ml.message_id
                  LEFT JOIN message_body mb ON mb.message_id = ml.message_id
                  WHERE ml.folder_id = ? AND ml.uidvalidity = ? AND ml.uid > 0 AND mb.message_id IS NULL
                  GROUP BY ml.message_id',
@@ -267,7 +268,7 @@ final class MessageSyncJob implements JobHandler
             )->fetchAll();
             $progress->report('bodies', $folderId, 0, \count($missing));
             foreach ($missing as $index => $row) {
-                /** @var array{message_id: string, uid: int|string} $row */
+                /** @var array{message_id: string, uid: int|string, size_bytes: int|string} $row */
                 if ($deadline->expired()) {
                     $complete = false;
                     break;
@@ -278,7 +279,10 @@ final class MessageSyncJob implements JobHandler
                     break;
                 }
                 if (isset($serverUids[(int) $row['uid']])) {
-                    $this->downloadBody($pdo, $ctx, $mailbox, $row['message_id'], (int) $row['uid'], null);
+                    // RFC822.SIZE from the metadata sync (0 = unknown): an
+                    // oversized body is skipped without downloading it.
+                    $size = (int) $row['size_bytes'];
+                    $this->downloadBody($pdo, $ctx, $mailbox, $row['message_id'], (int) $row['uid'], $size > 0 ? $size : null);
                 }
                 $progress->report('bodies', $folderId, $index + 1, \count($missing));
             }

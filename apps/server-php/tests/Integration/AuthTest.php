@@ -16,8 +16,8 @@ use Psr\Http\Message\ResponseInterface;
 final class AuthTest extends DatabaseTestCase
 {
     /** PHC string created by another Argon2id implementation (hash-wasm; m=19456, t=2, p=1). */
-    private const NODE_HASH = '$argon2id$v=19$m=19456,t=2,p=1$BwcHBwcHBwcHBwcHBwcHBw$IKTQ7IZ/DDTn5kzWh8hSs7Til6OOKiVHqoEdW1tVAig';
-    private const NODE_PASSWORD = 'node-hashed-password';
+    private const FOREIGN_HASH = '$argon2id$v=19$m=19456,t=2,p=1$BwcHBwcHBwcHBwcHBwcHBw$IKTQ7IZ/DDTn5kzWh8hSs7Til6OOKiVHqoEdW1tVAig';
+    private const FOREIGN_PASSWORD = 'node-hashed-password';
 
     /** @var \Slim\App<\Psr\Container\ContainerInterface|null> */
     private \Slim\App $app;
@@ -62,14 +62,14 @@ final class AuthTest extends DatabaseTestCase
         return null;
     }
 
-    private function createNodeUser(): void
+    private function createUserWithForeignHash(): void
     {
-        Database::run(self::$db->pdo(), 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [Uuid::v4(), 'node@example.org', self::NODE_HASH]);
+        Database::run(self::$db->pdo(), 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [Uuid::v4(), 'ref@example.org', self::FOREIGN_HASH]);
     }
 
     private function login(string $ip = '198.51.100.20'): string
     {
-        $response = $this->call('POST', '/api/auth/login', ['email' => 'Node@Example.org ', 'password' => self::NODE_PASSWORD, 'platform' => 'ios_pwa'], ip: $ip);
+        $response = $this->call('POST', '/api/auth/login', ['email' => 'Ref@Example.org ', 'password' => self::FOREIGN_PASSWORD, 'platform' => 'ios_pwa'], ip: $ip);
         self::assertSame(200, $response->getStatusCode());
         $token = self::token($response);
         self::assertNotNull($token);
@@ -77,12 +77,12 @@ final class AuthTest extends DatabaseTestCase
         return $token;
     }
 
-    public function testLoginWithAHashCreatedByTheNodeBackend(): void
+    public function testLoginWithAHashFromAnotherArgon2idImplementation(): void
     {
-        $this->createNodeUser();
-        $response = $this->call('POST', '/api/auth/login', ['email' => 'node@example.org', 'password' => self::NODE_PASSWORD]);
+        $this->createUserWithForeignHash();
+        $response = $this->call('POST', '/api/auth/login', ['email' => 'ref@example.org', 'password' => self::FOREIGN_PASSWORD]);
         self::assertSame(200, $response->getStatusCode());
-        self::assertSame(['email' => 'node@example.org'], Http::json($response));
+        self::assertSame(['email' => 'ref@example.org'], Http::json($response));
         $cookie = $response->getHeaderLine('Set-Cookie');
         self::assertMatchesRegularExpression('/^fma_session=[A-Za-z0-9_-]{43}; Max-Age=2592000; Path=\/; HttpOnly; Secure; SameSite=Strict$/', $cookie);
         // Only the SHA-256 of the token is stored.
@@ -130,23 +130,23 @@ final class AuthTest extends DatabaseTestCase
 
     public function testLockoutAfterFiveFailedLogins(): void
     {
-        $this->createNodeUser();
+        $this->createUserWithForeignHash();
         for ($i = 0; $i < 5; ++$i) {
-            self::assertSame(401, $this->call('POST', '/api/auth/login', ['email' => 'node@example.org', 'password' => 'wrong-password-x'], ip: '198.51.100.30')->getStatusCode());
+            self::assertSame(401, $this->call('POST', '/api/auth/login', ['email' => 'ref@example.org', 'password' => 'wrong-password-x'], ip: '198.51.100.30')->getStatusCode());
         }
-        $locked = $this->call('POST', '/api/auth/login', ['email' => 'node@example.org', 'password' => self::NODE_PASSWORD], ip: '198.51.100.30');
+        $locked = $this->call('POST', '/api/auth/login', ['email' => 'ref@example.org', 'password' => self::FOREIGN_PASSWORD], ip: '198.51.100.30');
         self::assertSame(429, $locked->getStatusCode());
         self::assertSame(['message' => 'Too many failed attempts. Try again in 15 minutes.'], Http::json($locked));
         self::assertSame('900', $locked->getHeaderLine('Retry-After'));
         // Other clients are not affected.
         $this->login('198.51.100.31');
         self::assertStringNotContainsString('wrong-password', Http::contents($this->log));
-        self::assertStringNotContainsString('node@example.org', Http::contents($this->log));
+        self::assertStringNotContainsString('ref@example.org', Http::contents($this->log));
     }
 
     public function testTokenRotatesAfter24HoursAndIdleSessionsExpire(): void
     {
-        $this->createNodeUser();
+        $this->createUserWithForeignHash();
         $token = $this->login();
         self::assertNull(self::token($this->call('GET', '/api/auth/devices', token: $token)), 'fresh token is not rotated');
 
@@ -168,7 +168,7 @@ final class AuthTest extends DatabaseTestCase
 
     public function testPasswordChangeEndsOtherDevicesAndRotatesTheToken(): void
     {
-        $this->createNodeUser();
+        $this->createUserWithForeignHash();
         $other = $this->login();
         $current = $this->login();
         $devices = Http::json($this->call('GET', '/api/auth/devices', token: $current))['devices'];
@@ -179,20 +179,20 @@ final class AuthTest extends DatabaseTestCase
         self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/', $devices[0]['lastSeenAt']);
 
         self::assertSame(403, $this->call('POST', '/api/auth/password', ['currentPassword' => 'wrong', 'newPassword' => 'new-password-1'], $current)->getStatusCode());
-        self::assertSame(400, $this->call('POST', '/api/auth/password', ['currentPassword' => self::NODE_PASSWORD, 'newPassword' => 'short'], $current)->getStatusCode());
-        $changed = $this->call('POST', '/api/auth/password', ['currentPassword' => self::NODE_PASSWORD, 'newPassword' => 'new-password-1'], $current);
+        self::assertSame(400, $this->call('POST', '/api/auth/password', ['currentPassword' => self::FOREIGN_PASSWORD, 'newPassword' => 'short'], $current)->getStatusCode());
+        $changed = $this->call('POST', '/api/auth/password', ['currentPassword' => self::FOREIGN_PASSWORD, 'newPassword' => 'new-password-1'], $current);
         self::assertSame(204, $changed->getStatusCode());
         $newToken = self::token($changed);
         self::assertNotNull($newToken);
         self::assertSame(401, $this->call('GET', '/api/auth/devices', token: $other)->getStatusCode());
         self::assertSame(401, $this->call('GET', '/api/auth/devices', token: $current)->getStatusCode());
         self::assertCount(1, (array) Http::json($this->call('GET', '/api/auth/devices', token: $newToken))['devices']);
-        self::assertSame(200, $this->call('POST', '/api/auth/login', ['email' => 'node@example.org', 'password' => 'new-password-1'])->getStatusCode());
+        self::assertSame(200, $this->call('POST', '/api/auth/login', ['email' => 'ref@example.org', 'password' => 'new-password-1'])->getStatusCode());
     }
 
     public function testRevokeDeviceAndLogout(): void
     {
-        $this->createNodeUser();
+        $this->createUserWithForeignHash();
         $other = $this->login();
         $current = $this->login();
         $devices = (array) Http::json($this->call('GET', '/api/auth/devices', token: $current))['devices'];

@@ -1,4 +1,5 @@
 // Settings, storage, export, sync and push basics (no mail server needed).
+import { createECDH, randomBytes, randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { API_URL, Client } from '../src/client'
 
@@ -37,7 +38,9 @@ describe.skipIf(!API_URL)('settings, storage, export, sync, push', () => {
     expect((await client.request('GET', '/api/storage')).status).toBe(200)
     const exported = await client.request('GET', '/api/export/config')
     expect(exported.status).toBe(200)
-    expect(exported.text).not.toMatch(/password/i)
+    // No credential fields or values (`credentialKind: "password"` is fine).
+    expect(exported.text).not.toMatch(/"\w*password"\s*:/i)
+    expect(exported.text).not.toContain('contract-pw')
   })
 
   it('POST /api/sync answers', async () => {
@@ -52,5 +55,43 @@ describe.skipIf(!API_URL)('settings, storage, export, sync, push', () => {
       body: { endpoint: 'not a url', keys: { p256dh: 'x', auth: 'y' } },
     })
     expect(bad.status).toBe(400)
+  })
+
+  it('push: subscribe, list, delete by id and by endpoint', async () => {
+    const keys = () => {
+      const ecdh = createECDH('prime256v1')
+      ecdh.generateKeys()
+      return {
+        p256dh: ecdh.getPublicKey().toString('base64url'),
+        auth: randomBytes(16).toString('base64url'),
+      }
+    }
+    const first = `https://push.example.org/contract/${randomUUID()}`
+    const second = `https://push.example.org/contract/${randomUUID()}`
+    const ids: string[] = []
+    for (const endpoint of [first, second]) {
+      const created = await client.request('POST', '/api/push/subscriptions', {
+        body: { endpoint, keys: keys() },
+      })
+      expect(created.status, endpoint).toBe(201)
+      ids.push((created.body as { id: string }).id)
+    }
+    const listed = async () =>
+      (
+        (await client.request('GET', '/api/push/subscriptions')).body as {
+          subscriptions: { id: string; pushService: string }[]
+        }
+      ).subscriptions
+    const before = await listed()
+    expect(before.map((s) => s.id)).toEqual(expect.arrayContaining(ids))
+    // The list names only the push service, never the endpoint.
+    expect(JSON.stringify(before)).not.toContain('/contract/')
+    expect((await client.request('DELETE', `/api/push/subscriptions/${ids[0]}`)).status).toBe(204)
+    expect((await client.request('DELETE', `/api/push/subscriptions/${ids[0]}`)).status).toBe(404)
+    const byEndpoint = await client.request('DELETE', '/api/push/subscriptions', {
+      body: { endpoint: second },
+    })
+    expect(byEndpoint.status).toBe(204)
+    expect((await listed()).map((s) => s.id)).not.toContain(ids[1])
   })
 })

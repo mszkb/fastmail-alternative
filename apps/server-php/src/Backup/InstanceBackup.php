@@ -9,6 +9,7 @@ use Fma\Crypto\CryptoException;
 use Fma\Crypto\Envelope;
 use Fma\Db\Database;
 use Fma\Db\Migrator;
+use Fma\Db\SchemaTooNewException;
 use Fma\Jobs\Runner;
 
 /**
@@ -51,6 +52,11 @@ use Fma\Jobs\Runner;
  *   and files, checking every checksum and the row counts again.
  * - Backups of a newer schema (unknown migration names) are refused;
  *   older ones are restored into the current schema.
+ * - A database migrated by a newer version (rollback) needs `force`: the
+ *   tables this version knows are dropped and migrated afresh; tables only
+ *   the newer version created stay untouched.
+ * - Run as root, the restored files are handed to the owner of the
+ *   mail-data root (www-data in the Docker image).
  *
  * The MASTER_KEY is never part of a backup. Nothing here logs file names,
  * paths or contents.
@@ -175,8 +181,18 @@ final class InstanceBackup
         }
         $this->lock();
         try {
-            (new Migrator($this->pdo, $this->migrationsDir))->migrate();
-            $dbEmpty = $this->databaseIsEmpty();
+            // A rollback restores into a database a newer version migrated:
+            // its schema is rebuilt from scratch below (--force only).
+            $tooNew = false;
+            try {
+                (new Migrator($this->pdo, $this->migrationsDir))->migrate();
+            } catch (SchemaTooNewException) {
+                if (!$force) {
+                    throw new BackupException('database schema comes from a newer app version; use --force to replace it');
+                }
+                $tooNew = true;
+            }
+            $dbEmpty = !$tooNew && $this->databaseIsEmpty();
             $dirEmpty = $this->directoryIsEmpty();
             if ((!$dbEmpty || !$dirEmpty) && !$force) {
                 $what = implode(' and ', array_filter([$dbEmpty ? '' : 'database', $dirEmpty ? '' : 'mail-data']));
@@ -189,11 +205,18 @@ final class InstanceBackup
 
             $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
             try {
+                if ($tooNew) {
+                    foreach ([...$this->existingTables(), ...self::EXCLUDED_TABLES] as $table) {
+                        $this->pdo->exec("DROP TABLE IF EXISTS `{$table}`");
+                    }
+                    (new Migrator($this->pdo, $this->migrationsDir))->migrate();
+                }
                 foreach ($this->existingTables() as $table) {
                     $this->pdo->exec("DELETE FROM `{$table}`");
                 }
                 $this->clearDirectory();
                 $summary = $this->read($file, $this->pdo);
+                $this->adoptDirectoryOwner();
             } finally {
                 $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
             }
@@ -500,6 +523,38 @@ final class InstanceBackup
             $ok = $item->isDir() && !$item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
             if (!$ok) {
                 throw new BackupException('cannot clear MAIL_DATA_DIR');
+            }
+        }
+    }
+
+    /**
+     * A restore run as root (`docker compose run --user root php ...`)
+     * writes root-owned files, which php-fpm and the worker (www-data)
+     * then cannot read. Hands everything below the mail-data root to the
+     * owner of the root itself (www-data in the image); without root
+     * nothing changes, the files already belong to the running user.
+     */
+    private function adoptDirectoryOwner(): void
+    {
+        if (!\function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            return;
+        }
+        $uid = fileowner($this->mailDataDir);
+        $gid = filegroup($this->mailDataDir);
+        if ($uid === false || $gid === false || $uid === 0) {
+            return;
+        }
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($this->mailDataDir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST,
+        );
+        foreach ($items as $item) {
+            /** @var \SplFileInfo $item */
+            if ($item->isLink()) {
+                continue;
+            }
+            if (!@chown($item->getPathname(), $uid) || !@chgrp($item->getPathname(), $gid)) {
+                throw new BackupException('cannot hand the restored mail-data to its owner');
             }
         }
     }

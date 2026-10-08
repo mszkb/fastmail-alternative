@@ -6,7 +6,7 @@ namespace Fma\Crypto;
 
 /**
  * Envelope encryption for credentials and mail contents (ADR-0013;
- * format regression vectors in tests/fixtures/crypto-vectors-node.json;
+ * format regression vectors in tests/fixtures/crypto-vectors-reference.json;
  * data model: see docs/architecture/data-model.md#verschlüsselung).
  *
  * - One data key (DEK) per mail account (and per user), stored wrapped with

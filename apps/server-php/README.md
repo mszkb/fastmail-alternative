@@ -79,7 +79,7 @@ Unter Apache zeigt der DocumentRoot auf `public/` (`AllowOverride All` für die 
 
 `tests/Unit/Crypto/EnvelopeTest.php` prüft das Verschlüsselungsformat gegen zwei eingecheckte Fixtures:
 
-- `tests/fixtures/crypto-vectors-node.json` – Regressions-Fixture des Formats, einst von einer unabhängigen (Node-)Implementierung erzeugt; nicht neu erzeugen.
+- `tests/fixtures/crypto-vectors-reference.json` – Regressions-Fixture des Formats, einst von einer unabhängigen (Node-)Implementierung erzeugt; nicht neu erzeugen.
 - `tests/fixtures/crypto-vectors-php.json` – Schnappschuss der eigenen Ausgabe (`tests/Support/CryptoVectors.php`). Nur bei einer gewollten Formatänderung neu erzeugen:
 
 ```bash

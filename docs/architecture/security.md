@@ -137,4 +137,4 @@ Der vollständige Audit nach OWASP ASVS 4.0.3 Level 2 mit Status jedes Befunds u
 ## Offene Punkte
 
 - Bedrohungsmodell ausarbeiten → `docs/architecture/threat-model.md` (Phase 0, Aufgabe 0.3).
-- Restliche offene Befunde aus dem ASVS-Review (Port-Allowlist N2, `Secure`-Cookie hinter eigenem TLS-Proxy): siehe [asvs-l2.md](../security/asvs-l2.md).
+- Befunde aus dem ASVS-Review und die bewusst akzeptierten Abweichungen: siehe [asvs-l2.md](../security/asvs-l2.md). Die Port-Allowlist (N2) und `COOKIE_SECURE` hinter eigenem TLS-Proxy (N7) sind umgesetzt.

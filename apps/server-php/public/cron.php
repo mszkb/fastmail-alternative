@@ -28,6 +28,14 @@ if (!is_string($given) || !hash_equals(hash('sha256', $expected), hash('sha256',
     exit;
 }
 ignore_user_abort(true);
-$result = Fma\Jobs\Bootstrap::runner($config, new Fma\Log\Logger('cron', $config->get('LOG_LEVEL', 'info')))
-    ->runOnce((float) $config->int('CRON_TIME_BUDGET_SECONDS', 50));
+$logger = new Fma\Log\Logger('cron', $config->get('LOG_LEVEL', 'info'));
+try {
+    $runner = Fma\Jobs\Bootstrap::runner($config, $logger);
+} catch (Fma\Db\SchemaTooNewException $e) {
+    $logger->error('jobs refused: the database was migrated by a newer version; upgrade again or roll back with a restore', ['unknown' => $e->unknown]);
+    http_response_code(503);
+    echo '{"message":"Database schema is newer than this version"}';
+    exit;
+}
+$result = $runner->runOnce((float) $config->int('CRON_TIME_BUDGET_SECONDS', 50));
 echo json_encode($result);
