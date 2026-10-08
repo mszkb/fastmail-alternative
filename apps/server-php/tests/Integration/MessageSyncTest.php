@@ -349,6 +349,16 @@ final class MessageSyncTest extends DatabaseTestCase
         self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']], env: $env));
         self::assertSame(1, (int) Database::run($pdo, 'SELECT COUNT(*) FROM message_body WHERE message_id = ?', [$large])->fetchColumn());
         self::assertDirectoryDoesNotExist("{$this->dataDir}/{$a['account']}/{$large}");
+
+        // The pass for missing bodies (e.g. after a deadline; it runs when new
+        // mail arrives) skips it by its stored size, too, instead of
+        // downloading it first.
+        Database::run($pdo, 'DELETE FROM message_body WHERE message_id = ?', [$large]);
+        $this->append($a['user'], 'Neu', '<new@example.org>');
+        self::assertGreaterThan(2000, (int) Database::run($pdo, 'SELECT size_bytes FROM message WHERE id = ?', [$large])->fetchColumn());
+        self::assertTrue($this->sync($a['account'], ['folderId' => $a['folder']], env: $env));
+        self::assertSame(['storage_ref' => null, 'skip_reason' => 'too_large'], $body($large));
+        self::assertDirectoryDoesNotExist("{$this->dataDir}/{$a['account']}/{$large}");
     }
 
     public function testParsesFetchResponses(): void
