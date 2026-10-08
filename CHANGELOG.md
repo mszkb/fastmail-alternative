@@ -69,6 +69,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - **Betreiber:** `backup restore` als root übergibt die wiederhergestellten Dateien in `mail-data` selbst an `www-data`; das `chown` nach dem Restore entfällt
 - Mails über `MAX_RAW_MESSAGE_BYTES`, deren Inhalt bei einem früheren Lauf noch nicht gespeichert wurde, lädt der Sync beim Nachholen nicht mehr erst komplett herunter, sondern überspringt sie anhand der bekannten Größe (wie beim ersten Abgleich)
 - **Sync großer Postfächer:** Bei Ordnern mit mehr als etwa 12 000 Mails auf Servern mit CONDSTORE (z. B. Dovecot, Fastmail) hielt der inkrementelle Abgleich die meisten Mails für beim Server gelöscht und entfernte die lokalen Kopien – die IMAP-Antwort mit allen UIDs wurde nach 64 KB abgeschnitten, und das Auslesen der UID-Liste scheiterte bei sehr langen Zeilen am Regex-Limit. Auf dem Server ging nichts verloren. Jetzt werden Antwortzeilen vollständig gelesen, die Liste ohne Regex geparst, und ein Abgleich mit einer unvollständigen UID-Liste (weniger UIDs als der Server Mails meldet) bricht ab, statt zu löschen. Gefunden mit dem Lasttest gegen Dovecot (#60)
+- Threading neuer Mails wurde mit der Postfachgröße immer langsamer: Die Suche nach verwandten Mails las bei jeder neuen Mail alle bereits einsortierten Mails des Kontos (Bedingungen mit `OR` verknüpft); jetzt nutzt jede Teilabfrage ihren Index. Gefunden mit dem Lasttest (volle Historie von 50 000 Mails)
 
 ### Security
 

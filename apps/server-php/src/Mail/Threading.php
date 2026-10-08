@@ -194,24 +194,28 @@ final class Threading
                 $links = self::links($message['message_id_header'], $message['in_reply_to'], $message['references']);
                 $ids = [...$links, $message['message_id_header']];
 
-                $conditions = ['in_reply_to IN (' . self::marks($ids) . ')',
-                    'id IN (SELECT message_id FROM message_reference WHERE account_id = ? AND ref IN (' . self::marks($ids) . '))'];
-                $params = [...$ids, $accountId, ...$ids];
+                // One indexed SELECT per link kind, combined with UNION: joined
+                // with OR, MySQL/MariaDB scanned every threaded message of the
+                // account for each new one (load test #60: O(n²) for a full history).
+                $base = "SELECT {$columns} FROM message WHERE account_id = ? AND thread_id IS NOT NULL AND id <> ? AND ";
+                $selects = [
+                    $base . 'in_reply_to IN (' . self::marks($ids) . ')',
+                    $base . 'id IN (SELECT message_id FROM message_reference WHERE account_id = ? AND ref IN (' . self::marks($ids) . '))',
+                ];
+                $params = [$accountId, $message['id'], ...$ids, $accountId, $message['id'], $accountId, ...$ids];
                 if ($links !== []) {
-                    $conditions[] = 'message_id_header IN (' . self::marks($links) . ')';
-                    array_push($params, ...$links);
+                    $selects[] = $base . 'message_id_header IN (' . self::marks($links) . ')';
+                    array_push($params, $accountId, $message['id'], ...$links);
                 }
                 if ($subjectHash !== null) {
-                    $conditions[] = "(subject_hash = ? AND {$sortAt} BETWEEN ? - INTERVAL ? SECOND AND ? + INTERVAL ? SECOND)";
-                    array_push($params, $subjectHash, $message['sort_at'], self::SUBJECT_THREAD_WINDOW_SECONDS, $message['sort_at'], self::SUBJECT_THREAD_WINDOW_SECONDS);
+                    $selects[] = $base . "subject_hash = ? AND {$sortAt} BETWEEN ? - INTERVAL ? SECOND AND ? + INTERVAL ? SECOND";
+                    array_push($params, $accountId, $message['id'], $subjectHash, $message['sort_at'], self::SUBJECT_THREAD_WINDOW_SECONDS, $message['sort_at'], self::SUBJECT_THREAD_WINDOW_SECONDS);
                 }
                 /** @var list<array<string, mixed>> $candidateRows */
                 $candidateRows = Database::run(
                     $pdo,
-                    "SELECT {$columns} FROM message
-                     WHERE account_id = ? AND thread_id IS NOT NULL AND id <> ? AND (" . implode(' OR ', $conditions) . ')
-                     LIMIT ' . self::MAX_CANDIDATES,
-                    [$accountId, $message['id'], ...$params],
+                    '(' . implode(') UNION (', $selects) . ') LIMIT ' . self::MAX_CANDIDATES,
+                    $params,
                 )->fetchAll();
                 $candidates = array_map(self::row(...), $candidateRows);
 
