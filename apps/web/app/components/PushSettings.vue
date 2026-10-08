@@ -165,7 +165,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="card push">
+  <div id="push" class="card push">
     <h2>Benachrichtigungen</h2>
     <p class="hint">
       Hinweis bei neuen E-Mails im Posteingang – ohne Betreff, Absender oder Inhalt. Die App lädt
@@ -221,28 +221,28 @@ onMounted(() => {
 <style scoped>
 .card {
   display: block;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .note {
   margin: 0;
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.375rem;
+  padding: 0.6rem var(--fma-space-3);
+  border-radius: var(--fma-radius);
   background: var(--fma-warning-soft);
   font-size: 0.9rem;
   color: var(--fma-warning-text);
@@ -253,7 +253,7 @@ h2 {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .state {
@@ -267,9 +267,9 @@ h2 {
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -288,7 +288,7 @@ button:disabled {
 
 .subscriptions {
   list-style: none;
-  margin: 0.75rem 0 0;
+  margin: var(--fma-space-3) 0 0;
   padding: 0;
 }
 
@@ -296,8 +296,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-2) 0;
   border-top: 1px solid var(--color-base-300);
 }
 
@@ -307,7 +307,7 @@ button:disabled {
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--color-base-300);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -317,7 +317,7 @@ button:disabled {
 }
 
 .error {
-  margin: 0.75rem 0 0;
+  margin: var(--fma-space-3) 0 0;
   font-size: 0.9rem;
   color: var(--color-error);
 }

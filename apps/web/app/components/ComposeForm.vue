@@ -14,7 +14,14 @@
 // shows a conflict notice: load the other version or keep this one (last
 // write wins). Closing keeps the draft, "Verwerfen" deletes it, sending
 // deletes it on the server (draftId in the outbox request).
+// Composer like elsewhere (#116): in the reading pane on wide screens
+// (`inPane`), full screen on phones; recipient suggestions from addresses
+// the app already knows; attachments by drag and drop; Ctrl/Cmd+Enter
+// sends; an undo-send window (settings, per device) delays the submit to
+// the outbox - "Rückgängig" returns to editing, nothing reached the server.
 import {
+  applyRecipientSuggestion,
+  suggestRecipients,
   OUTBOX_LIMITS,
   formatAddressList,
   parseAddressList,
@@ -41,6 +48,7 @@ import {
   newId,
   offlineState,
 } from '~/utils/offline-queue'
+import { undoSendSeconds } from '~/utils/undo-send'
 
 const props = defineProps<{
   accountId: string
@@ -50,6 +58,12 @@ const props = defineProps<{
   saved?: Draft
   /** Forward: id of the forwarded message, whose attachments are taken over (5.3). */
   forwardOf?: string
+  /** Addresses for the recipient suggestions (#116). */
+  knownPeople?: MailPerson[]
+  /** Shown in the reading pane instead of as an overlay (wide screens). */
+  inPane?: boolean
+  /** Shown below the conversation (a reply in the reading pane). */
+  inline?: boolean
 }>()
 const emit = defineEmits<{
   close: []
@@ -86,6 +100,76 @@ const toInput = ref<HTMLInputElement | null>(null)
 const clientId = newId()
 const textInput = ref<HTMLTextAreaElement | null>(null)
 
+// Recipient suggestions (#116) for the focused field (An/Cc/Bcc).
+type RecipientField = 'to' | 'cc' | 'bcc'
+const activeField = ref<RecipientField | ''>('')
+const highlighted = ref(0)
+const suggestions = computed(() =>
+  activeField.value && props.knownPeople?.length
+    ? suggestRecipients(form[activeField.value], props.knownPeople)
+    : [],
+)
+watch(suggestions, () => (highlighted.value = 0))
+
+function choose(index: number): void {
+  const field = activeField.value
+  const person = suggestions.value[index]
+  if (!field || !person) return
+  form[field] = applyRecipientSuggestion(form[field], person)
+}
+
+function onRecipientKeydown(event: KeyboardEvent): void {
+  const count = suggestions.value.length
+  if (count === 0) return
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    highlighted.value = (highlighted.value + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
+  } else if ((event.key === 'Enter' && !event.ctrlKey && !event.metaKey) || event.key === 'Tab') {
+    if (event.key === 'Enter' || !event.shiftKey) {
+      event.preventDefault()
+      choose(highlighted.value)
+    }
+  } else if (event.key === 'Escape') {
+    // Closes the list only, not the form.
+    event.preventDefault()
+    activeField.value = ''
+  }
+}
+
+function onRecipientBlur(): void {
+  // Let a click on a suggestion land first.
+  setTimeout(() => (activeField.value = ''), 150)
+}
+
+// Undo send (#116): countdown before the submit; 0 = off.
+const countdown = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | undefined
+let countdownDone: ((send: boolean) => void) | null = null
+
+function waitForUndoWindow(seconds: number): Promise<boolean> {
+  countdown.value = seconds
+  return new Promise((resolve) => {
+    countdownDone = resolve
+    countdownTimer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) finishCountdown(true)
+    }, 1000)
+  })
+}
+
+function finishCountdown(send: boolean): void {
+  clearInterval(countdownTimer)
+  countdown.value = 0
+  countdownDone?.(send)
+  countdownDone = null
+}
+
+function undoSend(): void {
+  finishCountdown(false)
+}
+
+onBeforeUnmount(() => finishCountdown(false))
+
 // Attachments (roadmap 5.3): uploaded right away (encrypted on the server),
 // sent by id. Saved with the draft (attachmentIds), so they survive closing
 // and reopening it; discarding the draft (or closing a never saved form)
@@ -116,6 +200,27 @@ async function addFiles(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const files = [...(input.files ?? [])]
   input.value = ''
+  await uploadFiles(files)
+}
+
+// Drag and drop of files onto the form (#116).
+const dragging = ref(false)
+
+function onDragOver(event: DragEvent): void {
+  if (!event.dataTransfer?.types.includes('Files') || sending.value) return
+  event.preventDefault()
+  dragging.value = true
+}
+
+function onDrop(event: DragEvent): void {
+  dragging.value = false
+  const files = [...(event.dataTransfer?.files ?? [])]
+  if (files.length === 0) return
+  event.preventDefault()
+  void uploadFiles(files)
+}
+
+async function uploadFiles(files: File[]): Promise<void> {
   error.value = ''
   for (const file of files) {
     if (attachments.value.length + uploading.value >= ATTACHMENT_LIMIT_DEFAULTS.maxCount) {
@@ -375,36 +480,33 @@ function onPageHide(event: Event): void {
   if (dirty.value) void saveDraft({ keepalive: true })
 }
 
-async function send(): Promise<void> {
-  if (sending.value) return
-  error.value = ''
+/** Validates the form and builds the send request; null (with `error` set) when invalid. */
+function buildRequest(): (SendMessageRequest & { clientId: string }) | null {
   if (uploading.value > 0) {
     error.value = 'Bitte warten, bis alle Anhänge hochgeladen sind.'
-    return
+    return null
   }
   const to = parseField('An', form.to)
   const cc = to && parseField('Cc', form.cc)
   const bcc = cc && parseField('Bcc', form.bcc)
-  if (!to || !cc || !bcc) return
+  if (!to || !cc || !bcc) return null
   const total = to.length + cc.length + bcc.length
   if (total === 0) {
     error.value = 'Bitte mindestens einen Empfänger angeben.'
-    return
+    return null
   }
   if (total > OUTBOX_LIMITS.maxRecipients) {
     error.value = `Höchstens ${OUTBOX_LIMITS.maxRecipients} Empfänger sind erlaubt.`
-    return
+    return null
   }
   if (form.subject.length > OUTBOX_LIMITS.maxSubjectLength) {
     error.value = 'Der Betreff ist zu lang.'
-    return
+    return null
   }
   if (form.text.length > OUTBOX_LIMITS.maxTextLength) {
     error.value = 'Der Nachrichtentext ist zu lang.'
-    return
+    return null
   }
-  if (!form.subject.trim() && !window.confirm('Ohne Betreff senden?')) return
-
   const body: SendMessageRequest & { clientId: string } = {
     accountId: props.accountId,
     to,
@@ -420,6 +522,22 @@ async function send(): Promise<void> {
   if (inReplyTo) body.inReplyTo = inReplyTo
   if (references.length) body.references = references
   if (attachments.value.length) body.attachmentIds = attachments.value.map((a) => a.id)
+  return body
+}
+
+async function send(): Promise<void> {
+  if (sending.value || countdown.value > 0) return
+  error.value = ''
+  let body = buildRequest()
+  if (!body) return
+  if (!form.subject.trim() && !window.confirm('Ohne Betreff senden?')) return
+
+  if (undoSendSeconds.value > 0) {
+    if (!(await waitForUndoWindow(undoSendSeconds.value))) return
+    // Changes made during the countdown are sent as well.
+    body = buildRequest()
+    if (!body) return
+  }
 
   sending.value = true
   // No autosave may race the send (it would answer 410 or recreate nothing).
@@ -485,7 +603,11 @@ async function queueOffline(body: SendMessageRequest & { clientId: string }): Pr
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
+  if (event.defaultPrevented) return
+  if (event.key === 'Escape' && countdown.value > 0) {
+    event.preventDefault()
+    undoSend()
+  } else if (event.key === 'Escape') {
     event.preventDefault()
     void close()
   } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -561,14 +683,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="compose-backdrop" @keydown="onKeydown">
+  <div
+    class="compose-backdrop"
+    :class="{ 'in-pane': inPane && !inline, inline }"
+    @keydown="onKeydown"
+  >
     <form
       class="compose"
+      :class="{ dragging }"
       role="dialog"
-      aria-modal="true"
+      :aria-modal="inPane || inline ? 'false' : 'true'"
       :aria-label="title"
       @submit.prevent="send"
+      @dragover="onDragOver"
+      @dragleave.self="dragging = false"
+      @drop="onDrop"
     >
+      <div v-if="dragging" class="drop-hint" aria-hidden="true">Dateien hier ablegen</div>
       <header class="compose-header">
         <h2>{{ title }}</h2>
         <span class="save-state" role="status">{{ saveLabel }}</span>
@@ -611,8 +742,40 @@ onBeforeUnmount(() => {
             type="text"
             inputmode="email"
             autocomplete="off"
+            role="combobox"
+            aria-autocomplete="list"
+            :aria-expanded="activeField === 'to' && suggestions.length > 0 ? 'true' : 'false'"
+            aria-controls="recipient-suggestions-to"
+            :aria-activedescendant="
+              activeField === 'to' && suggestions.length > 0
+                ? `recipient-to-${highlighted}`
+                : undefined
+            "
+            :readonly="countdown > 0"
             placeholder="name@example.com, Name <name@example.com>"
+            @focus="activeField = 'to'"
+            @input="activeField = 'to'"
+            @keydown="onRecipientKeydown"
+            @blur="onRecipientBlur"
           />
+          <ul
+            v-if="activeField === 'to' && suggestions.length > 0"
+            id="recipient-suggestions-to"
+            class="suggestions"
+            role="listbox"
+          >
+            <li
+              v-for="(person, index) in suggestions"
+              :id="`recipient-to-${index}`"
+              :key="person.address"
+              role="option"
+              :aria-selected="index === highlighted ? 'true' : 'false'"
+              @mousedown.prevent="choose(index)"
+            >
+              <strong v-if="person.name">{{ person.name }}</strong>
+              <span>{{ person.address }}</span>
+            </li>
+          </ul>
           <button
             v-if="!showCcBcc"
             type="button"
@@ -626,22 +789,101 @@ onBeforeUnmount(() => {
         <template v-if="showCcBcc">
           <label class="field">
             <span>Cc</span>
-            <input v-model="form.cc" type="text" inputmode="email" autocomplete="off" />
+            <input
+              v-model="form.cc"
+              type="text"
+              inputmode="email"
+              autocomplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="activeField === 'cc' && suggestions.length > 0 ? 'true' : 'false'"
+              aria-controls="recipient-suggestions-cc"
+              :aria-activedescendant="
+                activeField === 'cc' && suggestions.length > 0
+                  ? `recipient-cc-${highlighted}`
+                  : undefined
+              "
+              :readonly="countdown > 0"
+              @focus="activeField = 'cc'"
+              @input="activeField = 'cc'"
+              @keydown="onRecipientKeydown"
+              @blur="onRecipientBlur"
+            />
+            <ul
+              v-if="activeField === 'cc' && suggestions.length > 0"
+              id="recipient-suggestions-cc"
+              class="suggestions"
+              role="listbox"
+            >
+              <li
+                v-for="(person, index) in suggestions"
+                :id="`recipient-cc-${index}`"
+                :key="person.address"
+                role="option"
+                :aria-selected="index === highlighted ? 'true' : 'false'"
+                @mousedown.prevent="choose(index)"
+              >
+                <strong v-if="person.name">{{ person.name }}</strong>
+                <span>{{ person.address }}</span>
+              </li>
+            </ul>
           </label>
           <label class="field">
             <span>Bcc</span>
-            <input v-model="form.bcc" type="text" inputmode="email" autocomplete="off" />
+            <input
+              v-model="form.bcc"
+              type="text"
+              inputmode="email"
+              autocomplete="off"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="activeField === 'bcc' && suggestions.length > 0 ? 'true' : 'false'"
+              aria-controls="recipient-suggestions-bcc"
+              :aria-activedescendant="
+                activeField === 'bcc' && suggestions.length > 0
+                  ? `recipient-bcc-${highlighted}`
+                  : undefined
+              "
+              :readonly="countdown > 0"
+              @focus="activeField = 'bcc'"
+              @input="activeField = 'bcc'"
+              @keydown="onRecipientKeydown"
+              @blur="onRecipientBlur"
+            />
+            <ul
+              v-if="activeField === 'bcc' && suggestions.length > 0"
+              id="recipient-suggestions-bcc"
+              class="suggestions"
+              role="listbox"
+            >
+              <li
+                v-for="(person, index) in suggestions"
+                :id="`recipient-bcc-${index}`"
+                :key="person.address"
+                role="option"
+                :aria-selected="index === highlighted ? 'true' : 'false'"
+                @mousedown.prevent="choose(index)"
+              >
+                <strong v-if="person.name">{{ person.name }}</strong>
+                <span>{{ person.address }}</span>
+              </li>
+            </ul>
           </label>
         </template>
         <label class="field">
           <span>Betreff</span>
-          <input v-model="form.subject" type="text" :maxlength="OUTBOX_LIMITS.maxSubjectLength" />
+          <input
+            v-model="form.subject"
+            type="text"
+            :maxlength="OUTBOX_LIMITS.maxSubjectLength"
+            :readonly="countdown > 0"
+          />
         </label>
       </div>
 
       <label class="body">
         <span class="visually-hidden">Nachricht</span>
-        <textarea ref="textInput" v-model="form.text" spellcheck="true" />
+        <textarea ref="textInput" v-model="form.text" spellcheck="true" :readonly="countdown > 0" />
       </label>
 
       <div class="attachments">
@@ -670,7 +912,11 @@ onBeforeUnmount(() => {
 
       <footer class="compose-footer">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="buttons">
+        <p v-if="countdown > 0" class="countdown" role="status">
+          Wird in {{ countdown }} s gesendet …
+          <button type="button" class="link" @click="undoSend">Rückgängig</button>
+        </p>
+        <div v-else class="buttons">
           <button type="button" class="secondary" :disabled="sending" @click="discard">
             Verwerfen
           </button>
@@ -684,6 +930,105 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 0.15rem 0 0;
+  padding: var(--fma-space-1);
+  list-style: none;
+  border: 1px solid var(--fma-border);
+  border-radius: var(--fma-radius);
+  background: var(--color-base-100);
+  box-shadow: var(--fma-shadow);
+}
+
+.suggestions li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--fma-space-2);
+  padding: 0.35rem var(--fma-space-2);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.suggestions li span {
+  color: var(--fma-muted);
+}
+
+.suggestions li[aria-selected='true'],
+.suggestions li:hover {
+  background: var(--fma-primary-soft);
+}
+
+.compose.dragging {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -6px;
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--color-base-100) 85%, transparent);
+  color: var(--color-primary);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.countdown {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fma-space-3);
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Reply below the conversation (#116). */
+@media (min-width: 761px) {
+  .compose-backdrop.inline {
+    position: static;
+    inset: auto;
+    display: block;
+    margin-top: var(--fma-space-4);
+    padding: 0;
+    background: none;
+  }
+
+  .compose-backdrop.inline .compose {
+    width: 100%;
+    height: min(30rem, 70vh);
+    border: 1px solid var(--fma-border);
+    box-shadow: none;
+  }
+}
+
+/* Reading pane (#116): in the grid area of the message, no overlay. */
+@media (min-width: 761px) {
+  .compose-backdrop.in-pane {
+    position: relative;
+    inset: auto;
+    z-index: 4;
+    grid-area: detail;
+    padding: 0;
+    background: none;
+  }
+
+  .compose-backdrop.in-pane .compose {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 .compose-backdrop {
   position: fixed;
   inset: 0;
@@ -691,16 +1036,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
+  padding: var(--fma-space-5);
   background: rgb(0 0 0 / 35%);
 }
 
 .compose {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: min(48rem, 100%);
   height: min(44rem, 100%);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-100);
   box-shadow: 0 10px 40px rgb(0 0 0 / 25%);
   overflow: hidden;
@@ -710,8 +1056,8 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
+  gap: var(--fma-space-3);
+  padding: 0.6rem var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
   background: var(--color-base-200);
 }
@@ -728,14 +1074,14 @@ h2 {
 }
 
 .conflict {
-  padding: 0.6rem 1rem;
+  padding: 0.6rem var(--fma-space-4);
   border-bottom: 1px solid var(--fma-warning-border);
   background: var(--fma-warning-soft);
   font-size: 0.9rem;
 }
 
 .conflict p {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--fma-space-2);
 }
 
 button.icon {
@@ -748,14 +1094,15 @@ button.icon {
 }
 
 .fields {
-  padding: 0.25rem 1rem;
+  padding: var(--fma-space-1) var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
 }
 
 .field {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   padding: 0.3rem 0;
   border-bottom: 1px solid var(--color-base-200);
 }
@@ -766,7 +1113,7 @@ button.icon {
 
 .field > span {
   flex: 0 0 4rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -776,7 +1123,7 @@ button.icon {
   min-width: 0;
   padding: 0.35rem 0.4rem;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   font: inherit;
 }
@@ -792,7 +1139,7 @@ button.link {
   background: transparent;
   color: var(--color-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   cursor: pointer;
 }
 
@@ -804,11 +1151,11 @@ button.link {
 
 textarea {
   flex: 1;
-  padding: 0.75rem 1rem;
+  padding: var(--fma-space-3) var(--fma-space-4);
   border: none;
   resize: none;
   font-family: inherit;
-  font-size: 0.95rem;
+  font-size: var(--fma-text-md);
   line-height: 1.5;
 }
 
@@ -817,14 +1164,14 @@ textarea:focus {
 }
 
 .compose-footer {
-  padding: 0.6rem 1rem;
+  padding: 0.6rem var(--fma-space-4);
   border-top: 1px solid var(--color-base-300);
 }
 
 .buttons {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .attachments {
@@ -833,14 +1180,14 @@ textarea:focus {
   align-items: flex-start;
   gap: 0.35rem;
   /* Same horizontal inset as the fields and the message text. */
-  padding: 0.4rem 1rem;
-  font-size: 0.85rem;
+  padding: 0.4rem var(--fma-space-4);
+  font-size: var(--fma-text-sm);
 }
 
 .attachments ul {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--fma-space-1);
   width: 100%;
   margin: 0;
   padding: 0;
@@ -850,7 +1197,7 @@ textarea:focus {
 .attachments li {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: var(--fma-space-3);
   min-width: 0;
 }
 
@@ -868,9 +1215,9 @@ textarea:focus {
 
 button.primary,
 button.secondary {
-  padding: 0.45rem 1rem;
+  padding: 0.45rem var(--fma-space-4);
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
   cursor: pointer;
 }
@@ -891,8 +1238,8 @@ button:disabled {
 }
 
 .error {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-2);
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 

@@ -191,12 +191,12 @@ onMounted(load)
 <style scoped>
 .identities {
   flex-basis: 100%;
-  padding: 0.5rem 0 0.25rem;
+  padding: var(--fma-space-2) 0 var(--fma-space-1);
 }
 
 .identity {
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
+  padding-bottom: var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -211,14 +211,14 @@ onMounted(load)
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--fma-success-soft);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--color-success);
 }
 
 label {
   display: block;
   margin: 0.4rem 0 0.2rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 input,
@@ -227,7 +227,7 @@ textarea {
   width: 100%;
   padding: 0.45rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
   font-size: 0.9rem;
 }
@@ -236,14 +236,14 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   margin-top: 0.4rem;
 }
 
 button {
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-primary);
   font: inherit;
@@ -272,8 +272,8 @@ button:disabled {
 }
 
 .error {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-1) 0 0;
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 </style>

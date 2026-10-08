@@ -159,21 +159,21 @@ async function remove(account: Account): Promise<void> {
 
 <style scoped>
 .card {
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-2);
+  font-size: var(--fma-text-lg);
 }
 
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -188,8 +188,8 @@ h2 {
   align-items: center;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-2) 0;
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -216,13 +216,13 @@ h2 {
 }
 
 .storage-total {
-  margin-top: 0.5rem;
+  margin-top: var(--fma-space-2);
 }
 
 .status-text {
   width: 100%;
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-warning-text);
 }
 
@@ -232,14 +232,14 @@ h2 {
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--fma-success-soft);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--color-success);
 }
 
 button {
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--color-error);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-error);
   font: inherit;
@@ -262,8 +262,8 @@ button:disabled {
 }
 
 .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-2) 0 0;
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 </style>

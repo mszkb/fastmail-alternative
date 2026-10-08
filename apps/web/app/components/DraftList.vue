@@ -124,7 +124,7 @@ defineExpose({ reload, messageIds })
 
 h3 {
   margin: 0;
-  padding: 0.5rem 0.75rem 0.25rem;
+  padding: var(--fma-space-2) var(--fma-space-3) var(--fma-space-1);
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--fma-warning-text);
@@ -150,7 +150,7 @@ li {
   min-width: 0;
   flex-direction: column;
   gap: 0.15rem;
-  padding: 0.5rem 0.75rem;
+  padding: var(--fma-space-2) var(--fma-space-3);
   border: none;
   background: transparent;
   font: inherit;
@@ -165,7 +165,7 @@ li {
 .row {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .to,
@@ -201,8 +201,8 @@ li {
 }
 
 .error {
-  margin: 0 0.75rem 0.5rem;
-  font-size: 0.85rem;
+  margin: 0 var(--fma-space-3) var(--fma-space-2);
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 </style>

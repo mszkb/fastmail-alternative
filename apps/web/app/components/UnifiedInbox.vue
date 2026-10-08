@@ -145,15 +145,15 @@ onMounted(() => void load())
 .header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1rem;
+  gap: var(--fma-space-2);
+  padding: 0.6rem var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-200);
 }
 
 .header h2 {
   flex: 1;
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--fma-text-lg);
 }
 
 .messages {
@@ -165,7 +165,7 @@ onMounted(() => void load())
 .item {
   display: block;
   width: 100%;
-  padding: 0.6rem 1rem;
+  padding: 0.6rem var(--fma-space-4);
   border: none;
   border-bottom: 1px solid var(--color-base-200);
   background: transparent;
@@ -182,7 +182,7 @@ onMounted(() => void load())
 .row {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .from,
@@ -208,7 +208,7 @@ onMounted(() => void load())
 
 .date {
   flex-shrink: 0;
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -234,7 +234,7 @@ onMounted(() => void load())
 
 .hint,
 .message {
-  padding: 0 1rem;
+  padding: 0 var(--fma-space-4);
 }
 
 .more {

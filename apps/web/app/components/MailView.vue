@@ -65,12 +65,24 @@ import {
   overlayPendingActions,
   parseSearchQuery,
   searchQueryString,
+  groupByDate,
+  selectRange,
+  uniquePeople,
+  LAYOUT_LIMITS,
+  READING_PANE_CHOICES,
+  clampLayoutSize,
+  parseLayout,
+  GO_TO_ROLE,
+  ShortcutMatcher,
+  moveCursor,
   syncProgressText,
   syncStatusFromAccounts,
 } from '@fma/shared'
 import type {
   AccountSummary,
   AccountSyncStatus,
+  MailLayout,
+  ReadingPane,
   AccountSyncState,
   ComposeDraft,
   ComposeIdentity,
@@ -100,6 +112,26 @@ import {
   notifyUnauthorized,
   offlineState,
 } from '~/utils/offline-queue'
+import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
+import type { Component } from 'vue'
+import {
+  IconAlertOctagon,
+  IconArchive,
+  IconArrowBackUp,
+  IconFilePencil,
+  IconFolder,
+  IconInbox,
+  IconLayoutColumns,
+  IconLayoutList,
+  IconLayoutRows,
+  IconSend,
+  IconFlag,
+  IconFlagFilled,
+  IconMail,
+  IconMailOpened,
+  IconPaperclip,
+  IconTrash,
+} from '@tabler/icons-vue'
 
 type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'> &
   Partial<
@@ -171,6 +203,8 @@ const compose = ref<{
   saved?: Draft
   /** Forward: the original, whose attachments the form takes over (5.3). */
   forwardOf?: string
+  /** Shown below the conversation in the reading pane (#116). */
+  inline?: boolean
 } | null>(null)
 const composeForm = ref<InstanceType<typeof ComposeForm> | null>(null)
 // Search (5.1): criteria of the form and the shown result (null = folder view).
@@ -456,11 +490,21 @@ async function openCompose(mode: ComposeMode): Promise<void> {
   // Switched accounts meanwhile: never open a draft for the previous one.
   if (compose.value || !accountScope.isCurrent(scope)) return
   composeKey.value = ++composeCounter
+  // Replies on wide screens with a reading pane: below the conversation.
+  const inline =
+    mode !== 'new' &&
+    layout.readingPane !== 'off' &&
+    window.matchMedia('(min-width: 761px)').matches
   compose.value = {
     accountId: account,
     identities: list,
     draft: createDraft(mode, list, original),
+    inline,
     ...(mode === 'forward' && original ? { forwardOf: original.id } : {}),
+  }
+  if (inline) {
+    await nextTick()
+    document.getElementById('compose-inline-slot')?.scrollIntoView({ block: 'nearest' })
   }
 }
 
@@ -575,6 +619,7 @@ function resetSearch(): void {
 
 /** Searches the active account at the provider; the hits replace the list. */
 async function runSearch(): Promise<void> {
+  clearSelection()
   const query = parseSearchQuery({
     q: searchForm.q,
     from: searchForm.from,
@@ -632,6 +677,8 @@ function hitFolderLabel(message: MessageListItem): string {
 
 async function selectFolder(id: string): Promise<void> {
   resetSearch()
+  cursorId.value = ''
+  clearSelection()
   folderId.value = id
   olderHint.value = ''
   messages.value = []
@@ -736,6 +783,7 @@ async function loadOlder(): Promise<void> {
 }
 
 async function openMessage(id: string): Promise<void> {
+  cursorId.value = id
   const request = ++detailRequest
   selectedId.value = id
   mobilePane.value = 'detail'
@@ -1059,17 +1107,211 @@ function onMoveSelect(event: Event): void {
   if (target && detail.value) void runAction('move', [detail.value.id], target)
 }
 
-function isTyping(event: KeyboardEvent): boolean {
-  const element = event.target as HTMLElement | null
-  if (element && /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) return true
-  return !!element?.isContentEditable
+// Keyboard shortcuts (#115, table in @fma/shared): j/k move the cursor in
+// the list (and open the next message when one is open), Enter/o open,
+// Esc/u back, e/y archive, # delete, r/a/f reply/reply all/forward, c new
+// mail, s/! flag, Shift+I/Shift+U read/unread, "g" + letter a folder by its
+// role; 1-9 (and Ctrl+1-9 in the installed PWA) switch the account. "/" and
+// "?" belong to the header. Inactive while typing, inside dialogs/menus and
+// when switched off in the settings (per device).
+const matcher = new ShortcutMatcher()
+// Layout (#113): reading pane right/below/off and the dragged column sizes,
+// per device. Wide screens only; phones keep the stacked list -> message.
+const LAYOUT_KEY = 'fma.mail.layout'
+const layout = reactive<MailLayout>(parseLayout(readLayout()))
+const PANE_ICONS: Record<ReadingPane, Component> = {
+  right: IconLayoutColumns,
+  bottom: IconLayoutRows,
+  off: IconLayoutList,
+}
+const ROLE_ICONS: Record<string, Component> = {
+  inbox: IconInbox,
+  sent: IconSend,
+  drafts: IconFilePencil,
+  archive: IconArchive,
+  junk: IconAlertOctagon,
+  trash: IconTrash,
 }
 
-// Keyboard shortcuts (ignored while typing): 1-9 / Ctrl+1-9 switch the
-// account (Ctrl+digit only reaches the page in the installed PWA; browsers
-// use it for tabs), the rest acts on the open message.
+function readLayout(): string | null {
+  try {
+    return localStorage.getItem(LAYOUT_KEY)
+  } catch {
+    return null
+  }
+}
+
+function saveLayout(): void {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(toRaw(layout)))
+  } catch {
+    // Private mode: only for this session.
+  }
+}
+
+function setReadingPane(pane: ReadingPane): void {
+  layout.readingPane = pane
+  saveLayout()
+}
+
+function folderIcon(folder: FolderSummary): Component {
+  return (folder.specialUse && ROLE_ICONS[folder.specialUse]) || IconFolder
+}
+
+type SizeKey = 'folderWidth' | 'listWidth' | 'listHeight'
+
+/** Drag a column border: pointer capture keeps the moves on the handle. */
+function startResize(event: PointerEvent, key: SizeKey): void {
+  const handle = event.currentTarget as HTMLElement
+  handle.setPointerCapture(event.pointerId)
+  const vertical = key === 'listHeight'
+  const start = vertical ? event.clientY : event.clientX
+  const initial = layout[key]
+  const move = (e: PointerEvent) => {
+    layout[key] = clampLayoutSize(key, initial + (vertical ? e.clientY : e.clientX) - start)
+  }
+  const stop = () => {
+    handle.removeEventListener('pointermove', move)
+    handle.removeEventListener('pointerup', stop)
+    handle.removeEventListener('pointercancel', stop)
+    saveLayout()
+  }
+  handle.addEventListener('pointermove', move)
+  handle.addEventListener('pointerup', stop)
+  handle.addEventListener('pointercancel', stop)
+  event.preventDefault()
+}
+
+/** Arrow keys move a focused column border by 16 px. */
+function resizeWithKeys(event: KeyboardEvent, key: SizeKey): void {
+  const back = key === 'listHeight' ? 'ArrowUp' : 'ArrowLeft'
+  const forward = key === 'listHeight' ? 'ArrowDown' : 'ArrowRight'
+  if (event.key !== back && event.key !== forward) return
+  event.preventDefault()
+  layout[key] = clampLayoutSize(key, layout[key] + (event.key === forward ? 16 : -16))
+  saveLayout()
+}
+
+/**
+ * Addresses for the recipient suggestions (#116): senders and recipients
+ * of the loaded list and the open conversation of the active account.
+ */
+const knownPeople = computed(() =>
+  uniquePeople([
+    ...messages.value.map((m) => m.from),
+    ...(thread.value?.messages ?? []).flatMap((m) => [m.from, ...m.to, ...m.cc]),
+    ...(detail.value ? [detail.value.from, ...detail.value.to, ...detail.value.cc] : []),
+  ]),
+)
+
+/** Keyboard cursor in the list (j/k). */
+const cursorId = ref('')
+
+// Multiple selection (#114): checkbox, Shift-click for a range, Ctrl/Cmd-
+// click and "x" toggle; bulk actions go through runAction (one request,
+// queued offline like single actions). Not in search results (hits may
+// live in different folders). Cleared on folder/account switch.
+const selected = ref(new Set<string>())
+let selectionAnchor = ''
+const canArchive = computed(
+  () => !!archiveFolder.value && actionFolder.value?.specialUse !== 'archive',
+)
+const selectionFlagged = computed(() =>
+  visibleMessages.value.some((m) => selected.value.has(m.id) && m.flags.flagged),
+)
+/** Date groups of the folder view; search results stay one plain list. */
+const groupedMessages = computed(() =>
+  search.value
+    ? [{ label: '', messages: visibleMessages.value }]
+    : groupByDate(visibleMessages.value),
+)
+
+function toggleSelected(id: string, range: boolean): void {
+  const next = new Set(selected.value)
+  if (range && selectionAnchor) {
+    const ids = selectRange(
+      visibleMessages.value.map((m) => m.id),
+      selectionAnchor,
+      id,
+    )
+    const add = !next.has(id)
+    for (const rangeId of ids) {
+      if (add) next.add(rangeId)
+      else next.delete(rangeId)
+    }
+  } else if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  selectionAnchor = id
+  selected.value = next
+}
+
+function onSelectClick(event: MouseEvent, id: string): void {
+  toggleSelected(id, event.shiftKey)
+}
+
+/** Shift- or Ctrl/Cmd-click on a row selects instead of opening. */
+function onItemClick(event: MouseEvent, id: string): void {
+  if (!search.value && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    toggleSelected(id, event.shiftKey)
+    return
+  }
+  void openMessage(id)
+}
+
+function clearSelection(): void {
+  selected.value = new Set()
+  selectionAnchor = ''
+}
+
+async function bulkAction(
+  action: 'archive' | 'delete' | 'read' | 'unread' | 'flag',
+): Promise<void> {
+  const ids = visibleMessages.value.filter((m) => selected.value.has(m.id)).map((m) => m.id)
+  if (ids.length === 0) return
+  const resolved = action === 'flag' ? (selectionFlagged.value ? 'unflag' : 'flag') : action
+  clearSelection()
+  await runAction(resolved, ids)
+}
+
+// Messages that left the list (moved, synced away) leave the selection.
+watch(visibleMessages, (list) => {
+  if (selected.value.size === 0) return
+  const ids = new Set(list.map((m) => m.id))
+  const kept = [...selected.value].filter((id) => ids.has(id))
+  if (kept.length !== selected.value.size) selected.value = new Set(kept)
+})
+
+async function moveListCursor(step: 1 | -1): Promise<void> {
+  const ids = visibleMessages.value.map((m) => m.id)
+  const next = moveCursor(ids, cursorId.value || selectedId.value, step)
+  if (!next) return
+  cursorId.value = next
+  if (selectedId.value && next !== selectedId.value) await openMessage(next)
+  await nextTick()
+  document
+    .querySelector(`.messages [data-id="${CSS.escape(next)}"]`)
+    ?.scrollIntoView({ block: 'nearest' })
+}
+
+/** Archive/delete from the keyboard: the cursor (and an open message) moves on. */
+async function removeWithKeyboard(action: 'archive' | 'delete', id: string): Promise<void> {
+  const ids = visibleMessages.value.map((m) => m.id)
+  const index = ids.indexOf(id)
+  const following = ids[index + 1] ?? ids[index - 1] ?? ''
+  const wasOpen = selectedId.value === id
+  await runAction(action, [id])
+  cursorId.value = following
+  if (wasOpen && following) await openMessage(following)
+}
+
 function onKeydown(event: KeyboardEvent): void {
-  if (isTyping(event)) return
+  if (!shortcutsEnabled.value || event.defaultPrevented || isTypingTarget(event.target)) return
+  if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"]')) return
+  if (compose.value) return
   if (/^[1-9]$/.test(event.key) && !event.altKey && !event.shiftKey) {
     const account = props.accounts[Number(event.key) - 1]
     if (account) {
@@ -1078,32 +1320,70 @@ function onKeydown(event: KeyboardEvent): void {
     }
     return
   }
-  if (!detail.value || compose.value || event.ctrlKey || event.metaKey || event.altKey) return
-  const id = detail.value.id
-  switch (event.key) {
-    case 'u':
-      void runAction(detail.value.flags.seen ? 'unread' : 'read', [id])
+  const action = matcher.handle(event)
+  if (action === 'pending') {
+    event.preventDefault()
+    return
+  }
+  // "/" and "?" are handled by the header.
+  if (action === null || action === 'search' || action === 'help') return
+  const role = GO_TO_ROLE[action]
+  if (role) {
+    const folder = folders.value.find((f) => f.specialUse === role && f.selectable)
+    if (folder) void selectFolder(folder.id)
+    event.preventDefault()
+    return
+  }
+  const targetId = detail.value?.id ?? cursorId.value
+  const target = visibleMessages.value.find((m) => m.id === targetId) ?? detail.value
+  switch (action) {
+    case 'next':
+    case 'previous':
+      void moveListCursor(action === 'next' ? 1 : -1)
       break
-    case 's':
-      void runAction(detail.value.flags.flagged ? 'unflag' : 'flag', [id])
-      break
-    case 'e':
-      if (archiveFolder.value && actionFolder.value?.specialUse !== 'archive') {
-        void runAction('archive', [id])
+    case 'open':
+      // Enter on a focused button or link activates that control instead.
+      if ((event.target as HTMLElement | null)?.closest?.('button, a, summary, [role="button"]')) {
+        return
       }
+      if (!cursorId.value || detail.value?.id === cursorId.value) return
+      void openMessage(cursorId.value)
       break
-    case '#':
-    case 'Delete':
-      void runAction('delete', [id])
+    case 'back':
+      if (selected.value.size > 0) clearSelection()
+      else if (!goBack()) return
       break
-    case 'r':
-      void openCompose('reply')
+    case 'compose':
+      void openCompose('new')
       break
-    case 'a':
-      void openCompose('replyAll')
+    case 'reply':
+    case 'replyAll':
+    case 'forward':
+      if (!detail.value) return
+      void openCompose(action)
       break
-    case 'f':
-      void openCompose('forward')
+    case 'archive':
+      if (!target || !archiveFolder.value || actionFolder.value?.specialUse === 'archive') return
+      void removeWithKeyboard('archive', target.id)
+      break
+    case 'delete':
+      if (!target) return
+      void removeWithKeyboard('delete', target.id)
+      break
+    case 'flag':
+      if (!target) return
+      void runAction(target.flags.flagged ? 'unflag' : 'flag', [target.id])
+      break
+    case 'select': {
+      const id = cursorId.value || selectedId.value
+      if (!id || search.value) return
+      toggleSelected(id, false)
+      break
+    }
+    case 'markRead':
+    case 'markUnread':
+      if (!target) return
+      void runAction(action === 'markRead' ? 'read' : 'unread', [target.id])
       break
     default:
       return
@@ -1111,11 +1391,6 @@ function onKeydown(event: KeyboardEvent): void {
   event.preventDefault()
 }
 
-/**
- * Swipe back (4.9): one step back inside the mail view. Returns false when
- * there is nothing to go back to here. With an open composer the swipe is
- * swallowed (true) so a draft is never closed by accident.
- */
 function goBack(): boolean {
   if (compose.value) return true
   if (mobilePane.value !== 'detail' && !selectedId.value) return false
@@ -1158,6 +1433,9 @@ function closeDetail(): void {
 
 watch(accountId, (id) => {
   resetSearch()
+  cursorId.value = ''
+  clearSelection()
+  matcher.reset()
   Object.assign(searchForm, { q: '', from: '', subject: '', since: '', before: '' })
   // New scope: abort and ignore everything still in flight for the previous
   // account; its selection, thread and compose state are dropped.
@@ -1236,7 +1514,51 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mail" :class="`pane-${mobilePane}`">
+  <div
+    class="mail"
+    :class="[
+      `pane-${mobilePane}`,
+      `reading-${layout.readingPane}`,
+      { 'has-detail': !!selectedId || detailLoading },
+    ]"
+    :style="{
+      '--folders-w': `${layout.folderWidth}px`,
+      '--list-w': `${layout.listWidth}px`,
+      '--list-h': `${layout.listHeight}px`,
+    }"
+  >
+    <!-- Column borders, dragged with the mouse or moved with the arrow keys (#113) -->
+    <div
+      class="resizer resizer-folders"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Breite der Ordnerspalte"
+      tabindex="0"
+      :aria-valuenow="layout.folderWidth"
+      :aria-valuemin="LAYOUT_LIMITS.folderWidth.min"
+      :aria-valuemax="LAYOUT_LIMITS.folderWidth.max"
+      @pointerdown="startResize($event, 'folderWidth')"
+      @keydown="resizeWithKeys($event, 'folderWidth')"
+    />
+    <div
+      v-if="layout.readingPane !== 'off'"
+      class="resizer resizer-list"
+      role="separator"
+      :aria-orientation="layout.readingPane === 'bottom' ? 'horizontal' : 'vertical'"
+      :aria-label="
+        layout.readingPane === 'bottom'
+          ? 'Höhe der Nachrichtenliste'
+          : 'Breite der Nachrichtenliste'
+      "
+      tabindex="0"
+      :aria-valuenow="layout.readingPane === 'bottom' ? layout.listHeight : layout.listWidth"
+      @pointerdown="
+        startResize($event, layout.readingPane === 'bottom' ? 'listHeight' : 'listWidth')
+      "
+      @keydown="
+        resizeWithKeys($event, layout.readingPane === 'bottom' ? 'listHeight' : 'listWidth')
+      "
+    />
     <aside class="sidebar">
       <button type="button" class="primary compose-button" @click="openCompose('new')">
         Neue E-Mail
@@ -1252,6 +1574,7 @@ onBeforeUnmount(() => {
           :disabled="!folder.selectable"
           @click="selectFolder(folder.id)"
         >
+          <component :is="folderIcon(folder)" class="folder-icon" :size="16" aria-hidden="true" />
           <span class="folder-name">{{ folderLabel(folder) }}</span>
           <span v-if="folder.unreadCount > 0" class="count">{{ folder.unreadCount }}</span>
         </button>
@@ -1293,6 +1616,19 @@ onBeforeUnmount(() => {
         <h2 class="desktop-title">
           {{ search ? 'Suchergebnisse' : currentFolder ? folderLabel(currentFolder) : 'Ordner' }}
         </h2>
+        <span class="pane-switch" role="group" aria-label="Lesebereich">
+          <button
+            v-for="choice in READING_PANE_CHOICES"
+            :key="choice.value"
+            type="button"
+            :aria-pressed="layout.readingPane === choice.value ? 'true' : 'false'"
+            :aria-label="choice.label"
+            :title="choice.label"
+            @click="setReadingPane(choice.value)"
+          >
+            <component :is="PANE_ICONS[choice.value]" :size="18" aria-hidden="true" />
+          </button>
+        </span>
         <button
           v-if="accountId"
           type="button"
@@ -1423,38 +1759,141 @@ onBeforeUnmount(() => {
         Noch keine Ordner synchronisiert &ndash; der Abgleich läuft im Hintergrund.
       </p>
 
+      <div v-if="selected.size > 0" class="selection-bar" role="toolbar" aria-label="Auswahl">
+        <span class="selection-count" role="status">{{ selected.size }} ausgewählt</span>
+        <button v-if="canArchive" type="button" class="secondary" @click="bulkAction('archive')">
+          <IconArchive :size="16" aria-hidden="true" /> Archivieren
+        </button>
+        <button type="button" class="secondary danger" @click="bulkAction('delete')">
+          <IconTrash :size="16" aria-hidden="true" />
+          {{ inTrash ? 'Endgültig löschen' : 'Löschen' }}
+        </button>
+        <button type="button" class="secondary" @click="bulkAction('read')">Gelesen</button>
+        <button type="button" class="secondary" @click="bulkAction('unread')">Ungelesen</button>
+        <button type="button" class="secondary" @click="bulkAction('flag')">
+          <IconFlag :size="16" aria-hidden="true" />
+          {{ selectionFlagged ? 'Markierung entfernen' : 'Markieren' }}
+        </button>
+        <button type="button" class="link" @click="clearSelection">Auswahl aufheben</button>
+      </div>
+
       <ul class="messages">
-        <li v-for="message in visibleMessages" :key="message.id">
-          <button
-            type="button"
-            class="item"
-            :class="{ unread: !message.flags.seen, active: message.id === selectedId }"
-            @click="openMessage(message.id)"
+        <template v-for="group in groupedMessages" :key="`${group.label}-${group.messages[0]?.id}`">
+          <li v-if="group.label" class="date-group" role="presentation">{{ group.label }}</li>
+          <li
+            v-for="message in group.messages"
+            :key="message.id"
+            class="message-row"
+            :class="{ selected: selected.has(message.id), selectable: !search }"
           >
-            <span class="row">
-              <span class="from">{{ personLabel(message.from) }}</span>
-              <span class="date">{{ shortDate(message.date) }}</span>
-            </span>
-            <span class="row">
-              <span class="subject">{{ message.subject || '(kein Betreff)' }}</span>
-              <span class="icons">
-                <span
-                  v-if="message.threadCount > 1"
-                  class="thread-count"
-                  :title="`${message.threadCount} Nachrichten in der Unterhaltung`"
-                  >{{ message.threadCount }}</span
-                >
-                <span v-if="message.flags.answered" title="Beantwortet">&#8617;</span>
-                <span v-if="message.hasAttachments" title="Anhang">&#128206;</span>
-                <span v-if="message.flags.flagged" class="flagged" title="Markiert">&#9873;</span>
+            <input
+              v-if="!search"
+              type="checkbox"
+              class="select"
+              :checked="selected.has(message.id)"
+              :aria-label="`Auswählen: ${message.subject || '(kein Betreff)'}`"
+              @click="onSelectClick($event, message.id)"
+            />
+            <button
+              type="button"
+              class="item"
+              :class="{
+                unread: !message.flags.seen,
+                active: message.id === selectedId,
+                cursor: message.id === cursorId && message.id !== selectedId,
+              }"
+              :data-id="message.id"
+              @click="onItemClick($event, message.id)"
+            >
+              <span class="row">
+                <span class="from">{{ personLabel(message.from) }}</span>
+                <span class="date">{{ shortDate(message.date) }}</span>
               </span>
+              <span class="row">
+                <span class="subject">{{ message.subject || '(kein Betreff)' }}</span>
+                <span class="icons">
+                  <span
+                    v-if="message.threadCount > 1"
+                    class="thread-count"
+                    :title="`${message.threadCount} Nachrichten in der Unterhaltung`"
+                    >{{ message.threadCount }}</span
+                  >
+                  <IconArrowBackUp
+                    v-if="message.flags.answered"
+                    :size="14"
+                    aria-label="Beantwortet"
+                    role="img"
+                  />
+                  <IconPaperclip
+                    v-if="message.hasAttachments"
+                    :size="14"
+                    aria-label="Anhang"
+                    role="img"
+                  />
+                  <IconFlagFilled
+                    v-if="message.flags.flagged"
+                    class="flagged"
+                    :size="14"
+                    aria-label="Markiert"
+                    role="img"
+                  />
+                </span>
+              </span>
+              <span class="snippet">
+                <span v-if="search" class="hit-folder">{{ hitFolderLabel(message) }}</span>
+                {{ message.snippet }}
+              </span>
+            </button>
+            <!-- Quick actions on hover (mouse); keyboard users have the shortcuts and the toolbar. -->
+            <span v-if="!search" class="hover-actions">
+              <button
+                v-if="canArchive"
+                type="button"
+                tabindex="-1"
+                title="Archivieren (e)"
+                aria-label="Archivieren"
+                @click="runAction('archive', [message.id])"
+              >
+                <IconArchive :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                title="Löschen (#)"
+                aria-label="Löschen"
+                @click="runAction('delete', [message.id])"
+              >
+                <IconTrash :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                :title="
+                  message.flags.seen
+                    ? 'Als ungelesen markieren (Shift+U)'
+                    : 'Als gelesen markieren (Shift+I)'
+                "
+                :aria-label="
+                  message.flags.seen ? 'Als ungelesen markieren' : 'Als gelesen markieren'
+                "
+                @click="runAction(message.flags.seen ? 'unread' : 'read', [message.id])"
+              >
+                <IconMail v-if="message.flags.seen" :size="18" aria-hidden="true" />
+                <IconMailOpened v-else :size="18" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                tabindex="-1"
+                :title="message.flags.flagged ? 'Markierung entfernen (s)' : 'Markieren (s)'"
+                :aria-label="message.flags.flagged ? 'Markierung entfernen' : 'Markieren'"
+                @click="runAction(message.flags.flagged ? 'unflag' : 'flag', [message.id])"
+              >
+                <IconFlagFilled v-if="message.flags.flagged" :size="18" aria-hidden="true" />
+                <IconFlag v-else :size="18" aria-hidden="true" />
+              </button>
             </span>
-            <span class="snippet">
-              <span v-if="search" class="hit-folder">{{ hitFolderLabel(message) }}</span>
-              {{ message.snippet }}
-            </span>
-          </button>
-        </li>
+          </li>
+        </template>
       </ul>
 
       <div v-if="nextCursor" ref="sentinel" class="more">
@@ -1512,7 +1951,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="secondary"
-            title="Tastenkürzel: u"
+            title="Tastenkürzel: Shift+I / Shift+U"
             @click="runAction(detail.flags.seen ? 'unread' : 'read', [detail.id])"
           >
             {{ detail.flags.seen ? 'Als ungelesen markieren' : 'Als gelesen markieren' }}
@@ -1521,7 +1960,7 @@ onBeforeUnmount(() => {
             type="button"
             class="secondary"
             :class="{ 'is-flagged': detail.flags.flagged }"
-            title="Tastenkürzel: s"
+            title="Tastenkürzel: s / !"
             @click="runAction(detail.flags.flagged ? 'unflag' : 'flag', [detail.id])"
           >
             {{ detail.flags.flagged ? 'Markierung entfernen' : 'Markieren' }}
@@ -1530,7 +1969,7 @@ onBeforeUnmount(() => {
             v-if="archiveFolder && actionFolder?.specialUse !== 'archive'"
             type="button"
             class="secondary"
-            title="Tastenkürzel: e"
+            title="Tastenkürzel: e / y"
             @click="runAction('archive', [detail.id])"
           >
             Archivieren
@@ -1599,28 +2038,38 @@ onBeforeUnmount(() => {
         </div>
       </article>
       <p v-else class="hint empty">Keine Nachricht ausgewählt.</p>
+      <!-- Replies open here, below the conversation (#116) -->
+      <div id="compose-inline-slot" />
     </section>
 
-    <ComposeForm
-      v-if="compose"
-      ref="composeForm"
-      :key="composeKey"
-      :account-id="compose.accountId"
-      :identities="compose.identities"
-      :draft="compose.draft"
-      :saved="compose.saved"
-      :forward-of="compose.forwardOf"
-      @queued="onQueued"
-      @drafts-changed="draftList?.reload()"
-      @close="compose = null"
-    />
+    <Teleport to="#compose-inline-slot" defer :disabled="!compose?.inline">
+      <ComposeForm
+        v-if="compose"
+        ref="composeForm"
+        :key="composeKey"
+        :account-id="compose.accountId"
+        :identities="compose.identities"
+        :draft="compose.draft"
+        :saved="compose.saved"
+        :forward-of="compose.forwardOf"
+        :known-people="knownPeople"
+        :in-pane="layout.readingPane !== 'off'"
+        :inline="compose.inline"
+        @queued="onQueued"
+        @drafts-changed="draftList?.reload()"
+        @close="compose = null"
+      />
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .mail {
+  position: relative;
   display: grid;
-  grid-template-columns: 14rem minmax(18rem, 26rem) 1fr;
+  grid-template-columns: var(--folders-w, 14rem) var(--list-w, 25rem) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'side list detail';
   height: 100%;
   min-height: 0;
   background: var(--color-base-100);
@@ -1634,7 +2083,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar {
-  padding: 0.75rem 0.5rem;
+  padding: var(--fma-space-3) var(--fma-space-2);
   background: var(--color-base-200);
 }
 
@@ -1642,7 +2091,7 @@ select {
   width: 100%;
   padding: 0.45rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   font: inherit;
 }
@@ -1652,26 +2101,26 @@ select {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
-  margin: 0.75rem 1rem;
-  padding: 0.6rem 0.75rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  padding: 0.6rem var(--fma-space-3);
   border: 1px solid var(--fma-warning-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--fma-warning-soft);
   color: var(--fma-warning-text);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .account-status button.secondary {
-  padding: 0.25rem 0.6rem;
+  padding: var(--fma-space-1) 0.6rem;
   border-color: var(--fma-warning-text);
   color: var(--fma-warning-text);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 button.primary {
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -1680,7 +2129,7 @@ button.primary {
 
 .compose-button {
   width: 100%;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
 }
 
 .folder {
@@ -1688,9 +2137,9 @@ button.primary {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  padding: 0.4rem 0.6rem;
+  padding: var(--fma-folder-py) 0.6rem;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1715,6 +2164,9 @@ button.primary {
 }
 
 .folder-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1726,7 +2178,7 @@ button.primary {
   border-radius: 999px;
   background: var(--color-primary);
   color: var(--color-primary-content);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
 }
 
 .list-header {
@@ -1734,15 +2186,15 @@ button.primary {
   top: 0;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-3) var(--fma-space-4);
   border-bottom: 1px solid var(--color-base-300);
   background: var(--color-base-100);
 }
 
 h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--fma-text-lg);
 }
 
 .mobile-folders {
@@ -1761,7 +2213,7 @@ h2 {
   height: 2.25rem;
   padding: 0;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-base-100);
   color: var(--color-base-content);
   font-size: 1.15rem;
@@ -1791,15 +2243,20 @@ h2 {
   }
 }
 
+.item.cursor {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 .sync-progress {
-  margin: 0.5rem 1rem;
+  margin: var(--fma-space-2) var(--fma-space-4);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sync-notice {
-  margin: 0.5rem 1rem;
+  margin: var(--fma-space-2) var(--fma-space-4);
 }
 
 .pull-indicator {
@@ -1808,7 +2265,7 @@ h2 {
   justify-content: center;
   overflow: hidden;
   color: var(--fma-muted);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .messages {
@@ -1817,10 +2274,119 @@ h2 {
   padding: 0;
 }
 
+.message-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-base-200);
+}
+
+.message-row .item {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.message-row:hover,
+.message-row:hover .item {
+  background: var(--color-base-200);
+}
+
+.message-row:has(.item.active) {
+  background: var(--fma-primary-soft);
+}
+
+.message-row.selected,
+.message-row.selected .item {
+  background: var(--fma-primary-soft);
+}
+
+.select {
+  flex-shrink: 0;
+  align-self: center;
+  width: 1rem;
+  height: 1rem;
+  margin: 0 -0.5rem 0 var(--fma-space-3);
+  accent-color: var(--color-primary);
+}
+
+.date-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.35rem var(--fma-space-4);
+  border-bottom: 1px solid var(--color-base-200);
+  background: var(--color-base-200);
+  color: var(--fma-muted);
+  font-size: var(--fma-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Quick actions appear over the date/icons of the row on hover. */
+.hover-actions {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  display: none;
+  gap: 0.15rem;
+  padding: 0.1rem;
+  border-radius: var(--fma-radius);
+  background: var(--color-base-100);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 15%);
+}
+
+.hover-actions button {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--fma-muted);
+}
+
+.hover-actions button:hover {
+  background: var(--color-base-200);
+  color: var(--color-base-content);
+}
+
+@media (hover: hover) {
+  .message-row.selectable:hover .hover-actions {
+    display: inline-flex;
+  }
+}
+
+.selection-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: var(--fma-space-2) var(--fma-space-3);
+  border-bottom: 1px solid var(--fma-border);
+  background: var(--fma-primary-soft);
+}
+
+.selection-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: var(--fma-space-1) 0.6rem;
+  font-size: var(--fma-text-sm);
+}
+
+.selection-count {
+  margin-right: auto;
+  font-weight: 600;
+}
+
 .item {
   display: block;
   width: 100%;
-  padding: 0.6rem 1rem;
+  padding: var(--fma-row-py) var(--fma-row-px);
   border: none;
   border-bottom: 1px solid var(--color-base-200);
   background: transparent;
@@ -1841,7 +2407,7 @@ h2 {
 .row {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .from,
@@ -1874,9 +2440,16 @@ h2 {
 
 .date,
 .icons {
+  display: inline-flex;
   flex-shrink: 0;
-  font-size: 0.75rem;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
+}
+
+.selection-bar button.danger {
+  color: var(--color-error);
 }
 
 .flagged {
@@ -1893,15 +2466,20 @@ h2 {
   color: var(--fma-muted);
 }
 
+/* Compact density hides the preview line of list rows. */
+.item .snippet {
+  display: var(--fma-snippet-display);
+}
+
 .more {
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   text-align: center;
 }
 
 button.secondary {
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-primary);
   font: inherit;
@@ -1909,17 +2487,137 @@ button.secondary {
 }
 
 .detail {
-  padding: 1rem 1.5rem;
+  padding: var(--fma-space-4) var(--fma-space-5);
   overflow-y: auto;
+}
+
+.sidebar {
+  grid-area: side;
+}
+
+.list {
+  grid-area: list;
+}
+
+.detail {
+  grid-area: detail;
+}
+
+/* Layout (#113), wide screens: reading pane below the list or off. */
+.mail.reading-bottom {
+  grid-template-columns: var(--folders-w, 14rem) minmax(0, 1fr);
+  /* A stored height never pushes the message out of a short window. */
+  grid-template-rows: minmax(0, min(var(--list-h, 20rem), 50%)) minmax(0, 1fr);
+  grid-template-areas:
+    'side list'
+    'side detail';
+}
+
+.mail.reading-bottom .list {
+  border-right: none;
+  border-bottom: 1px solid var(--color-base-300);
+}
+
+.mail.reading-off {
+  grid-template-columns: var(--folders-w, 14rem) minmax(0, 1fr);
+  grid-template-areas: 'side list';
+}
+
+.mail.reading-off .detail {
+  display: none;
+}
+
+/* Without a reading pane, an open message takes the place of the list. */
+.mail.reading-off.has-detail {
+  grid-template-areas: 'side detail';
+}
+
+.mail.reading-off.has-detail .list {
+  display: none;
+}
+
+.mail.reading-off.has-detail .detail {
+  display: block;
+}
+
+.mail.reading-off.has-detail .back {
+  display: inline-block;
+}
+
+.resizer {
+  z-index: 3;
+  background: transparent;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: var(--color-primary);
+  outline: none;
+}
+
+.resizer-folders,
+.resizer-list {
+  justify-self: end;
+  width: 5px;
+  margin-right: -3px;
+  cursor: col-resize;
+}
+
+.resizer-folders {
+  grid-area: side;
+}
+
+.resizer-list {
+  grid-area: list;
+}
+
+.mail.reading-bottom .resizer-list {
+  align-self: end;
+  justify-self: stretch;
+  width: auto;
+  height: 5px;
+  margin: 0 0 -3px;
+  cursor: row-resize;
+}
+
+.pane-switch {
+  display: inline-flex;
+  gap: 0.1rem;
+  margin-left: auto;
+}
+
+.pane-switch button {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--fma-muted);
+}
+
+.pane-switch button[aria-pressed='true'] {
+  background: var(--fma-primary-soft);
+  color: var(--color-primary);
+}
+
+.folder-icon {
+  flex-shrink: 0;
+  margin-right: 0.45rem;
+  color: var(--fma-muted);
+}
+
+.folder.active .folder-icon {
+  color: inherit;
 }
 
 .back {
   display: none;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
 }
 
 .search {
-  padding: 0.5rem 0.75rem;
+  padding: var(--fma-space-2) var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -1934,7 +2632,7 @@ button.secondary {
   min-width: 0;
   overflow: hidden;
   color: var(--fma-muted);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1946,9 +2644,9 @@ button.secondary {
 .search input[type='search'] {
   flex: 1;
   min-width: 0;
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem var(--fma-space-2);
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
@@ -1957,7 +2655,7 @@ button.secondary {
   background: transparent;
   color: var(--color-primary);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   cursor: pointer;
 }
 
@@ -1965,8 +2663,8 @@ button.secondary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.4rem 0.6rem;
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
+  margin-top: var(--fma-space-2);
+  font-size: var(--fma-text-sm);
 }
 
 .search-options label {
@@ -1986,7 +2684,7 @@ button.secondary {
 .search-options input[type='date'] {
   padding: 0.3rem 0.4rem;
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
@@ -1997,9 +2695,9 @@ button.secondary {
 
 .search-summary {
   margin: 0;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -2008,7 +2706,7 @@ button.secondary {
   padding: 0 0.3rem;
   border-radius: 0.25rem;
   background: var(--color-base-200);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--color-base-content);
 }
 
@@ -2017,13 +2715,13 @@ button.secondary {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 1rem;
+  margin-bottom: var(--fma-space-4);
 }
 
 .toolbar button.secondary,
 .toolbar button.primary {
   padding: 0.3rem 0.65rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .toolbar button.is-flagged {
@@ -2039,13 +2737,13 @@ button.secondary {
 .toolbar .move select {
   width: auto;
   padding: 0.3rem;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .thread-count {
   display: inline-block;
   min-width: 1.1rem;
-  margin-right: 0.25rem;
+  margin-right: var(--fma-space-1);
   padding: 0 0.3rem;
   border: 1px solid var(--fma-border-strong);
   border-radius: 999px;
@@ -2054,16 +2752,16 @@ button.secondary {
 }
 
 .thread-info {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--fma-space-3);
   font-size: 0.8rem;
   color: var(--fma-muted);
 }
 
 .thread-message.in-thread {
   margin-bottom: 0.6rem;
-  padding: 0.25rem 0.75rem 0.5rem;
+  padding: var(--fma-space-1) var(--fma-space-3) var(--fma-space-2);
   border: 1px solid var(--color-base-300);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
 }
 
 .thread-message.opened {
@@ -2083,22 +2781,22 @@ button.secondary {
 }
 
 .thread-message.in-thread .headers {
-  margin-top: 0.25rem;
+  margin-top: var(--fma-space-1);
 }
 
 .detail-subject {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
   font-size: 1.25rem;
 }
 
 .headers {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.2rem 0.75rem;
-  margin: 0 0 1rem;
-  padding-bottom: 0.75rem;
+  gap: 0.2rem var(--fma-space-3);
+  margin: 0 0 var(--fma-space-4);
+  padding-bottom: var(--fma-space-3);
   border-bottom: 1px solid var(--color-base-300);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .headers dt {
@@ -2111,8 +2809,8 @@ button.secondary {
 }
 
 .hint {
-  margin: 0.75rem 1rem;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
@@ -2122,8 +2820,8 @@ button.secondary {
 }
 
 .error {
-  margin: 0.75rem 1rem;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 
@@ -2137,6 +2835,11 @@ button.secondary {
 
 /* Mobile: account + folder pickers above the list, list -> detail navigation. */
 @media (max-width: 760px) {
+  .resizer,
+  .pane-switch {
+    display: none;
+  }
+
   /* 16px avoids the automatic zoom on focus in iOS Safari. */
   .search input {
     font-size: 16px;
@@ -2146,12 +2849,12 @@ button.secondary {
     display: block;
     height: auto;
     min-height: 0;
-    padding: 0 0.75rem;
+    padding: 0 var(--fma-space-3);
     overflow: visible;
   }
 
   .sidebar {
-    padding: 0 0 0.5rem;
+    padding: 0 0 var(--fma-space-2);
     border: none;
     background: transparent;
   }
@@ -2171,12 +2874,12 @@ button.secondary {
   }
 
   .list-header {
-    padding: 0 0 0.5rem;
+    padding: 0 0 var(--fma-space-2);
     border: none;
   }
 
   .item {
-    padding: 0.6rem 0.25rem;
+    padding: 0.6rem var(--fma-space-1);
   }
 
   .back {

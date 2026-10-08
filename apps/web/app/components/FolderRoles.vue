@@ -113,15 +113,15 @@ onMounted(load)
 <style scoped>
 .roles {
   flex-basis: 100%;
-  padding: 0.5rem 0 0.25rem;
+  padding: var(--fma-space-2) 0 var(--fma-space-1);
 }
 
 label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
+  gap: var(--fma-space-2);
+  margin-bottom: var(--fma-space-2);
+  font-size: var(--fma-text-sm);
 }
 
 label span {
@@ -133,9 +133,9 @@ select {
   min-width: 0;
   padding: 0.35rem;
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
 }
 
 .hint {
@@ -145,8 +145,8 @@ select {
 }
 
 .error {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-1) 0 0;
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 </style>

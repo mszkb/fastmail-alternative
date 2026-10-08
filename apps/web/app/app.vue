@@ -36,6 +36,12 @@ import {
   ForegroundSyncPolicy,
   SwipeBack,
   sortOrderUpdates,
+  UNDO_SEND_CHOICES,
+  parseUndoSendSeconds,
+  DENSITY_CHOICES,
+  THEME_CHOICES,
+  parseDensity,
+  parseTheme,
   finishedSyncs,
   hasUnsavedInput,
   isSyncActive,
@@ -69,6 +75,9 @@ import {
   replayQueue,
   resetOfflineState,
 } from '~/utils/offline-queue'
+import { setShortcutsEnabled, shortcutsEnabled } from '~/utils/shortcuts-setting'
+import { densityChoice, setAppearance, themeChoice } from '~/utils/appearance'
+import { setUndoSendSeconds, undoSendSeconds } from '~/utils/undo-send'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -517,6 +526,43 @@ async function openSettings(): Promise<void> {
   document.querySelector<HTMLElement>('.settings h1')?.focus()
 }
 
+const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** Settings: theme and density (#112, per device). */
+function onAppearanceChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const form = input.closest('.card')
+  const value = (name: string) =>
+    form?.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)?.value
+  setAppearance(parseTheme(value('theme')), parseDensity(value('density')))
+  // Saved at once: never unsaved input for the swipe back.
+  form?.querySelectorAll<HTMLInputElement>('input').forEach((field) => {
+    fieldBaseline.set(field, { value: field.value, checked: field.checked })
+  })
+}
+
+/** Settings: undo-send window (#116, per device). */
+function onUndoSendChange(event: Event): void {
+  const select = event.target as HTMLSelectElement
+  setUndoSendSeconds(parseUndoSendSeconds(select.value))
+}
+
+/** Settings: keyboard shortcuts on/off (#115, per device). */
+function onShortcutsToggle(event: Event): void {
+  const input = event.target as HTMLInputElement
+  setShortcutsEnabled(input.checked)
+  // Saved at once: the toggle never counts as unsaved input (swipe back).
+  fieldBaseline.set(input, { value: input.value, checked: input.checked })
+}
+
+/** First steps: a section of the settings (push, install guide). */
+async function openSettingsSection(id: 'push' | 'install'): Promise<void> {
+  menuOpen.value = false
+  section.value = 'settings'
+  await nextTick()
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
+}
+
 /** "+" in the account bar: the form in the settings. */
 async function addAccount(): Promise<void> {
   menuOpen.value = false
@@ -829,6 +875,7 @@ onBeforeUnmount(() => {
   <!-- App frame (#120): header across the full width, account bar on the left -->
   <div v-if="view === 'app'" class="app-frame" :class="{ 'menu-open': menuOpen }">
     <AppHeader
+      ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
         activeAccountName ? `In ${activeAccountName} suchen …` : 'Kein Konto verbunden'
@@ -909,9 +956,14 @@ onBeforeUnmount(() => {
             @sync-requested="onManualSync"
             @cancel-sync="onCancelSync"
           />
-          <div v-else class="card empty-state">
+          <div v-else class="empty-state">
             <p>Noch kein E-Mail-Konto verbunden.</p>
-            <button type="button" @click="addAccount">Konto hinzufügen</button>
+            <GettingStarted
+              :has-accounts="false"
+              @add-account="addAccount"
+              @open="openSettingsSection"
+              @shortcuts="appHeader?.openHelp()"
+            />
           </div>
         </template>
 
@@ -923,6 +975,12 @@ onBeforeUnmount(() => {
           <p class="hint">
             Angemeldet als <strong>{{ currentEmail }}</strong>
           </p>
+          <GettingStarted
+            :has-accounts="accounts.length > 0"
+            @add-account="addAccount"
+            @open="openSettingsSection"
+            @shortcuts="appHeader?.openHelp()"
+          />
 
           <AccountList
             v-model:edit="editAccountId"
@@ -970,6 +1028,68 @@ onBeforeUnmount(() => {
               Standardmäßig bleiben die Konten getrennt. Eingeschaltet zeigt „Alle Konten“ in der
               Kontoleiste die Posteingänge aller Konten in einer Liste, jede Nachricht mit ihrem
               Konto; geantwortet wird immer aus dem Konto der Nachricht. Nur online verfügbar.
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>Darstellung</h2>
+            <fieldset class="choices">
+              <legend>Farbschema</legend>
+              <label v-for="choice in THEME_CHOICES" :key="choice.value" class="checkbox">
+                <input
+                  type="radio"
+                  name="theme"
+                  :value="choice.value"
+                  :checked="themeChoice === choice.value"
+                  @change="onAppearanceChange"
+                />
+                {{ choice.label }}
+              </label>
+            </fieldset>
+            <fieldset class="choices">
+              <legend>Dichte der Nachrichtenliste</legend>
+              <label v-for="choice in DENSITY_CHOICES" :key="choice.value" class="checkbox">
+                <input
+                  type="radio"
+                  name="density"
+                  :value="choice.value"
+                  :checked="densityChoice === choice.value"
+                  @change="onAppearanceChange"
+                />
+                {{ choice.label }}
+              </label>
+            </fieldset>
+            <p class="hint">
+              Gilt für dieses Gerät. „Kompakt“ zeigt mehr Nachrichten und blendet die Vorschauzeile
+              aus.
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>Verfassen</h2>
+            <label class="field-inline"
+              >Senden rückgängig machen
+              <select :value="undoSendSeconds" @change="onUndoSendChange">
+                <option v-for="seconds in UNDO_SEND_CHOICES" :key="seconds" :value="seconds">
+                  {{ seconds === 0 ? 'Aus' : `${seconds} Sekunden` }}
+                </option>
+              </select>
+            </label>
+            <p class="hint">
+              So lange wartet die App nach „Senden“, bevor die Nachricht an den Server geht; in
+              dieser Zeit holt „Rückgängig“ sie zurück in den Editor. Gilt für dieses Gerät.
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>Tastenkürzel</h2>
+            <label class="checkbox">
+              <input type="checkbox" :checked="shortcutsEnabled" @change="onShortcutsToggle" />
+              Tastenkürzel verwenden (j/k, r, e, # …)
+            </label>
+            <p class="hint">
+              Gilt für dieses Gerät. Die Übersicht öffnet <kbd>?</kbd> oder das Hilfe-Symbol oben
+              rechts; in Eingabefeldern sind Kürzel immer aus.
             </p>
           </div>
 
@@ -1133,29 +1253,60 @@ onBeforeUnmount(() => {
 .app-main > .notices,
 .app-main > .message,
 .app-main > .empty-state {
-  margin: 0.75rem 1rem;
+  margin: var(--fma-space-3) var(--fma-space-4);
 }
 
 .settings {
   width: 100%;
   max-width: 48rem;
   margin: 0 auto;
-  padding: 1rem;
+  padding: var(--fma-space-4);
 }
 
 .settings-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--fma-space-4);
 }
 
 .settings-head h1 {
-  margin: 0 0 0.25rem;
+  margin: 0 0 var(--fma-space-1);
 }
 
 .settings-head h1:focus {
   outline: none;
+}
+
+.field-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fma-space-2);
+  margin-bottom: var(--fma-space-2);
+}
+
+.field-inline select {
+  padding: 0.35rem;
+  border: 1px solid var(--fma-border-strong);
+  border-radius: var(--fma-radius);
+  font: inherit;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fma-space-1) var(--fma-space-4);
+  margin: 0 0 var(--fma-space-2);
+  padding: 0;
+  border: none;
+}
+
+.choices legend {
+  width: 100%;
+  margin-bottom: var(--fma-space-1);
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .settings-head .link {
@@ -1177,7 +1328,7 @@ onBeforeUnmount(() => {
 .side-menu {
   width: min(20rem, 85vw);
   height: 100%;
-  padding: 0.75rem;
+  padding: var(--fma-space-3);
   overflow-y: auto;
   background: var(--color-base-100);
   box-shadow: var(--fma-shadow);
@@ -1202,7 +1353,7 @@ onBeforeUnmount(() => {
   }
 
   .app-main {
-    padding-top: 0.5rem;
+    padding-top: var(--fma-space-2);
     overflow: visible;
   }
 }
@@ -1210,7 +1361,7 @@ onBeforeUnmount(() => {
 .shell {
   max-width: 28rem;
   margin: 3rem auto;
-  padding: 0 1rem;
+  padding: 0 var(--fma-space-4);
   font-family: system-ui, sans-serif;
   color: var(--color-base-content);
 }
@@ -1227,7 +1378,7 @@ onBeforeUnmount(() => {
 
 .notices {
   list-style: none;
-  margin: 0 0 1rem;
+  margin: 0 0 var(--fma-space-4);
   padding: 0;
 }
 
@@ -1235,12 +1386,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   margin-bottom: 0.4rem;
 }
 
 button.link {
-  padding: 0.2rem 0.5rem;
+  padding: 0.2rem var(--fma-space-2);
   background: transparent;
   color: var(--color-success);
   font-weight: 600;
@@ -1248,51 +1399,51 @@ button.link {
 
 .card {
   display: block;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .checkbox {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .form label {
   display: block;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
   font-size: 0.9rem;
 }
 
 .form input {
   display: block;
   width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
+  margin-top: var(--fma-space-1);
+  padding: var(--fma-space-2);
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   box-sizing: border-box;
   font: inherit;
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -1314,8 +1465,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.5rem 0;
+  gap: var(--fma-space-2);
+  padding: var(--fma-space-2) 0;
   border-bottom: 1px solid var(--color-base-300);
 }
 
@@ -1329,7 +1480,7 @@ button:disabled {
   padding: 0.1rem 0.45rem;
   border-radius: 999px;
   background: var(--color-base-300);
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -1339,8 +1490,8 @@ button:disabled {
 }
 
 .message {
-  padding: 0.75rem 1rem;
-  border-radius: 0.375rem;
+  padding: var(--fma-space-3) var(--fma-space-4);
+  border-radius: var(--fma-radius);
   font-size: 0.9rem;
 }
 

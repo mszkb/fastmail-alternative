@@ -18,6 +18,15 @@ Die GitHub-Labels `P0`/`P1`/`P2` entsprechen der Priorität hier. P0 ist bewusst
 
 Danach (P1): #121 globale Suche über alle Konten, die übrigen Issues aus Epic #111 (#112–#117) und der Abschluss des PHP-Umstiegs (Epic #94; Rückbau von Node/PostgreSQL mit #110 umgesetzt).
 
+Epic #111 (vertraute Oberfläche), Stand im Sammelbranch `feature/epic-111-batch`:
+
+- 🟨 **#117** Anbieter-Vorlagen in „Konto hinzufügen“ (Fastmail mit App-Passwort u. a.) und Karte „Erste Schritte“ – offen: Verbindungstest mit echtem Fastmail-Konto
+- 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – offen: Playwright-Lauf (`keyboard.spec.ts`)
+- 🟨 **#116** Verfassen: Antwort direkt unter der Nachricht, neue Mail im Lesebereich (breit) bzw. Vollbild (Handy), Empfänger-Vorschläge aus bekannten Adressen, Anhänge per Drag & Drop, Rückgängig-Senden-Fenster (vor dem Outbox-Request, pro Gerät); Absenderwahl, Cc/Bcc, Autosave-Status und `Strg/⌘+Enter` gab es schon – offen: Playwright-Lauf
+- 🟨 **#113** Layout: Lesebereich rechts/unten/aus, Spaltenbreiten per Ziehen oder Pfeiltasten (gemerkt pro Gerät), Rollen-Symbole an Ordnern; Konten links in der Kontoleiste (#120) – offen: Playwright-Lauf (`layout.spec.ts`)
+- 🟨 **#112** Design-Tokens (Farben, Abstände, Schrift, Dichte), Hell/Dunkel/System und Kompakt/Normal pro Gerät, [UX-Leitfaden](docs/product/ux-guide.md); alle Komponenten nutzen die Abstands-, Schrift- und Radius-Tokens
+- 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – offen: Playwright-Lauf (`multi-select.spec.ts`)
+
 ## Milestones
 
 | Milestone                 | Umfang     | Ziel                                                                                              |

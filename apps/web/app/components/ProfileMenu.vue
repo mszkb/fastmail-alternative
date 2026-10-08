@@ -139,7 +139,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
   border-radius: 50%;
   background: var(--color-neutral);
   color: var(--color-neutral-content);
-  font-size: 0.85rem;
+  font-size: var(--fma-text-sm);
   font-weight: 700;
 }
 
@@ -156,14 +156,14 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
   min-width: 14rem;
   padding: 0.35rem;
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-100);
   box-shadow: var(--fma-shadow);
 }
 
 .who {
   margin: 0;
-  padding: 0.4rem 0.6rem 0.5rem;
+  padding: 0.4rem 0.6rem var(--fma-space-2);
   overflow: hidden;
   border-bottom: 1px solid var(--fma-border);
   color: var(--fma-muted);
@@ -175,12 +175,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
 .menu-panel button {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   width: 100%;
-  margin-top: 0.25rem;
+  margin-top: var(--fma-space-1);
   padding: 0.45rem 0.6rem;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-base-content);
   font: inherit;

@@ -136,21 +136,21 @@ onMounted(() => {
 
 <style scoped>
 .card {
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 h3 {
-  margin: 0.75rem 0 0.25rem;
-  font-size: 0.95rem;
+  margin: var(--fma-space-3) 0 var(--fma-space-1);
+  font-size: var(--fma-text-md);
 }
 
 ol {
@@ -160,23 +160,23 @@ ol {
 }
 
 li {
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--fma-space-1);
 }
 
 .hint {
-  margin: 0.25rem 0 0.5rem;
-  font-size: 0.85rem;
+  margin: var(--fma-space-1) 0 var(--fma-space-2);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .ok {
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--fma-space-2);
   font-size: 0.9rem;
   color: var(--color-success);
 }
 
 details {
-  margin-top: 0.75rem;
+  margin-top: var(--fma-space-3);
   font-size: 0.9rem;
 }
 
@@ -186,9 +186,9 @@ summary {
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;

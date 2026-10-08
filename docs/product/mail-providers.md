@@ -33,6 +33,12 @@ Erlaubte Ports: IMAP 143/993, SMTP 25/465/587/2525; weitere nur mit `MAIL_EXTRA_
 | Microsoft 365 / Outlook.com | `outlook.office365.com` 993 / `smtp.office365.com` 587                        | **nur OAuth2** (Basic Auth abgeschaltet)       | ✓    | ✗         | ✗       | ✓    | ✓           | –       | Ohne OAuth2 (#36) **nicht nutzbar**                                                      |
 | GreenMail (nur Tests)       | lokal, 3143 / 3025                                                            | Passwort                                       | ✓    | ?         | ?       | ?    | ?           | CI      | Nur mit `MAIL_INSECURE_TRANSPORT=1`; Grundlage der Integrations- und E2E-Tests           |
 
+## Vorlagen in der Kontoeinrichtung
+
+„Konto hinzufügen“ bietet für die Anbieter oben eine Vorlage (#117, `PROVIDER_PRESETS` in `packages/shared/src/provider-presets.ts`): Auswahl unter „Anbieter“ oder automatisch nach der Domain der Adresse. Die Vorlage füllt IMAP-/SMTP-Server und Ports (993 bzw. 465/587, TLS), setzt die Adresse als Benutzer und erklärt, welches Passwort der Anbieter erwartet (App-Passwort bei Fastmail, Gmail, iCloud, Yahoo; Hinweis auf den IMAP-Schalter bei GMX/Web.de; Microsoft ohne OAuth2 nicht nutzbar). Ändern sich Serverdaten eines Anbieters, hier und in der Vorlage nachziehen. Der Verbindungstest beim Speichern prüft die Daten wie bei manueller Eingabe.
+
+**Stand der Prüfung gegen echte Konten:** Die Felder sind per Unit- und Playwright-Test abgedeckt; ein Verbindungstest mit einem echten Fastmail-Konto (App-Passwort) steht noch aus und wird hier mit Datum eingetragen.
+
 ## Prüfen, was ein Server wirklich kann
 
 Beim Anlegen eines Kontos und beim Ändern seiner Verbindung liest das Backend im Verbindungstest die IMAP-Fähigkeiten und speichert sie unverschlüsselt (keine Mailinhalte) in `mail_account.capabilities`. Auf der eigenen Instanz:

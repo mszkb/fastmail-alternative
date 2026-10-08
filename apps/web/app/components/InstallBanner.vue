@@ -60,11 +60,11 @@ onMounted(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
   padding: 0.6rem 0.9rem;
-  margin-bottom: 1rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-primary-soft);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--fma-primary-soft);
   font-size: 0.9rem;
   color: var(--color-base-content);
@@ -78,7 +78,7 @@ onMounted(() => {
 button {
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;

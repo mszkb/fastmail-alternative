@@ -203,10 +203,10 @@ defineExpose({ track, refresh })
 
 <style scoped>
 .outbox {
-  margin-top: 0.75rem;
+  margin-top: var(--fma-space-3);
   border-top: 1px solid var(--color-base-300);
-  padding-top: 0.5rem;
-  font-size: 0.85rem;
+  padding-top: var(--fma-space-2);
+  font-size: var(--fma-text-sm);
 }
 
 .toggle {
@@ -215,7 +215,7 @@ defineExpose({ track, refresh })
   width: 100%;
   padding: 0.4rem 0.6rem;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -228,7 +228,7 @@ defineExpose({ track, refresh })
 }
 
 .summary {
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -238,7 +238,7 @@ defineExpose({ track, refresh })
 
 .entries {
   list-style: none;
-  margin: 0.25rem 0 0;
+  margin: var(--fma-space-1) 0 0;
   padding: 0;
 }
 
@@ -265,7 +265,7 @@ defineExpose({ track, refresh })
 
 .status {
   flex-shrink: 0;
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   color: var(--fma-muted);
 }
 
@@ -281,19 +281,19 @@ defineExpose({ track, refresh })
 
 .to,
 .error-text {
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
 }
 
 .error {
-  margin: 0.25rem 0.6rem;
-  font-size: 0.75rem;
+  margin: var(--fma-space-1) 0.6rem;
+  font-size: var(--fma-text-xs);
 }
 
 .retry {
   align-self: flex-start;
   padding: 0.2rem 0.6rem;
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-primary);
   font: inherit;
@@ -312,7 +312,7 @@ button.link {
   background: transparent;
   color: var(--color-primary);
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--fma-text-xs);
   cursor: pointer;
 }
 </style>

@@ -98,27 +98,27 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .card {
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 label {
   display: block;
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--fma-space-3);
   font-size: 0.9rem;
 }
 
@@ -126,17 +126,17 @@ input {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
+  margin-top: var(--fma-space-1);
+  padding: var(--fma-space-2);
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   font: inherit;
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: 1px solid var(--color-primary);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: transparent;
   color: var(--color-primary);
   font: inherit;
@@ -149,14 +149,14 @@ button:disabled {
 }
 
 .ok {
-  margin: 0.75rem 0 0;
+  margin: var(--fma-space-3) 0 0;
   font-size: 0.9rem;
   color: var(--color-success);
 }
 
 .error {
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
+  margin: var(--fma-space-3) 0 0;
+  font-size: var(--fma-text-sm);
   color: var(--color-error);
 }
 </style>

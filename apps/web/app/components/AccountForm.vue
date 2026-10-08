@@ -2,7 +2,18 @@
 // Account form with live connection test: create (roadmap 2.1) and edit
 // (roadmap 3.1, `account` prop). Stored credentials are never sent to the
 // client; in edit mode empty user/password fields keep the stored values.
-import { SYNC_SINCE_CHOICES, syncSinceFromDays } from '@fma/shared'
+// Provider presets (#117): picking a provider (or typing an address of a
+// known domain) fills server, ports and user name and shows how to get the
+// password the provider expects (e.g. an app password at Fastmail).
+import {
+  PROVIDER_PRESETS,
+  SYNC_SINCE_CHOICES,
+  presetById,
+  presetFields,
+  presetForAddress,
+  syncSinceFromDays,
+} from '@fma/shared'
+import type { ProviderPreset } from '@fma/shared'
 
 interface EditableAccount {
   id: string
@@ -56,6 +67,54 @@ function chosenSyncSince(): string | null | undefined {
   if (syncChoice.value === 'keep') return undefined
   if (syncChoice.value === 'all') return null
   return syncSinceFromDays(Number(syncChoice.value))
+}
+
+// Provider preset ('' = own server); only offered when adding an account.
+const presetId = ref('')
+const preset = computed(() => (presetId.value ? presetById(presetId.value) : undefined))
+// A provider (or "Eigener Server") was picked by hand: no auto-detection.
+let presetChosenByUser = false
+
+function applyPreset(): void {
+  const chosen = preset.value
+  if (!chosen) return
+  const fields = presetFields(chosen, emailAddress.value)
+  imapHost.value = fields.imapHost
+  imapPort.value = fields.imapPort
+  smtpHost.value = fields.smtpHost
+  smtpPort.value = fields.smtpPort
+  if (fields.user) imapUser.value = fields.user
+  samePassword.value = true
+}
+
+/**
+ * The address no longer matches the auto-detected provider: drop it and
+ * its server values (those still as the preset filled them).
+ */
+function clearAutoPreset(previous: ProviderPreset): void {
+  const fields = presetFields(previous, '')
+  if (imapHost.value === fields.imapHost) imapHost.value = ''
+  if (smtpHost.value === fields.smtpHost) smtpHost.value = ''
+  presetId.value = ''
+}
+
+function onPresetChange(): void {
+  presetChosenByUser = true
+  applyPreset()
+}
+
+/** Known address domain: suggest its preset once, unless chosen by hand. */
+function onAddressChange(): void {
+  if (editing.value) return
+  const detected = presetForAddress(emailAddress.value)
+  if (detected && !presetChosenByUser && presetId.value !== detected.id) {
+    presetId.value = detected.id
+    applyPreset()
+  } else if (!detected && !presetChosenByUser && preset.value) {
+    clearAutoPreset(preset.value)
+  } else if (preset.value && (!imapUser.value || imapUser.value.includes('@'))) {
+    imapUser.value = emailAddress.value.trim()
+  }
 }
 
 const busy = ref(false)
@@ -204,6 +263,8 @@ async function submit(): Promise<void> {
     smtpUser.value = ''
     smtpPassword.value = ''
     syncChoice.value = 'all'
+    presetId.value = ''
+    presetChosenByUser = false
     emit('created')
   } catch {
     error.value = 'API nicht erreichbar.'
@@ -226,8 +287,31 @@ async function submit(): Promise<void> {
 
     <label v-if="!editing"
       >E-Mail-Adresse des Kontos
-      <input v-model="emailAddress" type="email" required placeholder="ich@provider.de" />
+      <input
+        v-model="emailAddress"
+        type="email"
+        required
+        placeholder="ich@provider.de"
+        @change="onAddressChange"
+      />
     </label>
+    <label v-if="!editing"
+      >Anbieter
+      <select v-model="presetId" @change="onPresetChange">
+        <option value="">Eigener Server (Daten selbst eingeben)</option>
+        <option v-for="option in PROVIDER_PRESETS" :key="option.id" :value="option.id">
+          {{ option.label }}
+        </option>
+      </select>
+    </label>
+    <p
+      v-if="!editing && preset"
+      class="preset-hint"
+      :class="{ blocked: preset.auth === 'oauth-only' }"
+      role="note"
+    >
+      {{ preset.hint }}
+    </p>
     <label
       >{{ editing ? 'Anzeigename' : 'Anzeigename (optional)' }}
       <input v-model="displayName" type="text" placeholder="z. B. Privat" :required="editing" />
@@ -324,35 +408,49 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
+.preset-hint {
+  margin: -0.25rem 0 var(--fma-space-3);
+  padding: var(--fma-space-2) var(--fma-space-3);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0.25rem;
+  background: var(--fma-primary-soft);
+  font-size: var(--fma-text-sm);
+}
+
+.preset-hint.blocked {
+  border-left-color: var(--color-error);
+  background: var(--fma-error-soft);
+}
+
 .form {
   display: block;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
+  padding: var(--fma-space-4) 1.25rem;
+  margin-bottom: var(--fma-space-4);
   border: 1px solid var(--fma-border);
-  border-radius: 0.5rem;
+  border-radius: var(--fma-radius-box);
   background: var(--color-base-200);
 }
 
 h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
+  margin: 0 0 var(--fma-space-1);
+  font-size: var(--fma-text-lg);
 }
 
 .form.embedded {
   width: 100%;
-  margin: 0.5rem 0 0;
+  margin: var(--fma-space-2) 0 0;
   background: var(--color-base-100);
 }
 
 .hint {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--fma-space-3);
+  font-size: var(--fma-text-sm);
   color: var(--fma-muted);
 }
 
 .sync-hint {
   display: block;
-  margin: 0.25rem 0 0;
+  margin: var(--fma-space-1) 0 0;
 }
 
 label {
@@ -365,26 +463,26 @@ input,
 select {
   display: block;
   width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
+  margin-top: var(--fma-space-1);
+  padding: var(--fma-space-2);
   border: 1px solid var(--fma-border-strong);
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   box-sizing: border-box;
   font: inherit;
 }
 
 fieldset {
   border: 1px solid var(--fma-border);
-  border-radius: 0.375rem;
-  margin: 0 0 0.75rem;
-  padding: 0.75rem;
+  border-radius: var(--fma-radius);
+  margin: 0 0 var(--fma-space-3);
+  padding: var(--fma-space-3);
 }
 
 legend {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--fma-muted);
-  padding: 0 0.25rem;
+  padding: 0 var(--fma-space-1);
 }
 
 .row {
@@ -412,9 +510,9 @@ legend {
 }
 
 button {
-  padding: 0.5rem 1rem;
+  padding: var(--fma-space-2) var(--fma-space-4);
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--fma-radius);
   background: var(--color-primary);
   color: var(--color-primary-content);
   font: inherit;
@@ -423,7 +521,7 @@ button {
 
 .buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--fma-space-2);
 }
 
 button.secondary {
@@ -437,9 +535,9 @@ button:disabled {
 }
 
 .msg {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem 1rem;
-  border-radius: 0.375rem;
+  margin: var(--fma-space-3) 0 0;
+  padding: var(--fma-space-3) var(--fma-space-4);
+  border-radius: var(--fma-radius);
   font-size: 0.9rem;
 }
 

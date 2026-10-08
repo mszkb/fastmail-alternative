@@ -132,6 +132,40 @@ export async function appendOld(mailbox: string, message: string, date: Date): P
   socket.end('a3 LOGOUT\r\n')
 }
 
+/** Creates an IMAP folder in a GreenMail mailbox (e.g. "Archive"); exists already = fine. */
+export async function createFolder(mailbox: string, name: string): Promise<void> {
+  const socket = net.connect(imapPort, mailHost)
+  socket.setEncoding('utf8')
+  let buffer = ''
+  socket.on('data', (chunk: string) => (buffer += chunk))
+  const waitFor = async (pattern: RegExp) => {
+    for (let i = 0; i < 100 && !pattern.test(buffer); i++)
+      await new Promise((r) => setTimeout(r, 50))
+    if (!pattern.test(buffer)) throw new Error('IMAP: no response')
+  }
+  await waitFor(/^\* OK/m)
+  socket.write(`a1 LOGIN "${mailbox}" "${mailbox}"\r\n`)
+  await waitFor(/^a1 OK/m)
+  socket.write(`a2 CREATE "${name}"\r\n`)
+  await waitFor(/^a2 (OK|NO|BAD)/m)
+  const created = /^a2 OK/m.test(buffer)
+  // NO is fine only when the folder exists already.
+  if (!created) {
+    socket.write(`a3 LIST "" "${name}"\r\n`)
+    await waitFor(/^a3 (OK|NO|BAD)/m)
+  }
+  socket.end('a4 LOGOUT\r\n')
+  const listed = buffer
+    .split('\r\n')
+    .some(
+      (line) =>
+        /^\* LIST /.test(line) && (line.endsWith(` "${name}"`) || line.endsWith(` ${name}`)),
+    )
+  if (!created && !listed) {
+    throw new Error(`IMAP CREATE ${name} failed: ${buffer.match(/^a2 .*$/m)?.[0] ?? ''}`)
+  }
+}
+
 /**
  * Real touch input via CDP (trusted events with timestamps), for the
  * pull-to-refresh and swipe-back gestures. Chromium only.
