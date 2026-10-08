@@ -9,6 +9,12 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 $config = Fma\Config::load();
-$result = Fma\Jobs\Bootstrap::runner($config, new Fma\Log\Logger('cron', $config->get('LOG_LEVEL', 'info')))
-    ->runOnce((float) $config->int('CRON_TIME_BUDGET_SECONDS', 50));
+$logger = new Fma\Log\Logger('cron', $config->get('LOG_LEVEL', 'info'));
+try {
+    $runner = Fma\Jobs\Bootstrap::runner($config, $logger);
+} catch (Fma\Db\SchemaTooNewException $e) {
+    $logger->error('jobs refused: the database was migrated by a newer version; upgrade again or roll back with a restore', ['unknown' => $e->unknown]);
+    exit(1);
+}
+$result = $runner->runOnce((float) $config->int('CRON_TIME_BUDGET_SECONDS', 50));
 exit(0);

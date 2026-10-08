@@ -21,7 +21,30 @@ final class Migrator
 {
     private const LOCK = 'fma-migrations';
 
-    public function __construct(private readonly \PDO $pdo, private readonly string $dir) {}
+    /** The migrations shipped with this version. */
+    public const DEFAULT_DIR = __DIR__ . '/../../migrations';
+
+    public function __construct(private readonly \PDO $pdo, private readonly string $dir = self::DEFAULT_DIR) {}
+
+    /**
+     * Read-only check for entry points that do not migrate (cron, worker):
+     * throws SchemaTooNewException if a newer version migrated the
+     * database. A database without schema_migrations passes.
+     */
+    public function assertNotNewer(): void
+    {
+        $exists = Database::run(
+            $this->pdo,
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'schema_migrations'",
+        )->fetchColumn();
+        if ($exists === false) {
+            return;
+        }
+        $this->assertKnown(array_map(
+            static fn(mixed $name): string => (string) $name,
+            Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
+        ));
+    }
 
     /** @return list<string> names applied in this run */
     public function migrate(): array
@@ -41,10 +64,7 @@ final class Migrator
                 static fn(mixed $name): string => (string) $name,
                 Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
             );
-            $unknown = array_values(array_diff($done, array_keys($this->files())));
-            if ($unknown !== []) {
-                throw new SchemaTooNewException($unknown);
-            }
+            $this->assertKnown($done);
             $applied = [];
             foreach ($this->pending($done) as $name => $file) {
                 foreach (self::statements((string) file_get_contents($file)) as $sql) {
@@ -57,6 +77,15 @@ final class Migrator
             return $applied;
         } finally {
             Database::run($this->pdo, 'SELECT RELEASE_LOCK(?)', [self::LOCK]);
+        }
+    }
+
+    /** @param list<string> $done */
+    private function assertKnown(array $done): void
+    {
+        $unknown = array_values(array_diff($done, array_keys($this->files())));
+        if ($unknown !== []) {
+            throw new SchemaTooNewException($unknown);
         }
     }
 

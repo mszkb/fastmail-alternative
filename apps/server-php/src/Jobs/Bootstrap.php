@@ -6,6 +6,7 @@ namespace Fma\Jobs;
 
 use Fma\Config;
 use Fma\Db\Database;
+use Fma\Db\Migrator;
 use Fma\Log\Logger;
 use Fma\Push\PushNotifyHandler;
 
@@ -15,6 +16,8 @@ final class Bootstrap
     public static function runner(Config $config, Logger $logger, ?Database $db = null): Runner
     {
         $db ??= new Database($config);
+        // Old code must not run jobs on a schema a newer version migrated.
+        (new Migrator($db->pdo()))->assertNotNewer();
         $queue = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
         $runner = new Runner($db, $queue, new AccountHealth($db), $logger, $config);
         // Handlers are registered here as the job types get ported (#103-#107).

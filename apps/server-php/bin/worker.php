@@ -16,7 +16,12 @@ require __DIR__ . '/../vendor/autoload.php';
 $config = Fma\Config::load();
 $logger = new Fma\Log\Logger('worker', $config->get('LOG_LEVEL', 'info'));
 $db = new Fma\Db\Database($config);
-$runner = Fma\Jobs\Bootstrap::runner($config, $logger, $db);
+try {
+    $runner = Fma\Jobs\Bootstrap::runner($config, $logger, $db);
+} catch (Fma\Db\SchemaTooNewException $e) {
+    $logger->error('jobs refused: the database was migrated by a newer version; upgrade again or roll back with a restore', ['unknown' => $e->unknown]);
+    exit(1);
+}
 $idle = Fma\Jobs\IdleManager::enabled($config)
     ? new Fma\Jobs\IdleManager($db, new Fma\Jobs\JobQueue($db), $config, $logger)
     : null;
