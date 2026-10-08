@@ -80,7 +80,7 @@ final class Migrator
         }
     }
 
-    /** @param list<string> $done */
+    /** @param array<string> $done */
     private function assertKnown(array $done): void
     {
         $unknown = array_values(array_diff($done, array_keys($this->files())));
