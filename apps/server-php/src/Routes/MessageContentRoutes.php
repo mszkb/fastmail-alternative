@@ -21,9 +21,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Content derived on demand from the encrypted raw mail (nothing cached or
- * logged), like apps/api/src/mail/message-html.ts and the read part of
- * attachments.ts (roadmap 2.9, 5.3):
+ * Content derived on demand from the encrypted raw mail, nothing cached or
+ * logged (roadmap 2.9, 5.3):
  * - GET /api/messages/{id}/html?remote=0|1: sanitized HTML body, cid:
  *   images embedded as data: URLs, remote resources only with remote=1.
  * - GET /api/messages/{id}/attachments: name, type, size, inline.

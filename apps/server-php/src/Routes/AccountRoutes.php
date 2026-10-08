@@ -22,7 +22,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * /api/accounts like apps/api/src/mail/accounts.ts (roadmap 2.1, 3.1):
+ * /api/accounts (roadmap 2.1, 3.1):
  * create with connection test, list, edit, delete.
  *
  * - Credentials are encrypted with the account DEK and never leave the
@@ -313,7 +313,7 @@ final class AccountRoutes
         ];
     }
 
-    /** Credential blob, same JSON as Node: {imapUser, imapPassword, smtpUser, smtpPassword}. */
+    /** Credential blob JSON: {imapUser, imapPassword, smtpUser, smtpPassword}. */
     private static function encryptCredentials(string $dek, string $accountId, HostConfig $imap, HostConfig $smtp): string
     {
         $json = json_encode(
@@ -567,7 +567,7 @@ final class AccountRoutes
         return \is_string($value) && $value !== '';
     }
 
-    /** Node rejects a missing or non-object PATCH body (Body::json maps both to []). */
+    /** A missing or non-object PATCH body is rejected (Body::json maps both to []). */
     private static function isJsonObject(Request $request): bool
     {
         $raw = ltrim((string) $request->getBody());

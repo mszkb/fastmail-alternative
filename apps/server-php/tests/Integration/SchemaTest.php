@@ -102,7 +102,7 @@ final class SchemaTest extends DatabaseTestCase
         $this->sql('INSERT INTO message_body (message_id, storage_ref) VALUES (?, ?)', [$message, 'ab/cd']);
         $this->sql('INSERT INTO job (type, account_id, payload) VALUES (?, ?, ?)', ['message_sync', $account, '{"folderId":"x"}']);
 
-        // Thread overlap lookup as in apps/worker/src/threading.ts ("references" && $refs).
+        // Thread overlap lookup as in Fma\Mail\Threading (message_reference instead of a PostgreSQL array).
         $found = $this->sql(
             'SELECT DISTINCT m.id FROM message m JOIN message_reference r ON r.message_id = m.id
              WHERE r.account_id = ? AND r.ref IN (?, ?)',

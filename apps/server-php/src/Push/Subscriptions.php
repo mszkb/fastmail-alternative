@@ -12,8 +12,7 @@ use Fma\Db\Uuid;
 use Fma\Mail\Ssrf;
 
 /**
- * Web Push subscriptions, port of the helpers in apps/api/src/push/routes.ts
- * (roadmap 4.3, ADR-0005, docs/architecture/push.md):
+ * Web Push subscriptions (roadmap 4.3, ADR-0005, docs/architecture/push.md):
  * - endpoints must be https URLs on a public host without credentials
  *   (SSRF guard; the job checks the host again before every send);
  *   MAIL_INSECURE_TRANSPORT=1 (dev/test) allows http and private hosts;

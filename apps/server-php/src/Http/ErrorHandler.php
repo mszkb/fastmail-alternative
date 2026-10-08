@@ -11,7 +11,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Slim\Exception\HttpException;
 
 /**
- * Central error handler like registerErrorHandler in apps/api/src/app.ts:
+ * Central error handler:
  * clients only get a generic text for the status, the log gets class and
  * stack frames but never the message (driver messages may contain row
  * values).

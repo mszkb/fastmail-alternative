@@ -8,8 +8,7 @@ use Fma\Db\Database;
 use Fma\Mail\FileStore;
 
 /**
- * `account_cleanup` job like apps/worker/src/jobs/account-cleanup.ts
- * (roadmap 3.1): removes the encrypted files of a deleted account.
+ * `account_cleanup` job (roadmap 3.1): removes the encrypted files of a deleted account.
  *
  * The account row (and with it every database row and the DEK) is already
  * gone; the payload carries only the id (job.account_id stays NULL, it

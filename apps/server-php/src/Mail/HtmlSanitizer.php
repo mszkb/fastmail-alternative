@@ -7,8 +7,7 @@ namespace Fma\Mail;
 use Masterminds\HTML5;
 
 /**
- * Sanitizer for HTML mail bodies (roadmap 2.9), port of the policy of
- * apps/api/src/mail/html-sanitizer.ts.
+ * Sanitizer for HTML mail bodies (roadmap 2.9).
  *
  * The HTML is parsed with the HTML5 parser (masterminds/html5, the parser
  * behind symfony/html-sanitizer) and re-serialized from the DOM with a

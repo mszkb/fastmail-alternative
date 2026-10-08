@@ -23,7 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * /api/auth/* like apps/api/src/auth/routes.ts (ADR-0004): single-user
+ * /api/auth/* (ADR-0004): single-user
  * setup with setup code, password login with lockout, server-side
  * sessions, logout, password change and device management.
  */

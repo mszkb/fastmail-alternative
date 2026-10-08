@@ -109,7 +109,7 @@ test('sync panel shows progress, stops and starts again', async ({ page }) => {
 })
 
 test('without the status endpoint the panel falls back to "syncing"', async ({ page }) => {
-  // The Node backend has no /api/sync/status; force the same on PHP.
+  // Backends without /api/sync/status (e.g. an older server) answer 404; simulate that.
   await page.route('**/api/sync/status', (route) =>
     route.fulfill({ status: 404, json: { message: 'Not found' } }),
   )

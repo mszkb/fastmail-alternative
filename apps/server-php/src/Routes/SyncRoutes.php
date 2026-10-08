@@ -17,7 +17,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Client-triggered sync like apps/api/src/mail/sync.ts (roadmap 4.5): the
+ * Client-triggered sync (roadmap 4.5): the
  * app asks for a sync on start, focus and when it comes back online.
  *
  * - POST /api/accounts/{id}/sync: folder_sync for one account;
@@ -99,7 +99,7 @@ final class SyncRoutes
             )->fetchAll();
             $results = [];
             foreach ($rows as $row) {
-                // Same order of checks as Node's skipReason.
+                // Fixed order of checks: the first matching reason is reported.
                 $reason = match (true) {
                     $row['status'] === 'disabled' => 'disabled',
                     $row['status'] === 'auth_error' => 'auth_error',

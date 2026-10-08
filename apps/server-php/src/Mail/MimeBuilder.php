@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Fma\Mail;
 
 /**
- * Builds plain-text RFC 5322 messages with optional attachments, like
- * nodemailer's MailComposer in apps/worker (send_message, draft_sync).
+ * Builds plain-text RFC 5322 messages with optional attachments for
+ * send_message and draft_sync.
  * Everything is 7-bit: headers as RFC 2047 encoded words, the text as
  * quoted-printable, attachments as base64 (file names RFC 2231), so no
  * 8BITMIME/SMTPUTF8 is needed. Bcc is written only with `keepBcc` (the

@@ -21,7 +21,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Sending API (roadmap 2.7), port of apps/api/src/mail/outbox.ts:
+ * Sending API (roadmap 2.7):
  * POST /api/outbox stores the message encrypted with the account DEK and
  * enqueues send_message in the same transaction (Message-ID generated
  * once here); idempotent with `clientId`; `draftId` deletes the draft it

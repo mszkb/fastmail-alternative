@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Fma\Mail;
 
 /**
- * Result of a connection test, like TestResult in
- * apps/api/src/mail/connection-test.ts. `message` is a fixed German text per
+ * Result of a connection test. `message` is a fixed German text per
  * code, never a server response.
  */
 final class TestResult
@@ -19,7 +18,7 @@ final class TestResult
         public readonly array $capabilities = [],
     ) {}
 
-    /** JSON shape of the Node backend ({ok, code?, message?, capabilities?}). */
+    /** JSON shape of the API ({ok, code?, message?, capabilities?}). */
     /** @return array<string, mixed> */
     public function toArray(): array
     {

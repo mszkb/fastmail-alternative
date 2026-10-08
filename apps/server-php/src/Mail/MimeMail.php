@@ -9,9 +9,8 @@ use ZBateson\MailMimeParser\MailMimeParser;
 use ZBateson\MailMimeParser\Message\IMessagePart;
 
 /**
- * Read-only view of a decrypted raw mail (zbateson/mail-mime-parser), like
- * the mailparser use in apps/api/src/mail/message-html.ts and
- * attachments.ts: the HTML body, inline raster images (cid:) and the list
+ * Read-only view of a decrypted raw mail (zbateson/mail-mime-parser): the
+ * HTML body, inline raster images (cid:) and the list
  * of attachments. Every non-body part counts as an attachment (index order
  * of the MIME tree); parts inside multipart/related are `inline`.
  */

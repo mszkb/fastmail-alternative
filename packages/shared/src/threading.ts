@@ -12,10 +12,10 @@
  *    SUBJECT_THREAD_WINDOW_MS (earlier messages preferred). Unrelated mails
  *    that merely share a subject ("Rechnung", "Hallo") stay separate.
  *
- * The result does not depend on the input order. The worker runs the same
- * function on a new message plus its candidate neighbours from the
- * database (see apps/worker/src/threading.ts); subjects there are keyed
- * HMACs, never plaintext.
+ * The result does not depend on the input order. The PHP worker applies the
+ * same rules to a new message plus its candidate neighbours from the
+ * database (see apps/server-php/src/Mail/Threading.php); subjects there are
+ * keyed HMACs, never plaintext.
  */
 import { baseSubject } from './compose'
 

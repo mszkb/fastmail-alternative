@@ -18,7 +18,7 @@ use Fma\Mail\TransportPolicy;
 use Fma\Mail\Uploads;
 
 /**
- * send_message job, port of apps/worker/src/jobs/send-message.ts: sends an
+ * send_message job: sends an
  * outbox message via SMTP, then stores a copy in "Sent" (APPEND, \Seen).
  *
  * - Not yet accepted (`sent_at` NULL): permanent errors (auth, 5xx,

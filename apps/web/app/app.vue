@@ -24,7 +24,7 @@
 // stopping, and not afterwards; when an account's sync ends, the account
 // list is reloaded (the views refresh as in 4.5). "Stoppen" posts the
 // cancel and shows "wird gestoppt" right away. A backend without the
-// endpoint (404, the Node backend) keeps the 4.5 behavior: the state comes
+// endpoint (404, e.g. an older server) keeps the 4.5 behavior: the state comes
 // from `syncing`, the account list is polled, there is no stop button.
 // App frame (#120): full-width layout with the header (search, help,
 // profile menu with settings and logout) and the account bar on the left
@@ -108,7 +108,7 @@ let sessionVerified = false
 let accountTimer: ReturnType<typeof setInterval> | undefined
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const syncPolicy = new ForegroundSyncPolicy()
-// Sync status (#119); supported: null = not asked yet, false = 404 (Node).
+// Sync status (#119); supported: null = not asked yet, false = 404 (older server).
 const syncStatus = ref<AccountSyncStatus[]>([])
 const syncStatusSupported = ref<boolean | null>(null)
 let statusTimer: ReturnType<typeof setTimeout> | undefined

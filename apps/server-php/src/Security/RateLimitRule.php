@@ -19,7 +19,7 @@ final class RateLimitRule
         public readonly ?array $routes = null,
     ) {}
 
-    /** Same limits as DEFAULT_RATE_LIMITS in apps/api/src/security/rate-limit.ts. */
+    /** Default rate limits per route group. */
     /** @return list<self> */
     public static function defaults(): array
     {

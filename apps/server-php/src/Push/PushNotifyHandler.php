@@ -13,8 +13,7 @@ use Fma\Jobs\JobHandler;
 use Fma\Log\Logger;
 
 /**
- * push_notify job, port of apps/worker/src/jobs/push-notify.ts (roadmap
- * 4.3, ADR-0005, ADR-0013: sent from the cron runner):
+ * push_notify job (roadmap 4.3, ADR-0005, ADR-0013: sent from the cron runner):
  * - sends a content-free Web Push to every active subscription of the
  *   user whose device still has a valid session;
  * - payload ONLY {type, installationId, badge} (PushPayload, principle 4);

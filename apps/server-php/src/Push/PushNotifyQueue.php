@@ -7,7 +7,7 @@ namespace Fma\Push;
 use Fma\Db\Database;
 
 /**
- * Enqueues push_notify, port of enqueuePushNotify (apps/worker): called by
+ * Enqueues push_notify: called by
  * message_sync when new unseen messages arrive in an INBOX (incremental
  * sync only). At most one queued job per user, jobs of a user at least
  * COALESCE_SECONDS apart (a burst over several accounts yields one

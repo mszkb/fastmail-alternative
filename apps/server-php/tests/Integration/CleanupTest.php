@@ -15,9 +15,8 @@ use Fma\Mail\FileStore;
 use Fma\Tests\Support\Http;
 
 /**
- * cleanup and account_cleanup jobs, ported from
- * apps/worker/test/cleanup.test.ts and account-cleanup.test.ts (without
- * the provider part, which needs GreenMail and the sync jobs).
+ * cleanup and account_cleanup jobs (without the provider part, which needs
+ * GreenMail and the sync jobs).
  */
 final class CleanupTest extends DatabaseTestCase
 {

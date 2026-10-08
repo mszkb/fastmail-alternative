@@ -17,8 +17,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
 
 /**
- * Folder role mapping and loading older messages, like
- * apps/api/src/mail/folders.ts (roadmap 3.3, 2.2):
+ * Folder role mapping and loading older messages (roadmap 3.3, 2.2):
  * - PATCH /api/folders/{id} stores special_use_override (never touched by
  *   folder_sync; a role moves away from any other folder of the account)
  *   and recomputes the effective special_use right away.

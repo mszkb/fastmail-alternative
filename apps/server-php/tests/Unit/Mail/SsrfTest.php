@@ -10,7 +10,7 @@ use Fma\Mail\TransportPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-/** Port of apps/api/test/ssrf.test.ts (cases extracted from it) and the port policy. */
+/** SSRF host checks and the port policy. */
 final class SsrfTest extends TestCase
 {
     /** @return iterable<string, array{string}> */

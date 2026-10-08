@@ -10,32 +10,24 @@ Es gibt zwei Wege, eine Instanz auf einen anderen Server zu bringen:
 | Voraussetzung       | Datenbank, Volume `mail-data` **und** derselbe `MASTER_KEY`    | nur die Exportdatei                                                   |
 | Geeignet für        | Serverwechsel, Hardwaretausch, gleiche oder neuere App-Version | Neuanfang, verlorener `MASTER_KEY`, Aufräumen, Test-Instanz           |
 
-Beide Wege setzen auf dem Zielserver eine laufende Installation voraus (`docker compose`, siehe [ADR-0007](../adr/0007-deployment.md)).
+Beide Wege setzen auf dem Zielserver eine Installation voraus ([Docker](installation.md) oder [Webspace](installation-php.md)).
 
 ## A: Vollständiger Umzug (Datenbank + `mail-data` + `MASTER_KEY`)
 
 Alle Inhalte und Zugangsdaten sind mit Data Keys verschlüsselt, die ihrerseits mit dem `MASTER_KEY` verpackt in der Datenbank liegen ([Datenmodell → Verschlüsselung](../architecture/data-model.md#verschlüsselung)). Datenbank und Volume sind deshalb **nur zusammen mit genau diesem `MASTER_KEY`** lesbar. Ohne ihn hilft nur Weg B.
 
-> **Einfacher:** Mit dem Backup-Werkzeug ist der Umzug ein verschlüsseltes Backup auf dem alten und ein Restore auf dem neuen Server, siehe [Backup & Restore](backup-restore.md). Die folgenden Einzelschritte funktionieren weiterhin ohne das Werkzeug.
+Der Umzug ist ein verschlüsseltes Backup auf dem alten und ein Restore auf dem neuen Server ([Backup & Restore](backup-restore.md)). Das Backup enthält Datenbank und `mail-data` in einer Datei; es funktioniert ebenso zwischen Docker und Webspace in beide Richtungen.
 
 ### 1. Alten Server sichern
 
 Im Projektverzeichnis (z. B. `~/fastmail-alternative`):
 
 ```sh
-# Schreibzugriffe stoppen (Worker und API), Datenbank läuft weiter
-docker compose stop worker api
-
-# Datenbank-Dump (Benutzer/DB-Name aus der .env, Standard: mail/mail)
-docker compose exec -T postgres pg_dump -U mail -Fc mail > fma-db.dump
-
-# Volume mit den verschlüsselten Rohmails; der Volume-Name trägt den
-# Projektnamen als Präfix (prüfen mit: docker volume ls | grep mail-data)
-docker run --rm -v fastmail-alternative_mail-data:/data:ro -v "$PWD":/backup \
-  alpine tar czf /backup/fma-mail-data.tgz -C /data .
+./scripts/backup.sh                 # schreibt backups/fma-backup-<zeit>.fmabk
+docker compose stop worker          # ab jetzt nichts mehr abgleichen oder senden
 ```
 
-Zusätzlich die `.env` sichern – sie enthält `MASTER_KEY`, `MASTER_KEY_ID`, die VAPID-Schlüssel und das Datenbankpasswort. Die `.env` **getrennt** vom Dump und vom Volume-Archiv übertragen und aufbewahren (wer Dump und Key zusammen hat, kann alles entschlüsseln).
+Zusätzlich die `.env` sichern – sie enthält `MASTER_KEY`, `MASTER_KEY_ID`, die VAPID-Schlüssel und das Datenbankpasswort. Die `.env` **getrennt** von der Backup-Datei übertragen und aufbewahren (wer Backup und Key zusammen hat, kann alles entschlüsseln).
 
 ### 2. Neuen Server einrichten
 
@@ -43,20 +35,9 @@ Zusätzlich die `.env` sichern – sie enthält `MASTER_KEY`, `MASTER_KEY_ID`, d
 git clone <repo> ~/fastmail-alternative && cd ~/fastmail-alternative
 # .env vom alten Server übernehmen (NICHT neu erzeugen: anderer MASTER_KEY = Daten unlesbar)
 cp /pfad/zur/gesicherten/.env .env
-
-# Nur die Datenbank starten und den Dump einspielen
-docker compose up -d postgres
-docker compose exec -T postgres pg_restore -U mail -d mail --clean --if-exists < fma-db.dump
-
-# Volume befüllen (Volume wird beim ersten Zugriff angelegt)
-docker run --rm -v fastmail-alternative_mail-data:/data -v "$PWD":/backup \
-  alpine sh -c 'tar xzf /backup/fma-mail-data.tgz -C /data && chown -R 1000:1000 /data'
-
-# Alles starten; die API führt ausstehende Migrationen beim Start aus
-docker compose up -d
 ```
 
-Der Besitzer `1000:1000` entspricht dem Benutzer im Worker-Image; bei abweichenden Images den Besitzer des alten Volumes übernehmen (`ls -n` im Volume).
+Dann das Backup einspielen wie unter [Restore auf einer frischen Instanz](backup-restore.md#restore-auf-einer-frischen-instanz) beschrieben (nur mariadb starten, `backup restore`, `mail-data` an `www-data` übergeben, Postausgang prüfen, dann alles starten). Die App-Version auf dem neuen Server muss gleich oder neuer sein.
 
 ### 3. Prüfen
 
@@ -81,7 +62,7 @@ Das Format ist versioniert (`"format": "fma-config"`, `"version": 1`); eine Inst
 
 ### Import (neuer Server)
 
-1. Neue Instanz einrichten (`node scripts/setup-env.mjs`, `docker compose up -d`) und den Benutzer anlegen.
+1. Neue Instanz einrichten (`./scripts/setup-env.sh`, `docker compose up -d --build --wait`, siehe [Installation](installation.md)) und den Benutzer anlegen.
 2. **Einstellungen → Konfiguration übertragen → Importieren …** und die Datei wählen (API: `POST /api/import/config`).
 3. Die Konten erscheinen mit dem Hinweis **„Passwort fehlt“** (Status `auth_error`, Code `CREDENTIALS_REQUIRED`). Bis das Passwort eingegeben ist, läuft für diese Konten kein Abgleich.
 4. Je Konto **Bearbeiten** wählen und das Passwort (bei abweichenden SMTP-Zugangsdaten auch das SMTP-Passwort) eingeben. Nach erfolgreichem Verbindungstest startet der Abgleich; die Ordnerzuordnungen bleiben erhalten.
@@ -89,16 +70,3 @@ Das Format ist versioniert (`"format": "fma-config"`, `"version": 1`); eine Inst
 Konten, deren Mailadresse auf der Zielinstanz schon existiert, werden übersprungen – ein wiederholter Import ist also gefahrlos.
 
 Nicht übertragen werden: Mails (kommen vom Anbieter), der Postausgang, Geräte/Sitzungen und Push-Abos (je Gerät neu anmelden bzw. aktivieren) sowie der Login des Benutzers selbst.
-
-## Umstieg auf das PHP-Backend (PostgreSQL → MySQL/MariaDB)
-
-> **Vorschau** – das PHP-Backend ([ADR-0013](../adr/0013-php-backend.md), Epic #94) ist noch nicht vollständig. Diese Schritte beschreiben das Werkzeug aus #108; die endgültige Anleitung folgt mit der Umstellung (#110).
-
-Einmaliger Import einer bestehenden Installation (Node + PostgreSQL) in eine leere MySQL-/MariaDB-Datenbank. Ids und verschlüsselte Inhalte werden unverändert übernommen, deshalb **muss derselbe `MASTER_KEY`** gesetzt sein. Nötig ist die PHP-Erweiterung `pdo_pgsql` (im Docker-Image vorhanden; auf Shared Hosting den Import auf dem alten Server bzw. lokal ausführen).
-
-1. Alte Instanz stoppen bzw. nur noch lesen lassen und ein [Backup](backup-restore.md) erstellen.
-2. In `apps/server-php`: Konfiguration der neuen Datenbank und den bisherigen `MASTER_KEY` setzen, dann `php bin/migrate.php`.
-3. Import: `php bin/import-postgres.php postgres://BENUTZER:PASSWORT@HOST:5432/mail`. Danach entschlüsselt das Werkzeug zur Probe alle Zugangsdaten und Betreffzeilen; meldet es nicht lesbare Daten, ist der `MASTER_KEY` falsch – nichts weiter tun, Ziel-Datenbank leeren und mit dem richtigen Key wiederholen.
-4. Das Volume `mail-data` (Rohmails) unverändert an den neuen Ort kopieren.
-
-Übernommen werden alle Tabellen; erledigte Jobs nicht, laufende Jobs werden wieder eingereiht. IMAP-Flags und `References` landen in den MySQL-Ersatztabellen (siehe [Datenmodell](../architecture/data-model.md#mysqlmariadb-php-backend-adr-0013)).

@@ -22,7 +22,7 @@ use Fma\Push\WebPushCrypto;
 use Fma\Tests\Support\Http;
 use Psr\Http\Message\ResponseInterface;
 
-/** Port of apps/api/test/push.test.ts and apps/worker/test/push-notify.test.ts. */
+/** Push subscription routes and the push_notify job. */
 final class PushTest extends DatabaseTestCase
 {
     /** @var \Slim\App<\Psr\Container\ContainerInterface|null> */
