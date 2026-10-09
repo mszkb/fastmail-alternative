@@ -29,6 +29,12 @@
             </intent-filter>
         </activity>
 
+        <provider
+            android:name=".android.AttachmentProvider"
+            android:authorities="net.fma.mail.attachments"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <service
             android:name=".android.FcmService"
             android:exported="false">

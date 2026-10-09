@@ -169,6 +169,18 @@ data class MessageDetail(
 )
 
 @Serializable
+data class AttachmentInfo(
+    val index: Int,
+    val filename: String = "",
+    val contentType: String = "application/octet-stream",
+    val size: Long = 0,
+    val inline: Boolean = false,
+)
+
+@Serializable
+data class AttachmentListResponse(val attachments: List<AttachmentInfo>)
+
+@Serializable
 data class ThreadDetail(val id: String, val accountId: String, val subject: String = "", val messages: List<MessageDetail>)
 
 @Serializable

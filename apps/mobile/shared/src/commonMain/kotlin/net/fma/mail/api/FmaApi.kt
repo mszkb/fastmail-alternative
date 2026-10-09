@@ -13,13 +13,16 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.json.Json
 import net.fma.mail.httpEngine
 
@@ -130,6 +133,29 @@ class FmaApi(
         }.read()
 
     suspend fun message(id: String): MessageDetail = client.get("api/messages/$id") { auth() }.read()
+
+    suspend fun attachments(messageId: String): List<AttachmentInfo> =
+        client.get("api/messages/$messageId/attachments") { auth() }.read<AttachmentListResponse>().attachments
+
+    /**
+     * Streams one attachment to [write] in chunks, without buffering the
+     * whole file (the app never stores mail content on the device).
+     */
+    suspend fun downloadAttachment(messageId: String, index: Int, write: (ByteArray, Int) -> Unit) {
+        client.prepareGet("api/messages/$messageId/attachments/$index") {
+            auth()
+            parameter("inline", "0")
+        }.execute { response ->
+            check(response)
+            val channel = response.bodyAsChannel()
+            val buffer = ByteArray(16 * 1024)
+            while (true) {
+                val read = channel.readAvailable(buffer, 0, buffer.size)
+                if (read == -1) break
+                if (read > 0) write(buffer, read)
+            }
+        }
+    }
 
     /** Messages of a thread across folders, oldest first (at most 200). */
     suspend fun thread(id: String): ThreadDetail = client.get("api/threads/$id") { auth() }.read()

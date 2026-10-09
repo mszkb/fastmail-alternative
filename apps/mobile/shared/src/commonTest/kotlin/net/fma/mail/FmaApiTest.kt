@@ -122,4 +122,18 @@ class FmaApiTest {
         assertEquals("f9", result.messages.single().folderId)
         assertEquals("m1", result.messages.single().toListItem().id)
     }
+
+    @Test
+    fun attachmentDownloadStreamsBytes() = runTest {
+        val payload = ByteArray(40_000) { (it % 251).toByte() }
+        val engine = MockEngine { request ->
+            requests += request
+            respond(payload, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/pdf"))
+        }
+        val api = FmaApi("https://mail.example.org", { "tok" }, engine = engine)
+        val out = mutableListOf<Byte>()
+        api.downloadAttachment("m1", 2) { bytes, length -> for (i in 0 until length) out += bytes[i] }
+        assertEquals("/api/messages/m1/attachments/2", requests.single().url.encodedPath)
+        assertEquals(payload.toList(), out)
+    }
 }

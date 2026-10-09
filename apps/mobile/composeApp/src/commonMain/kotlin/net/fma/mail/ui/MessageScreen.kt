@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -16,12 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -49,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import net.fma.mail.api.AttachmentInfo
 import net.fma.mail.api.MessageDetail
 import net.fma.mail.api.MessageHtml
 import net.fma.mail.domain.folderRoleLabel
@@ -73,6 +78,7 @@ fun MessageScreen(
     var message by remember { mutableStateOf<MessageDetail?>(null) }
     var html by remember { mutableStateOf<MessageHtml?>(null) }
     var thread by remember { mutableStateOf<List<MessageDetail>>(emptyList()) }
+    var attachments by remember { mutableStateOf<List<AttachmentInfo>>(emptyList()) }
     var remote by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var flagged by remember { mutableStateOf(false) }
@@ -87,6 +93,9 @@ fun MessageScreen(
             message = detail
             flagged = detail.flags.flagged
             if (!detail.flags.seen) vm.messageAction(messageId, "read", folderId)
+            if (detail.hasAttachments) {
+                attachments = runCatching { api.attachments(messageId).filterNot { it.inline } }.getOrDefault(emptyList())
+            }
             detail.threadId?.let { threadId ->
                 thread = runCatching { api.thread(threadId).messages.filter { it.id != messageId } }.getOrDefault(emptyList())
             }
@@ -189,6 +198,9 @@ fun MessageScreen(
                 else -> Column(Modifier.fillMaxSize()) {
                     Header(detail)
                     if (thread.isNotEmpty()) ThreadSection(thread)
+                    if (attachments.isNotEmpty()) {
+                        AttachmentRow(attachments) { platform.openAttachment(messageId, it) }
+                    }
                     HorizontalDivider()
                     val body = html
                     if (body?.remoteContentBlocked == true && !remote) {
@@ -213,6 +225,28 @@ fun MessageScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AttachmentRow(attachments: List<AttachmentInfo>, onOpen: (AttachmentInfo) -> Unit) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        items(attachments, key = { it.index }) { attachment ->
+            AssistChip(
+                onClick = { onOpen(attachment) },
+                label = { Text("${attachment.filename.ifBlank { "Anhang" }} (${formatSize(attachment.size)})", maxLines = 1) },
+                leadingIcon = { Icon(Icons.Filled.AttachFile, contentDescription = null) },
+            )
+        }
+    }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes >= 1_048_576 -> "${(bytes * 10 / 1_048_576) / 10.0} MB"
+    bytes >= 1024 -> "${bytes / 1024} KB"
+    else -> "$bytes B"
 }
 
 /** The other messages of the thread, collapsed; tap one to show its text (#148). */

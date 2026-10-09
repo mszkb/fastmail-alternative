@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.flow.Flow
+import net.fma.mail.api.AttachmentInfo
 import net.fma.mail.api.FmaApi
 import net.fma.mail.domain.SessionStore
 
@@ -23,6 +24,9 @@ interface Platform {
 
     /** Opens a link outside the app (browser); only http(s) and mailto. */
     fun openExternal(url: String)
+
+    /** Opens an attachment in another app; streamed, never stored by this app. */
+    fun openAttachment(messageId: String, attachment: AttachmentInfo) = Unit
 
     /**
      * Sanitized mail HTML from the server, rendered without JavaScript,

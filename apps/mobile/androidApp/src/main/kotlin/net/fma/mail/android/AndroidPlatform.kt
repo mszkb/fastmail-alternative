@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.flow.Flow
+import net.fma.mail.api.AttachmentInfo
 import net.fma.mail.domain.SessionStore
 import net.fma.mail.ui.Platform
 import net.fma.mail.ui.PushController
@@ -37,6 +38,18 @@ class AndroidPlatform(private val context: Context, private val app: FmaApplicat
             context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
             // No app for this link.
+        }
+    }
+
+    override fun openAttachment(messageId: String, attachment: AttachmentInfo) {
+        val uri = AttachmentProvider.uri(messageId, attachment.index, attachment.contentType, attachment.filename)
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, attachment.contentType)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            // No chooser: the read grant must go to the viewer itself.
+            context.startActivity(view)
+        } catch (_: Exception) {
+            // No app can open this type.
         }
     }
 
