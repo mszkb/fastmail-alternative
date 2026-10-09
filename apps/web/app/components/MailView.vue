@@ -2210,6 +2210,8 @@ button.primary {
 .list-header {
   position: sticky;
   top: 0;
+  /* Above the sticky date groups and rows: the sync panel opens from here. */
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--fma-space-2);
@@ -2386,7 +2388,8 @@ h2 {
 .selection-bar {
   position: sticky;
   top: 0;
-  z-index: 2;
+  /* Over the list header (z-index 5) when both stick. */
+  z-index: 6;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

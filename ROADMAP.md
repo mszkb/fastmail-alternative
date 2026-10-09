@@ -21,12 +21,12 @@ Danach (P1): 🟨 #121 globale Suche über alle Konten (umgesetzt: `GET /api/sea
 Epic #111 (vertraute Oberfläche), seit PR #125 in `main`:
 
 - 🟨 **#117** Anbieter-Vorlagen in „Konto hinzufügen“ (Fastmail mit App-Passwort u. a.) und Karte „Erste Schritte“ – offen: Verbindungstest mit echtem Fastmail-Konto
-- 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – offen: Playwright-Lauf (`keyboard.spec.ts`)
-- 🟨 **#116** Verfassen: Antwort direkt unter der Nachricht, neue Mail im Lesebereich (breit) bzw. Vollbild (Handy), Empfänger-Vorschläge aus bekannten Adressen, Anhänge per Drag & Drop, Rückgängig-Senden-Fenster (vor dem Outbox-Request, pro Gerät); Absenderwahl, Cc/Bcc, Autosave-Status und `Strg/⌘+Enter` gab es schon – offen: Playwright-Lauf
-- 🟨 **#113** Layout: Lesebereich rechts/unten/aus, Spaltenbreiten per Ziehen oder Pfeiltasten (gemerkt pro Gerät), Rollen-Symbole an Ordnern; Konten links in der Kontoleiste (#120) – offen: Playwright-Lauf (`layout.spec.ts`)
+- 🟨 **#115** Tastenkürzel (`j`/`k`, `Enter`/`o`, `Esc`/`u`, `e`/`y`, `#`, `r`/`a`/`f`, `c`, `/`, `s`/`!`, `Shift+I`/`Shift+U`, `g`+Ordner, `x`) mit Übersicht unter `?`, pro Gerät abschaltbar – Playwright-Lauf grün (2026-10-09, nach Fix: Fokus nach `?`/`Esc` zurück an die vorige Stelle)
+- 🟨 **#116** Verfassen: Antwort direkt unter der Nachricht, neue Mail im Lesebereich (breit) bzw. Vollbild (Handy), Empfänger-Vorschläge aus bekannten Adressen, Anhänge per Drag & Drop, Rückgängig-Senden-Fenster (vor dem Outbox-Request, pro Gerät); Absenderwahl, Cc/Bcc, Autosave-Status und `Strg/⌘+Enter` gab es schon – Playwright-Lauf grün (2026-10-09, nach Fixes: „Rückgängig“ war durch die daisyUI-Klasse `.countdown` unsichtbar, Empfänger-Vorschläge gingen bei schnellem Feldwechsel verloren)
+- 🟨 **#113** Layout: Lesebereich rechts/unten/aus, Spaltenbreiten per Ziehen oder Pfeiltasten (gemerkt pro Gerät), Rollen-Symbole an Ordnern; Konten links in der Kontoleiste (#120) – Playwright-Lauf grün (2026-10-09)
 - 🟨 **#112** Design-Tokens (Farben, Abstände, Schrift, Dichte), Hell/Dunkel/System und Kompakt/Normal pro Gerät, [UX-Leitfaden](docs/product/ux-guide.md); alle Komponenten nutzen die Abstands-, Schrift- und Radius-Tokens
 - 🟨 **#126** Installierbare Themes: deklaratives Format `*.fmatheme.json` (Farben hell/dunkel, Größen in rem, Layout-Optionen; kein Code, kein CSS, keine URLs), Validator in `@fma/shared` und PHP mit Kontrastprüfung (AA, sonst abgelehnt), [Schema und Anleitung](docs/themes/README.md), `GET/POST/DELETE /api/themes` (Migration 0007), Einstellungen → Darstellung: installieren, Vorschau, aktivieren (pro Gerät), löschen, `?theme=default`; Zusatzpaket [`themes/`](themes/README.md) mit drei Umsteiger-Presets – offen: Owner-Entscheidung zu den offenen Fragen (Nähe der Presets, Ablehnen statt Warnen bei Kontrast)
-- 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – offen: Playwright-Lauf (`multi-select.spec.ts`)
+- 🟨 **#114** Nachrichtenliste: Mehrfachauswahl, Sammelaktionen (auch offline), Aktionen beim Überfahren, Datumsgruppen – Playwright-Lauf grün (2026-10-09)
 
 ## Milestones
 

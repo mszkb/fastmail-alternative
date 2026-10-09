@@ -8,6 +8,12 @@ Einträge mit **Betreiber:** erfordern beim Upgrade Aufmerksamkeit (Migrationen,
 
 Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
+### Fixed
+
+- Verfassen: Der Knopf „Rückgängig“ im Senden-Countdown war unsichtbar (Klassenkonflikt mit daisyUI); Empfänger-Vorschläge im Cc/Bcc-Feld gingen verloren, wenn man direkt nach dem Feldwechsel tippte – Enter schickte dann das Formular ab
+- Tastenkürzel: Nach `?` und `Esc` blieb der Fokus auf dem Hilfe-Knopf, das nächste `Enter` öffnete wieder die Hilfe statt der Nachricht
+- Handy: Das Sync-Panel lag unter der Nachrichtenliste, „Stoppen“ war nicht klickbar
+
 ### Added
 
 - Self-hosted Deployment mit Docker Compose (caddy, web, php, worker, mariadb), Healthchecks und `scripts/setup-env.sh` für `MASTER_KEY`, VAPID-Schlüssel und DB-Passwort; läuft auf Raspberry Pi (arm64, rootless Docker); alternativ Shared Hosting mit PHP und MySQL
