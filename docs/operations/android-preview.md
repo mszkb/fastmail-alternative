@@ -95,15 +95,16 @@ Mit der Notlösung kommt die Benachrichtigung erst beim nächsten Abfragezeitpun
 ## Was die Vorschau kann
 
 - Instanz verbinden (nur HTTPS), Anmelden, Abmelden; das Geräte-Token liegt verschlüsselt im Android-Keystore
-- Konten wechseln (Konten bleiben getrennt), Ungelesen-Zahlen, Fehlerhinweis pro Konto
+- Konten wechseln (Konten bleiben getrennt), Ungelesen-Zahlen, Fehlerhinweis pro Konto, Fortschrittsbalken während des Syncs; „Alle Konten“ nur, wenn der gemeinsame Posteingang in der Web-App eingeschaltet ist (Antworten gehen immer aus dem Ursprungskonto)
 - Ordner, Nachrichtenliste mit Nachladen beim Scrollen, Ziehen zum Aktualisieren, Sync beim Start und bei Rückkehr in die App
-- Nachricht lesen (bereinigtes HTML ohne JavaScript, externe Bilder erst auf Knopfdruck, Links öffnen im Browser), Verlauf (Thread) aufklappbar
+- Nachricht lesen (bereinigtes HTML ohne JavaScript, externe Bilder erst auf Knopfdruck, Links öffnen im Browser, Dunkelmodus), Verlauf (Thread) aufklappbar
 - Anhänge öffnen: die Datei wird direkt an die passende App gestreamt und nicht in der App gespeichert
 - Gelesen/ungelesen, markieren, archivieren, löschen, verschieben, als Spam markieren; Wischen in der Liste: nach links = archivieren, nach rechts = gelesen/ungelesen
 - Suche im aktiven Konto (beim Mailanbieter per IMAP `SEARCH`)
 - „Ältere Nachrichten vom Server laden“ am Ende eines Ordners
 - Neue Mail, Antworten, Allen antworten, Weiterleiten mit Absenderauswahl (nur Text, ohne eigene Anhänge)
-- Push über FCM, sonst Abfrage alle 15 Minuten
+- Push über FCM, sonst Abfrage alle 15 Minuten; ist die App offen, aktualisiert ein Push nur die Liste
+- Andere Geräte in den Einstellungen abmelden
 
 ## Bekannte Einschränkungen
 
@@ -111,4 +112,4 @@ Mit der Notlösung kommt die Benachrichtigung erst beim nächsten Abfragezeitpun
 - Keine Anhänge senden (auch beim Weiterleiten nicht), keine Entwürfe, kein Rückgängig.
 - Konten, Identitäten und Geräte-Widerruf nur in der Web-App.
 - Debug-Build: ohne `ANDROID_DEBUG_KEYSTORE_B64` muss die App vor einem Update deinstalliert werden.
-- Kein Dunkelmodus für Mailinhalte (Mails werden auf weißem Grund angezeigt).
+- Dunkelmodus für Mailinhalte per Farbumkehr: bei aufwendig gestalteten Mails können Farben ungewohnt wirken.
