@@ -90,6 +90,11 @@ class FmaApi(
     suspend fun login(email: String, password: String, deviceName: String, platform: String): LoginResponse =
         client.post("api/auth/login") { jsonBody(LoginRequest(email, password, deviceName, platform)) }.read()
 
+    /** First-run setup of a fresh instance (setup code from the server log); sets a cookie, used by tests. */
+    suspend fun setup(email: String, password: String, setupCode: String) = check(
+        client.post("api/auth/setup") { jsonBody(SetupRequest(email, password, setupCode)) },
+    )
+
     suspend fun logout() = check(client.delete("api/auth/session") { auth() })
 
     suspend fun devices(): List<DeviceInfo> = client.get("api/auth/devices") { auth() }.read<DeviceListResponse>().devices

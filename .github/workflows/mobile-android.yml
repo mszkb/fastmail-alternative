@@ -101,3 +101,52 @@ jobs:
           disable-animations: true
           working-directory: apps/mobile
           script: ./gradlew --no-daemon :androidApp:connectedDebugAndroidTest
+
+  # The Kotlin API client against the real PHP API (#143): login with a
+  # device token, read endpoints, push registration, logout.
+  api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_DATABASE: mail_test
+          MARIADB_USER: mail
+          MARIADB_PASSWORD: mail
+          MARIADB_RANDOM_ROOT_PASSWORD: '1'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: mysql://mail:mail@127.0.0.1:3306/mail_test
+      SETUP_TOKEN: e2e-setup-code
+      FMA_API_URL: http://127.0.0.1:3001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: openssl, pdo_mysql, mbstring
+          coverage: none
+          tools: composer:v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Start PHP API
+        run: |
+          composer install --no-interaction --no-progress -d apps/server-php
+          export MASTER_KEY="$(openssl rand -base64 32)"
+          php apps/server-php/bin/migrate.php
+          php -S 127.0.0.1:3001 -t apps/server-php/public apps/server-php/public/index.php > php.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:3001/api/health && break; sleep 1; done
+      - name: Kotlin client against the API
+        working-directory: apps/mobile
+        run: ./gradlew --no-daemon :shared:jvmTest --tests 'net.fma.mail.ApiSmokeTest'
+      - name: API log on failure
+        if: failure()
+        run: tail -n 100 php.log

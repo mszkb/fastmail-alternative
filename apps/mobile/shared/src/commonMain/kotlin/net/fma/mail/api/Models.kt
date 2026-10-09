@@ -23,6 +23,9 @@ data class LoginRequest(
 )
 
 @Serializable
+data class SetupRequest(val email: String, val password: String, val setupCode: String)
+
+@Serializable
 data class LoginResponse(val email: String, val token: String? = null)
 
 @Serializable

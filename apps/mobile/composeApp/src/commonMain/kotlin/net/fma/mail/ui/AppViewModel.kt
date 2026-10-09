@@ -89,7 +89,12 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
                 Result.success(normalized)
             }
         } catch (e: ApiException) {
-            Result.failure(IllegalStateException("Keine fastmail-alternative-Instanz unter dieser Adresse (HTTP ${e.status})."))
+            val text = if (e.status == 503) {
+                "Die Instanz ist erreichbar, meldet aber ein Problem (Datenbank?)."
+            } else {
+                "Keine fastmail-alternative-Instanz unter dieser Adresse (HTTP ${e.status})."
+            }
+            Result.failure(IllegalStateException(text))
         } catch (e: Exception) {
             Result.failure(IllegalStateException(connectionErrorText(e)))
         } finally {
