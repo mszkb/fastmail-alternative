@@ -2,6 +2,7 @@ package net.fma.mail.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.flow.Flow
 import net.fma.mail.api.FmaApi
 import net.fma.mail.domain.SessionStore
@@ -35,6 +36,9 @@ interface Platform {
 
     /** Emits when a notification was tapped: show the inbox and sync. */
     val openInboxRequests: Flow<Unit>
+
+    /** HTTP engine override for UI tests against a fake server; null = platform default. */
+    val httpEngine: HttpClientEngine? get() = null
 }
 
 interface PushController {

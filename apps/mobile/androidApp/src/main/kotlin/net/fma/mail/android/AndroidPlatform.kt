@@ -40,59 +40,63 @@ class AndroidPlatform(private val context: Context, private val app: FmaApplicat
         }
     }
 
-    /**
-     * Locked-down WebView (#149): no JavaScript, no file/content access, no
-     * storage, no new windows; without allowRemote no network loads at all
-     * (the server already strips remote content unless asked). Every
-     * navigation is cancelled and handed to [onLink] (opened externally).
-     */
-    @SuppressLint("SetJavaScriptEnabled")
     @Composable
-    override fun HtmlView(html: String, allowRemote: Boolean, onLink: (String) -> Unit, modifier: Modifier) {
-        AndroidView(
-            modifier = modifier,
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    setBackgroundColor(Color.WHITE)
-                    settings.apply {
-                        javaScriptEnabled = false
-                        javaScriptCanOpenWindowsAutomatically = false
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        domStorageEnabled = false
-                        databaseEnabled = false
-                        setSupportMultipleWindows(false)
-                        setGeolocationEnabled(false)
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        cacheMode = WebSettings.LOAD_NO_CACHE
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                    }
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                            onLink(request.url.toString())
-                            return true
-                        }
-                    }
-                }
-            },
-            update = { view ->
-                view.settings.blockNetworkLoads = !allowRemote
-                view.settings.blockNetworkImage = !allowRemote
-                val key = html.hashCode() * 31 + allowRemote.hashCode()
-                if (view.tag != key) {
-                    view.tag = key
-                    view.loadDataWithBaseURL("about:blank", wrap(html), "text/html", "utf-8", null)
-                }
-            },
-        )
-    }
-
-    private fun wrap(html: String): String =
-        "<!doctype html><html><head><meta charset=\"utf-8\">" +
-            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-            "<style>body{margin:12px;font-family:sans-serif;word-wrap:break-word}img{max-width:100%;height:auto}</style>" +
-            "</head><body>$html</body></html>"
+    override fun HtmlView(html: String, allowRemote: Boolean, onLink: (String) -> Unit, modifier: Modifier) =
+        LockedWebView(html, allowRemote, onLink, modifier)
 }
+
+/**
+ * Locked-down WebView (#149): no JavaScript, no file/content access, no
+ * storage, no new windows; without allowRemote no network loads at all
+ * (the server already strips remote content unless asked). Every
+ * navigation is cancelled and handed to [onLink] (opened externally).
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun LockedWebView(html: String, allowRemote: Boolean, onLink: (String) -> Unit, modifier: Modifier) {
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            WebView(ctx).apply {
+                setBackgroundColor(Color.WHITE)
+                settings.apply {
+                    javaScriptEnabled = false
+                    javaScriptCanOpenWindowsAutomatically = false
+                    allowFileAccess = false
+                    allowContentAccess = false
+                    domStorageEnabled = false
+                    databaseEnabled = false
+                    setSupportMultipleWindows(false)
+                    setGeolocationEnabled(false)
+                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                    cacheMode = WebSettings.LOAD_NO_CACHE
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+                    builtInZoomControls = true
+                    displayZoomControls = false
+                }
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                        onLink(request.url.toString())
+                        return true
+                    }
+                }
+            }
+        },
+        update = { view ->
+            view.settings.blockNetworkLoads = !allowRemote
+            view.settings.blockNetworkImage = !allowRemote
+            val key = html.hashCode() * 31 + allowRemote.hashCode()
+            if (view.tag != key) {
+                view.tag = key
+                view.loadDataWithBaseURL("about:blank", wrap(html), "text/html", "utf-8", null)
+            }
+        },
+    )
+}
+
+private fun wrap(html: String): String =
+    "<!doctype html><html><head><meta charset=\"utf-8\">" +
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+        "<style>body{margin:12px;font-family:sans-serif;word-wrap:break-word}img{max-width:100%;height:auto}</style>" +
+        "</head><body>$html</body></html>"

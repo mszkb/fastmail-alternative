@@ -66,7 +66,10 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         baseUrl = baseUrl,
         token = { _session.value?.token },
         onUnauthorized = { onRevoked() },
+        engine = platform.httpEngine,
     )
+
+    private fun anonymousApi(baseUrl: String) = FmaApi(baseUrl, { null }, engine = platform.httpEngine)
 
     private fun now() = Clock.System.now().toEpochMilliseconds()
 
@@ -80,7 +83,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
             is InstanceUrl.Result.Invalid -> return Result.failure(IllegalArgumentException(result.reason))
             is InstanceUrl.Result.Ok -> result.baseUrl
         }
-        val probe = FmaApi(normalized, { null })
+        val probe = anonymousApi(normalized)
         return try {
             val health = probe.health()
             if (health.status != "ok") {
@@ -103,7 +106,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
     }
 
     suspend fun login(baseUrl: String, email: String, password: String): String? {
-        val probe = FmaApi(baseUrl, { null })
+        val probe = anonymousApi(baseUrl)
         try {
             val response = probe.login(email.trim(), password, platform.deviceName, platform.platformName)
             val token = response.token ?: return "Der Server unterstützt keine App-Anmeldung (bitte Server aktualisieren)."
