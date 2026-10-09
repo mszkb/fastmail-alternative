@@ -43,6 +43,8 @@ import net.fma.mail.api.ComposeIdentity
 import net.fma.mail.api.SendMessageRequest
 import net.fma.mail.domain.isPlausibleAddress
 import net.fma.mail.domain.parseRecipients
+import net.fma.mail.domain.forward
+import net.fma.mail.domain.replyAll
 import net.fma.mail.domain.replyTo
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -53,7 +55,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalUuidApi::class)
 @Composable
-fun ComposeScreen(vm: AppViewModel, replyToId: String?, onClose: () -> Unit) {
+fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     val accountId = remember { vm.mail.value.selectedAccountId }
     var identities by remember { mutableStateOf<List<ComposeIdentity>>(emptyList()) }
@@ -69,14 +71,20 @@ fun ComposeScreen(vm: AppViewModel, replyToId: String?, onClose: () -> Unit) {
     // Idempotency key: a retry after a network error does not send twice.
     val clientId = remember { Uuid.random().toString() }
 
-    LaunchedEffect(accountId, replyToId) {
+    LaunchedEffect(accountId, messageId) {
         val api = vm.api ?: return@LaunchedEffect
         if (accountId == null) return@LaunchedEffect
         try {
             identities = api.identities(accountId)
             identity = identities.firstOrNull { it.isDefault } ?: identities.firstOrNull()
-            if (replyToId != null) {
-                val draft = replyTo(api.message(replyToId))
+            if (messageId != null && mode != "new") {
+                val original = api.message(messageId)
+                val own = identities.map { it.emailAddress } + listOfNotNull(vm.mail.value.selectedAccount?.emailAddress)
+                val draft = when (mode) {
+                    "forward" -> forward(original)
+                    "replyAll" -> replyAll(original, own).also { cc = it.second }.first
+                    else -> replyTo(original)
+                }
                 to = draft.to
                 subject = draft.subject
                 body = draft.body
@@ -131,7 +139,16 @@ fun ComposeScreen(vm: AppViewModel, replyToId: String?, onClose: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (replyToId != null) "Antworten" else "Neue E-Mail") },
+                title = {
+                    Text(
+                        when (mode) {
+                            "reply" -> "Antworten"
+                            "replyAll" -> "Allen antworten"
+                            "forward" -> "Weiterleiten"
+                            else -> "Neue E-Mail"
+                        },
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Verwerfen") }
                 },

@@ -44,6 +44,7 @@ fun App(platform: Platform) {
                     vm,
                     onOpenMessage = { id, folder -> nav.navigate("message/$id/$folder") },
                     onCompose = { nav.navigate("compose") },
+                    onSearch = { nav.navigate("search") },
                     onSettings = { nav.navigate("settings") },
                 )
             }
@@ -53,20 +54,32 @@ fun App(platform: Platform) {
                 MessageScreen(
                     vm, platform, id, folder,
                     onBack = { nav.popBackStack() },
-                    onReply = { nav.navigate("compose?replyTo=$it") },
+                    onCompose = { mode, id -> nav.navigate("compose?mode=$mode&messageId=$id") },
                 )
             }
             composable(
-                "compose?replyTo={replyTo}",
-                arguments = listOf(
-                    navArgument("replyTo") {
+                "compose?mode={mode}&messageId={messageId}",
+                arguments = listOf("mode", "messageId").map { name ->
+                    navArgument(name) {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
-                    },
-                ),
+                    }
+                },
             ) { entry ->
-                ComposeScreen(vm, entry.savedStateHandle.get<String>("replyTo"), onClose = { nav.popBackStack() })
+                ComposeScreen(
+                    vm,
+                    mode = entry.savedStateHandle.get<String>("mode") ?: "new",
+                    messageId = entry.savedStateHandle.get<String>("messageId"),
+                    onClose = { nav.popBackStack() },
+                )
+            }
+            composable("search") {
+                SearchScreen(
+                    vm,
+                    onBack = { nav.popBackStack() },
+                    onOpenMessage = { id, folder -> nav.navigate("message/$id/$folder") },
+                )
             }
             composable("settings") { SettingsScreen(vm, platform, onBack = { nav.popBackStack() }) }
         }

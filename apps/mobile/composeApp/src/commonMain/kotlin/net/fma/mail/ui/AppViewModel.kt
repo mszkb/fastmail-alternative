@@ -31,6 +31,7 @@ data class MailState(
     val loadingMore: Boolean = false,
     val refreshing: Boolean = false,
     val error: String? = null,
+    val notice: String? = null,
 ) {
     val selectedAccount: AccountSummary? get() = accounts.firstOrNull { it.id == selectedAccountId }
     val selectedFolder: FolderSummary? get() = folders.firstOrNull { it.id == selectedFolderId }
@@ -305,6 +306,21 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         }
     }
 
+    /** Asks the server to fetch older mail of the folder from the provider (beyond sync_since). */
+    fun loadOlder() {
+        val api = api ?: return
+        val folderId = _mail.value.selectedFolderId ?: return
+        viewModelScope.launch {
+            try {
+                api.loadOlder(folderId)
+                _mail.update { it.copy(notice = "Ältere Nachrichten werden vom Server geladen …") }
+                startPolling()
+            } catch (e: Exception) {
+                showError(e)
+            }
+        }
+    }
+
     fun refresh() {
         _mail.update { it.copy(refreshing = true) }
         viewModelScope.launch {
@@ -318,13 +334,19 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
      * read/unread/flag/unflag/archive/delete, optimistic in the list; on
      * failure the list is reloaded from the server.
      */
-    fun messageAction(messageId: String, action: String, folderId: String? = null, onDone: (String?) -> Unit = {}) {
+    fun messageAction(
+        messageId: String,
+        action: String,
+        folderId: String? = null,
+        targetFolderId: String? = null,
+        onDone: (String?) -> Unit = {},
+    ) {
         val api = api ?: return
         val folder = folderId ?: _mail.value.selectedFolderId ?: return
         applyLocally(messageId, action)
         viewModelScope.launch {
             try {
-                api.messageAction(folder, listOf(messageId), action)
+                api.messageAction(folder, listOf(messageId), action, targetFolderId)
                 onDone(null)
                 refreshAccounts()
             } catch (e: Exception) {
@@ -339,7 +361,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
     private fun applyLocally(messageId: String, action: String) {
         _mail.update { state ->
             val messages = when (action) {
-                "archive", "delete" -> state.messages.filterNot { it.id == messageId }
+                "archive", "delete", "move" -> state.messages.filterNot { it.id == messageId }
                 else -> state.messages.map { m ->
                     if (m.id != messageId) {
                         m
@@ -360,7 +382,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
 
     fun markReadLocally(messageId: String) = applyLocally(messageId, "read")
 
-    fun clearError() = _mail.update { it.copy(error = null) }
+    fun clearError() = _mail.update { it.copy(error = null, notice = null) }
 
     private fun showError(e: Exception) {
         if (e is ApiException && e.isUnauthorized) return

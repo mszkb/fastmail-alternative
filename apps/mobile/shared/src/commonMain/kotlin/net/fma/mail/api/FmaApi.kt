@@ -121,6 +121,14 @@ class FmaApi(
 
     suspend fun loadOlder(folderId: String): LoadOlderResponse = client.post("api/folders/$folderId/load-older") { auth() }.read()
 
+    /** IMAP SEARCH at the provider (#152), newest first, at most 100; the query is never logged by the server. */
+    suspend fun search(accountId: String, query: String, folderId: String? = null): SearchResponse =
+        client.get("api/accounts/$accountId/search") {
+            auth()
+            parameter("q", query.trim().take(200))
+            folderId?.let { parameter("folderId", it) }
+        }.read()
+
     suspend fun message(id: String): MessageDetail = client.get("api/messages/$id") { auth() }.read()
 
     /** Sanitized HTML; remote images stay blocked unless [remote]. */

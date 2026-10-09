@@ -1,10 +1,13 @@
 package net.fma.mail.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -14,9 +17,13 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.fma.mail.api.MessageDetail
 import net.fma.mail.api.MessageHtml
+import net.fma.mail.domain.folderRoleLabel
 
 /**
  * Read a message (#149): sanitized HTML from the server in the locked-down
@@ -55,7 +64,7 @@ fun MessageScreen(
     messageId: String,
     folderId: String,
     onBack: () -> Unit,
-    onReply: (String) -> Unit,
+    onCompose: (mode: String, messageId: String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -64,6 +73,9 @@ fun MessageScreen(
     var remote by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var flagged by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var moveOpen by remember { mutableStateOf(false) }
+    val folders = vm.mail.collectAsState().value.folders
 
     LaunchedEffect(messageId) {
         val api = vm.api ?: return@LaunchedEffect
@@ -81,8 +93,8 @@ fun MessageScreen(
         html = runCatching { api.messageHtml(messageId, remote) }.getOrNull()
     }
 
-    fun act(action: String, leave: Boolean) {
-        vm.messageAction(messageId, action, folderId) { failure ->
+    fun act(action: String, leave: Boolean, target: String? = null) {
+        vm.messageAction(messageId, action, folderId, target) { failure ->
             if (failure != null) scope.launch { snackbar.showSnackbar(failure) }
         }
         if (leave) onBack()
@@ -111,14 +123,58 @@ fun MessageScreen(
                     IconButton(onClick = { act("delete", leave = true) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Löschen")
                     }
-                    IconButton(onClick = { onReply(messageId) }, enabled = message != null) {
+                    IconButton(onClick = { onCompose("reply", messageId) }, enabled = message != null) {
                         Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Antworten")
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Mehr") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Allen antworten") }, enabled = message != null, onClick = {
+                                menuOpen = false
+                                onCompose("replyAll", messageId)
+                            })
+                            DropdownMenuItem(text = { Text("Weiterleiten") }, enabled = message != null, onClick = {
+                                menuOpen = false
+                                onCompose("forward", messageId)
+                            })
+                            DropdownMenuItem(text = { Text("Verschieben …") }, onClick = {
+                                menuOpen = false
+                                moveOpen = true
+                            })
+                            val junk = folders.firstOrNull { it.specialUse == "junk" && it.id != folderId }
+                            if (junk != null) {
+                                DropdownMenuItem(text = { Text("Als Spam markieren") }, onClick = {
+                                    menuOpen = false
+                                    act("move", leave = true, target = junk.id)
+                                })
+                            }
+                        }
                     }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
+        if (moveOpen) {
+            AlertDialog(
+                onDismissRequest = { moveOpen = false },
+                title = { Text("Verschieben nach") },
+                text = {
+                    LazyColumn {
+                        items(folders.filter { it.selectable && it.id != folderId }, key = { it.id }) { folder ->
+                            Text(
+                                folderRoleLabel(folder.specialUse) ?: folder.path,
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    moveOpen = false
+                                    act("move", leave = true, target = folder.id)
+                                }.padding(vertical = 12.dp, horizontal = (8 + folder.depth * 12).dp),
+                            )
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { moveOpen = false }) { Text("Abbrechen") } },
+            )
+        }
         val detail = message
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {

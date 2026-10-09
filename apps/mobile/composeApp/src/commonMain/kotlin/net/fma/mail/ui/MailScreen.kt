@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Badge
@@ -39,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberDrawerState
@@ -68,6 +70,7 @@ fun MailScreen(
     vm: AppViewModel,
     onOpenMessage: (messageId: String, folderId: String) -> Unit,
     onCompose: () -> Unit,
+    onSearch: () -> Unit,
     onSettings: () -> Unit,
 ) {
     val state by vm.mail.collectAsState()
@@ -75,8 +78,8 @@ fun MailScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    LaunchedEffect(state.error) {
-        state.error?.let {
+    LaunchedEffect(state.error, state.notice) {
+        (state.error ?: state.notice)?.let {
             snackbar.showSnackbar(it)
             vm.clearError()
         }
@@ -113,6 +116,9 @@ fun MailScreen(
                             }
                         },
                         actions = {
+                            if (state.selectedAccountId != null) {
+                                IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "Suchen") }
+                            }
                             IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Einstellungen") }
                         },
                     )
@@ -145,6 +151,7 @@ fun MailScreen(
                         hasMore = state.nextCursor != null,
                         loadingMore = state.loadingMore,
                         onLoadMore = vm::loadMore,
+                        onLoadOlder = vm::loadOlder,
                         onOpen = { id -> state.selectedFolderId?.let { onOpenMessage(id, it) } },
                     )
                 }
@@ -203,6 +210,7 @@ private fun MessageList(
     hasMore: Boolean,
     loadingMore: Boolean,
     onLoadMore: () -> Unit,
+    onLoadOlder: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -230,6 +238,12 @@ private fun MessageList(
             item(key = "more") {
                 Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator() }
             }
+        } else if (!hasMore && messages.isNotEmpty()) {
+            item(key = "older") {
+                Box(Modifier.fillMaxWidth().padding(8.dp), Alignment.Center) {
+                    TextButton(onClick = onLoadOlder) { Text("Ältere Nachrichten vom Server laden") }
+                }
+            }
         }
     }
 }
@@ -250,7 +264,7 @@ private fun AccountErrorBanner(account: AccountSummary) {
 }
 
 @Composable
-private fun MessageRow(message: MessageListItem, onClick: () -> Unit) {
+internal fun MessageRow(message: MessageListItem, onClick: () -> Unit) {
     val unread = !message.flags.seen
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

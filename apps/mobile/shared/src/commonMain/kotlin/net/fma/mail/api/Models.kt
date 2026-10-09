@@ -122,6 +122,30 @@ data class MessageListItem(
 @Serializable
 data class MessagePage(val messages: List<MessageListItem>, val nextCursor: String? = null)
 
+/** A search hit: MessageListItem plus the folder it was found in. */
+@Serializable
+data class SearchHit(
+    val id: String,
+    val subject: String,
+    val from: MailPerson? = null,
+    val date: String,
+    val snippet: String = "",
+    val flags: MessageFlags,
+    val hasAttachments: Boolean = false,
+    val threadId: String? = null,
+    val threadCount: Int = 1,
+    val folderId: String,
+) {
+    fun toListItem() = MessageListItem(id, subject, from, date, snippet, flags, hasAttachments, threadId, threadCount)
+}
+
+@Serializable
+data class SearchResponse(
+    val messages: List<SearchHit>,
+    val notSynced: Int = 0,
+    val truncated: Boolean = false,
+)
+
 @Serializable
 data class LoadOlderResponse(val queued: Boolean)
 

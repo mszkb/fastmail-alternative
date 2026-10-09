@@ -108,4 +108,18 @@ class FmaApiTest {
         assertEquals("fcm", body["transport"]!!.jsonPrimitive.content)
         assertEquals("fcm-token-123456789012345", body["token"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun searchPassesQueryAndMapsHits() = runTest {
+        val api = api {
+            HttpStatusCode.OK to """{"messages":[{"id":"m1","subject":"Rechnung","from":null,"date":"2026-10-09T10:00:00Z",
+                "snippet":"","flags":{"seen":true,"flagged":false,"answered":false},"hasAttachments":true,"threadId":null,
+                "threadCount":1,"folderId":"f9"}],"providerMatches":1,"notSynced":0,"truncated":false,"foldersSearched":3,
+                "foldersFailed":[]}"""
+        }
+        val result = api.search("a1", "  Rechnung ")
+        assertEquals("Rechnung", requests.single().url.parameters["q"])
+        assertEquals("f9", result.messages.single().folderId)
+        assertEquals("m1", result.messages.single().toListItem().id)
+    }
 }

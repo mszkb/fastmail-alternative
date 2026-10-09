@@ -4,6 +4,7 @@ name: mobile-android
 # shared tests, debug APK as artifact `fma-android-debug`.
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/mobile/**'
       - '.github/workflows/mobile-android.yml'

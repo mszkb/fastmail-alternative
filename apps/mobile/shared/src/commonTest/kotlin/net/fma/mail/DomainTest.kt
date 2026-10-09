@@ -7,7 +7,9 @@ import net.fma.mail.api.MessageFlags
 import net.fma.mail.domain.SyncThrottle
 import net.fma.mail.domain.accountsWithNewMail
 import net.fma.mail.domain.badgeCount
+import net.fma.mail.domain.forward
 import net.fma.mail.domain.parseRecipients
+import net.fma.mail.domain.replyAll
 import net.fma.mail.domain.replySubject
 import net.fma.mail.domain.replyTo
 import kotlin.test.Test
@@ -48,5 +50,22 @@ class DomainTest {
         assertEquals(listOf("<0@x>", "<1@x>"), draft.references)
         assertTrue(draft.body.contains("> Zeile 2"))
         assertEquals(listOf("a@x.org", "b@y.org"), parseRecipients("a@x.org, b@y.org;"))
+    }
+
+    @Test
+    fun replyAllAndForward() {
+        val message = MessageDetail(
+            id = "m", accountId = "a", subject = "Plan", from = MailPerson("Ann", "ann@example.org"),
+            to = listOf(MailPerson("", "Me@Example.org"), MailPerson("", "bob@example.org")),
+            cc = listOf(MailPerson("", "ann@example.org"), MailPerson("", "carl@example.org")),
+            date = "2026-10-09T10:00:00Z", flags = MessageFlags(true, false), text = "Inhalt",
+        )
+        val (draft, cc) = replyAll(message, listOf("me@example.org"))
+        assertEquals("ann@example.org", draft.to)
+        assertEquals("bob@example.org, carl@example.org", cc)
+        val fwd = forward(message)
+        assertEquals("Fwd: Plan", fwd.subject)
+        assertEquals("", fwd.to)
+        assertTrue(fwd.body.contains("Von: Ann <ann@example.org>") && fwd.body.endsWith("Inhalt"))
     }
 }
