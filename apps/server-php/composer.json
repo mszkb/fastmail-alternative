@@ -44,6 +44,7 @@
     "analyse": "phpstan analyse --memory-limit=512M",
     "cs": "php-cs-fixer fix --dry-run --diff",
     "cs:fix": "php-cs-fixer fix",
-    "migrate": "php bin/migrate.php"
+    "migrate": "php bin/migrate.php",
+    "loadtest": "php tests/Load/loadtest.php"
   }
 }

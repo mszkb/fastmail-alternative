@@ -15,6 +15,7 @@ use Fma\Mail\HostConfig;
 use Fma\Mail\ImapActions;
 use Fma\Mail\ImapClient;
 use Fma\Mail\TransportPolicy;
+use Fma\Routes\MessageRoutes;
 use Fma\Routes\SearchRoutes;
 use Fma\Security\RateLimiter;
 use Fma\Tests\Support\FakeConnectionTester;
@@ -145,7 +146,13 @@ final class SearchTest extends DatabaseTestCase
             [$id, $this->accountId, "<{$id}@example.org>", $this->enc($id, 'subject', $subject), $this->enc($id, 'from', '[{"name":"","address":"x@example.org"}]'),
                 $this->enc($id, 'recipients', '{"to":[]}'), $this->enc($id, 'snippet', ''), $sentAt],
         );
-        Database::run($pdo, 'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid) VALUES (?, ?, ?, ?, ?)', [Uuid::v4(), $id, $folderId, $uidvalidity, $uid]);
+        // sort_at as the sync sets it.
+        Database::run(
+            $pdo,
+            'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid, sort_at)
+             SELECT ?, id, ?, ?, ?, ' . MessageRoutes::SORT_AT . ' FROM message m WHERE m.id = ?',
+            [Uuid::v4(), $folderId, $uidvalidity, $uid, $id],
+        );
 
         return $id;
     }

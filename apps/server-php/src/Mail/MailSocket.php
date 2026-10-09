@@ -15,6 +15,10 @@ final class MailSocket
     /** @var resource */
     private $stream;
 
+    private const READ_BYTES = 65536;
+    /** A `* SEARCH` of 1 million UIDs is ~7 MB. */
+    public const MAX_LINE_BYTES = 32 * 1024 * 1024;
+
     /** @param resource $stream */
     private function __construct($stream)
     {
@@ -62,13 +66,26 @@ final class MailSocket
         }
     }
 
+    /**
+     * One complete line including its line break. fgets() stops after its
+     * buffer size, so long lines (e.g. `* SEARCH` with tens of thousands of
+     * UIDs) are read in pieces until the line break; a cut-off line would
+     * make the missing UIDs look expunged. MAX_LINE_BYTES only guards memory.
+     */
     public function readLine(): string
     {
-        $line = fgets($this->stream, 65536);
-        if ($line === false) {
-            $meta = stream_get_meta_data($this->stream);
-            throw new MailException($meta['timed_out'] ? 'ETIMEDOUT' : 'ECONNRESET', 'connection lost');
-        }
+        $line = '';
+        do {
+            $part = fgets($this->stream, self::READ_BYTES);
+            if ($part === false) {
+                $meta = stream_get_meta_data($this->stream);
+                throw new MailException($meta['timed_out'] ? 'ETIMEDOUT' : 'ECONNRESET', 'connection lost');
+            }
+            $line .= $part;
+            if (\strlen($line) > self::MAX_LINE_BYTES) {
+                throw new MailException('PROTOCOL', 'response line too long');
+            }
+        } while (!str_ends_with($line, "\n"));
 
         return $line;
     }

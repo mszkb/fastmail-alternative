@@ -51,6 +51,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - Fehlerisolierung pro Konto: Circuit Breaker, Verbindungslimit pro IMAP-Host, Sync-Debounce und Backoff bei Drosselung durch den Anbieter
 - Inkrementeller Flag-Abgleich per CONDSTORE (RFC 7162, #28): Server mit CONDSTORE liefern nur noch seit dem letzten Lauf geänderte Flags (`CHANGEDSINCE`), bei unverändertem HIGHESTMODSEQ entfällt der Flag-Abgleich ganz; ohne CONDSTORE bisheriges Verhalten. **Betreiber:** keine Migration nötig (nutzt die bestehende Spalte `folder.highestmodseq`), keine `.env`-Änderung
 - Weiterleiten übernimmt eingebettete Bilder (cid:, PNG/JPEG/GIF/WebP) der Originalmail als normale Anhänge, da die Weiterleitung als Text versendet wird; SVG/HTML-Inline-Teile werden nicht übernommen, Größen- und Anzahlgrenzen gelten wie bisher (#53)
+- Nachrichtenliste großer Ordner deutlich schneller (Lasttest #60: 50 000 Mails in einem Ordner 475 ms → 4 ms je Seite auf MariaDB): Die Liste liest eine Seite jetzt direkt aus einem Index statt den ganzen Ordner zu sortieren. **Betreiber:** Migration `0005_message_sort_key` ergänzt `message_location` um die Spalte `sort_at` samt Index und füllt sie für alle vorhandenen Mails (läuft automatisch mit `bin/migrate.php`, wiederholbar; bei sehr großen Datenbanken einige Sekunden bis Minuten); keine `.env`-Änderung. Neues Lasttest-Werkzeug `composer loadtest` ([Lasttest](docs/operations/load-test.md))
 
 ### Removed
 
@@ -67,6 +68,8 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 - **Betreiber:** Der `php`-Container startet nicht mehr auf einer Datenbank, die eine neuere Version schon migriert hat (`migration refused` im Log), und Cron, Worker und Web-Cron arbeiten dann keine Jobs ab (`jobs refused`); zurück nur per Rollback mit Restore. `backup restore --force` baut das Schema in diesem Fall neu auf
 - **Betreiber:** `backup restore` als root übergibt die wiederhergestellten Dateien in `mail-data` selbst an `www-data`; das `chown` nach dem Restore entfällt
 - Mails über `MAX_RAW_MESSAGE_BYTES`, deren Inhalt bei einem früheren Lauf noch nicht gespeichert wurde, lädt der Sync beim Nachholen nicht mehr erst komplett herunter, sondern überspringt sie anhand der bekannten Größe (wie beim ersten Abgleich)
+- **Sync großer Postfächer:** Bei Ordnern mit mehr als etwa 12 000 Mails auf Servern mit CONDSTORE (z. B. Dovecot, Fastmail) hielt der inkrementelle Abgleich die meisten Mails für beim Server gelöscht und entfernte die lokalen Kopien – die IMAP-Antwort mit allen UIDs wurde nach 64 KB abgeschnitten, und das Auslesen der UID-Liste scheiterte bei sehr langen Zeilen am Regex-Limit. Auf dem Server ging nichts verloren. Jetzt werden Antwortzeilen vollständig gelesen, die Liste ohne Regex geparst, und ein Abgleich mit einer unvollständigen UID-Liste (weniger UIDs als der Server Mails meldet) bricht ab, statt zu löschen. Gefunden mit dem Lasttest gegen Dovecot (#60)
+- Threading neuer Mails wurde mit der Postfachgröße immer langsamer: Die Suche nach verwandten Mails las bei jeder neuen Mail alle bereits einsortierten Mails des Kontos (Bedingungen mit `OR` verknüpft); jetzt nutzt jede Teilabfrage ihren Index. Gefunden mit dem Lasttest (volle Historie von 50 000 Mails)
 
 ### Security
 

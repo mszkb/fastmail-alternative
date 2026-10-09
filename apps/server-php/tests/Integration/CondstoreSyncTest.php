@@ -8,6 +8,7 @@ use Fma\Config;
 use Fma\Crypto\Envelope;
 use Fma\Db\Database;
 use Fma\Db\Uuid;
+use Fma\Jobs\AccountErrorException;
 use Fma\Jobs\Deadline;
 use Fma\Jobs\Job;
 use Fma\Jobs\JobQueue;
@@ -111,12 +112,12 @@ final class CondstoreSyncTest extends DatabaseTestCase
         }
     }
 
-    private function sync(): void
+    private function sync(int $limit = MessageSyncJob::MESSAGE_SYNC_LIMIT): void
     {
         file_put_contents("{$this->dir}/commands.log", '');
         $config = Config::fromArray(['MASTER_KEY' => $this->masterKey, 'MAIL_DATA_DIR' => $this->dir]);
         $policy = new TransportPolicy(allowPrivateHosts: true, insecureTransport: true);
-        $job = new MessageSyncJob(self::$db, $config, new JobQueue(self::$db), new FileStore($this->dir), new Logger('test', 'error', Http::memoryStream()), $policy);
+        $job = new MessageSyncJob(self::$db, $config, new JobQueue(self::$db), new FileStore($this->dir), new Logger('test', 'error', Http::memoryStream()), $policy, $limit);
         self::assertTrue($job->run(new Job('1', 'message_sync', $this->account, ['folderId' => $this->folder], 1), new Deadline(10)));
     }
 
@@ -176,6 +177,39 @@ final class CondstoreSyncTest extends DatabaseTestCase
         self::assertSame([], $this->flagFetches());
         self::assertSame([2], array_keys($this->locations()));
         self::assertSame('12', $this->storedModseq());
+    }
+
+    public function testKeepsMessagesWhenTheUidListIsLongerThanOneReadBuffer(): void
+    {
+        // 20 000 UIDs make the `* SEARCH` line ~110 KB: it must be read
+        // whole, or the UIDs after the first 64 KB look expunged.
+        Database::run(self::$db->pdo(), 'UPDATE message_location SET uid = uid + 19997 WHERE folder_id = ?', [$this->folder]);
+        $this->mailbox['uids'] = range(1, 20000);
+        $this->mailbox['highestModseq'] = 10;
+        $this->mailbox['flags'] = [];
+        $this->mailbox['modseqs'] = [];
+        $this->writeMailbox();
+        // Window of 3: the newest UIDs are exactly the known ones, nothing new to fetch.
+        $this->sync(3);
+        self::assertCount(1, $this->commands('/UID SEARCH ALL$/'));
+        self::assertSame([], $this->commands('/ FETCH /i'));
+        self::assertSame([19998, 19999, 20000], array_keys($this->locations()));
+    }
+
+    public function testRefusesToReconcileWithAnIncompleteUidList(): void
+    {
+        // The server claims 5 messages but lists 2: nothing may be deleted.
+        $this->mailbox['exists'] = 5;
+        $this->writeMailbox();
+        $config = Config::fromArray(['MASTER_KEY' => $this->masterKey, 'MAIL_DATA_DIR' => $this->dir]);
+        $policy = new TransportPolicy(allowPrivateHosts: true, insecureTransport: true);
+        $job = new MessageSyncJob(self::$db, $config, new JobQueue(self::$db), new FileStore($this->dir), new Logger('test', 'error', Http::memoryStream()), $policy);
+        try {
+            $job->run(new Job('1', 'message_sync', $this->account, ['folderId' => $this->folder], 1), new Deadline(10));
+            self::fail('expected an account error');
+        } catch (AccountErrorException) {
+        }
+        self::assertSame([1, 2, 3], array_keys($this->locations()));
     }
 
     public function testHandles63BitModseqValues(): void

@@ -151,6 +151,13 @@ final class MessageSyncTest extends DatabaseTestCase
         self::assertSame(2, $this->unread($a['folder']));
 
         $pdo = self::$db->pdo();
+        // Every location carries the list sort key of its message.
+        self::assertSame(0, (int) Database::run(
+            $pdo,
+            'SELECT COUNT(*) FROM message_location ml JOIN message m ON m.id = ml.message_id
+             WHERE ml.folder_id = ? AND NOT (ml.sort_at <=> COALESCE(m.sent_at, m.received_at, m.created_at))',
+            [$a['folder']],
+        )->fetchColumn());
         /** @var array{from_enc: string, recipients_enc: string, snippet_enc: string, references: string, metadata_version: int|string} $row */
         $row = Database::run($pdo, 'SELECT from_enc, recipients_enc, snippet_enc, `references`, metadata_version FROM message WHERE id = ?', [$messages[1]['id']])->fetch();
         $id = $messages[1]['id'];

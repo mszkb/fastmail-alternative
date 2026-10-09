@@ -42,7 +42,7 @@ while (($conn = @stream_socket_accept($server, -1)) !== false) {
             case 'SELECT':
             case 'EXAMINE':
                 $modseq = $box['highestModseq'] === null ? '* OK [NOMODSEQ] no modseq' : "* OK [HIGHESTMODSEQ {$box['highestModseq']}] ok";
-                $out = "* FLAGS (\\Seen \\Flagged \\Deleted)\r\n* " . \count($box['uids']) . " EXISTS\r\n"
+                $out = "* FLAGS (\\Seen \\Flagged \\Deleted)\r\n* " . ($box['exists'] ?? \count($box['uids'])) . " EXISTS\r\n"
                     . "* OK [UIDVALIDITY 7] ok\r\n* OK [UIDNEXT 10] ok\r\n{$modseq}\r\n";
                 break;
             case 'SEARCH':

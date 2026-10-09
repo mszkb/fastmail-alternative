@@ -185,6 +185,12 @@ final class MessageSyncJob implements JobHandler
                 $allUids = array_keys($serverFlags);
             }
         }
+        // A UID list shorter than the server's EXISTS count is incomplete (cut-off
+        // response, parser limit): reconciling with it would delete messages that
+        // are still there. Stop instead; the next run tries again.
+        if (\count($allUids) < $selected['exists']) {
+            throw new MailException('PROTOCOL', 'incomplete UID list');
+        }
         $serverUids = array_flip($allUids);
 
         $progress->report('expunge', $folderId);
@@ -384,9 +390,11 @@ final class MessageSyncJob implements JobHandler
 
         Database::run(
             $pdo,
-            'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid, modseq) VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE message_id = VALUES(message_id), modseq = VALUES(modseq)',
-            [Uuid::v4(), $dbMessageId, $folderId, $uidvalidity, $message['uid'], $message['modseq']],
+            // sort_at: the list sort key (MessageRoutes::SORT_AT of the message, never changes).
+            'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid, modseq, sort_at)
+             SELECT ?, m.id, ?, ?, ?, ?, COALESCE(m.sent_at, m.received_at, m.created_at) FROM message m WHERE m.id = ?
+             ON DUPLICATE KEY UPDATE message_id = VALUES(message_id), modseq = VALUES(modseq), sort_at = VALUES(sort_at)',
+            [Uuid::v4(), $folderId, $uidvalidity, $message['uid'], $message['modseq'], $dbMessageId],
         );
         $locationId = (string) Database::run($pdo, 'SELECT id FROM message_location WHERE folder_id = ? AND uidvalidity = ? AND uid = ?', [$folderId, $uidvalidity, $message['uid']])->fetchColumn();
         $this->replaceFlags($pdo, $locationId, $message['flags']);

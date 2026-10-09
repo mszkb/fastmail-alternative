@@ -39,7 +39,7 @@ final class BackupTest extends DatabaseTestCase
     {
         $pdo = self::$db->pdo();
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-        foreach (['user', 'device', 'session', 'mail_account', 'message', 'message_flag', 'job', 'attachment_upload', 'app_state'] as $t) {
+        foreach (['user', 'device', 'session', 'mail_account', 'message', 'message_flag', 'job', 'attachment_upload', 'app_state', 'folder', 'message_location'] as $t) {
             $pdo->exec("DELETE FROM `{$t}`");
         }
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
@@ -92,6 +92,10 @@ final class BackupTest extends DatabaseTestCase
         $u->bindValue(3, random_bytes(3 * 1024 * 1024), \PDO::PARAM_LOB);
         $u->execute();
         Database::run($pdo, "INSERT INTO job (type, account_id, payload) VALUES ('folder_sync', ?, '{\"a\": 1}')", [$account]);
+        // A location as a backup from before migration 0005 has it: no sort key.
+        $folder = Uuid::v4();
+        Database::run($pdo, "INSERT INTO folder (id, account_id, path) VALUES (?, ?, 'INBOX')", [$folder, $account]);
+        Database::run($pdo, 'INSERT INTO message_location (id, message_id, folder_id, uidvalidity, uid) SELECT ?, id, ?, 1, 1 FROM message WHERE account_id = ? LIMIT 1', [Uuid::v4(), $folder, $account]);
         Database::run($pdo, "UPDATE sequence_counter SET value = 42 WHERE name = 'message_location_placeholder'");
         @mkdir($this->dataDir . '/acc/msg', 0o700, true);
         file_put_contents($this->dataDir . '/acc/msg/raw.eml.enc', random_bytes(200000));
@@ -134,6 +138,9 @@ final class BackupTest extends DatabaseTestCase
         self::assertEquals($before, $this->snapshot());
         self::assertSame($raw, file_get_contents($this->dataDir . '/acc/msg/raw.eml.enc'));
         self::assertSame('', file_get_contents($this->dataDir . '/empty'));
+        // Missing list sort keys are filled in.
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM message_location WHERE sort_at IS NULL')->fetchColumn());
+        self::assertSame(1, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM message_location')->fetchColumn());
 
         // --force replaces a non-empty target.
         Database::run(self::$db->pdo(), "UPDATE mail_account SET display_name = 'changed'");

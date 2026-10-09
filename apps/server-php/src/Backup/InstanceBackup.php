@@ -226,6 +226,12 @@ final class InstanceBackup
                     throw new BackupException("restored row count does not match the manifest ({$table})");
                 }
             }
+            // A backup from before migration 0005 has no list sort key.
+            Database::run(
+                $this->pdo,
+                'UPDATE message_location ml JOIN message m ON m.id = ml.message_id
+                 SET ml.sort_at = COALESCE(m.sent_at, m.received_at, m.created_at) WHERE ml.sort_at IS NULL',
+            );
 
             return $summary;
         } finally {
