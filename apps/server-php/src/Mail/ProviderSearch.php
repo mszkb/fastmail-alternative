@@ -17,7 +17,8 @@ use Fma\Routes\SearchFailure;
  */
 final class ProviderSearch
 {
-    public const MAX_FOLDERS = 20;
+    /** Safety cap; the deadlines bound the time anyway. */
+    public const MAX_FOLDERS = 100;
     /** Folder order of the default scope (lower first). */
     private const FOLDER_RANK = ['inbox' => 0, 'sent' => 1, 'archive' => 2, 'drafts' => 3];
 
@@ -25,20 +26,22 @@ final class ProviderSearch
     public const TIMEOUT = ['TIMEOUT', 504, 'Die Suche beim Anbieter dauert zu lange.'];
 
     /**
-     * The given folder, or INBOX and the other selectable folders except
-     * Junk/Trash (at most MAX_FOLDERS, INBOX and special-use first).
+     * The given folder, or all selectable folders except Junk/Trash (unless
+     * `$includeJunk`) and Gmail's "All Mail" (role `all`, a second copy of
+     * every message); at most MAX_FOLDERS, INBOX and special-use first.
      *
      * @return list<array{id: string, path: string, special_use: ?string}>
      */
-    public static function folders(\PDO $pdo, string $accountId, ?string $folderId): array
+    public static function folders(\PDO $pdo, string $accountId, ?string $folderId, bool $includeJunk = false): array
     {
+        $excluded = $includeJunk ? "('all')" : "('junk', 'trash', 'all')";
         /** @var list<array{id: string, path: string, special_use: ?string}> $folders */
         $folders = $folderId !== null
             ? Database::run($pdo, 'SELECT id, path, special_use FROM folder WHERE account_id = ? AND id = ? AND selectable', [$accountId, $folderId])->fetchAll()
             : Database::run(
                 $pdo,
                 "SELECT id, path, special_use FROM folder
-                 WHERE account_id = ? AND selectable AND COALESCE(special_use, '') NOT IN ('junk', 'trash')",
+                 WHERE account_id = ? AND selectable AND COALESCE(special_use, '') NOT IN {$excluded}",
                 [$accountId],
             )->fetchAll();
         $rank = static fn(array $f): int => strtoupper($f['path']) === 'INBOX' ? -1 : (self::FOLDER_RANK[$f['special_use'] ?? ''] ?? 10);

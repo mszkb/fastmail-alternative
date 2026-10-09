@@ -17,6 +17,8 @@ const themes = ref<InstalledTheme[]>([])
 const busy = ref(false)
 const errors = ref<string[]>([])
 const notice = ref('')
+/** Contrast warnings of the theme just installed. */
+const warnings = ref<string[]>([])
 
 async function load(): Promise<void> {
   const cached = await cacheGet<InstalledTheme[]>(CACHE_KEY)
@@ -38,6 +40,7 @@ async function install(event: Event): Promise<void> {
   if (!file) return
   errors.value = []
   notice.value = ''
+  warnings.value = []
   const text = await file.text()
   const checked = parseThemeFile(text)
   if (!checked.ok) {
@@ -58,6 +61,7 @@ async function install(event: Event): Promise<void> {
       return
     }
     notice.value = `„${body.name}“ ist installiert.`
+    warnings.value = body.warnings ?? []
     await load()
     // An update of the active theme applies at once.
     if (activeThemeId.value === body.id) activateTheme(body.theme)
@@ -114,7 +118,14 @@ onBeforeUnmount(() => {
       </li>
       <li v-for="item in themes" :key="item.id" :data-theme-id="item.id">
         <span class="theme-name"
-          >{{ item.name }} <span class="hint">{{ item.version }}</span></span
+          >{{ item.name }} <span class="hint">{{ item.version }}</span
+          ><span
+            v-if="item.warnings?.length"
+            class="contrast-warning"
+            :title="item.warnings.join('\n')"
+          >
+            · geringer Kontrast</span
+          ></span
         >
         <span v-if="activeThemeId === item.id" class="tag">Aktiv</span>
         <template v-else>
@@ -145,6 +156,12 @@ onBeforeUnmount(() => {
       />
     </label>
     <p v-if="notice" class="message info" role="status">{{ notice }}</p>
+    <div v-if="warnings.length" class="message warning" role="alert">
+      <p>Installiert, aber schlecht lesbar – zu wenig Kontrast:</p>
+      <ul>
+        <li v-for="(warning, index) in warnings" :key="index">{{ warning }}</li>
+      </ul>
+    </div>
     <div v-if="errors.length" class="message error" role="alert">
       <p>Das Theme wurde nicht installiert:</p>
       <ul>
@@ -190,6 +207,11 @@ onBeforeUnmount(() => {
   padding: 0 0.4rem;
   border-radius: 999px;
   background: var(--fma-primary-soft);
+}
+
+.contrast-warning {
+  color: var(--fma-warning-text);
+  font-size: var(--fma-text-xs);
 }
 
 .danger {

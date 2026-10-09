@@ -62,10 +62,13 @@ final class ThemeValidatorTest extends TestCase
         self::assertSame([], ThemeValidator::validate(['format' => 1.0] + $v));
     }
 
-    public function testRejectsTooLittleContrast(): void
+    public function testWarnsAboutTooLittleContrast(): void
     {
-        $errors = ThemeValidator::validate(['colors' => ['dark' => ['base-content' => '#333333']]] + self::valid());
-        self::assertMatchesRegularExpression('/^Zu wenig Kontrast \(dunkel\): base-content auf base-100 /', $errors[0]);
+        $theme = ['colors' => ['dark' => ['base-content' => '#333333']]] + self::valid();
+        self::assertSame([], ThemeValidator::validate($theme));
+        $warnings = ThemeValidator::contrastWarnings($theme);
+        self::assertMatchesRegularExpression('/^Zu wenig Kontrast \(dunkel\): base-content auf base-100 /', $warnings[0]);
+        self::assertSame([], ThemeValidator::contrastWarnings(self::valid()));
     }
 
     public function testAcceptsTheSwitcherPresets(): void
@@ -74,7 +77,10 @@ final class ThemeValidatorTest extends TestCase
         self::assertIsArray($files);
         self::assertCount(3, $files);
         foreach ($files as $file) {
-            self::assertSame([], ThemeValidator::validate(json_decode((string) file_get_contents($file), true)), $file);
+            $theme = json_decode((string) file_get_contents($file), true);
+            \assert(\is_array($theme));
+            self::assertSame([], ThemeValidator::validate($theme), $file);
+            self::assertSame([], ThemeValidator::contrastWarnings($theme), $file);
         }
     }
 }

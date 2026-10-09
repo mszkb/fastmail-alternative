@@ -17,7 +17,8 @@ use Slim\App;
 /**
  * Installed themes per user (#126): GET /api/themes, POST /api/themes (the
  * theme file as JSON body; the same id replaces an installed theme),
- * DELETE /api/themes/{id}. Files are validated by ThemeValidator; the
+ * DELETE /api/themes/{id}. Files are validated by ThemeValidator (contrast
+ * below AA only warns, `warnings`); the
  * active theme is a per-device choice of the client.
  */
 final class ThemeRoutes
@@ -107,6 +108,8 @@ final class ThemeRoutes
             'version' => $row['version'],
             'installedAt' => Sessions::iso($row['installed_at']),
             'theme' => json_decode($row['content'], false, 16, JSON_THROW_ON_ERROR),
+            // Contrast below AA does not block the installation, it is shown.
+            'warnings' => ThemeValidator::contrastWarnings((array) json_decode($row['content'], true, 16, JSON_THROW_ON_ERROR)),
         ];
     }
 

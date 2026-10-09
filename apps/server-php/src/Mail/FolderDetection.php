@@ -77,6 +77,11 @@ final class FolderDetection
         if ($value === 'inbox') {
             return 'inbox';
         }
+        // Gmail's "All Mail" (\All): holds every message once more; only
+        // detected, never assigned manually (global search skips it, #121).
+        if ($value === 'all') {
+            return 'all';
+        }
 
         return \in_array($value, self::ROLES, true) ? $value : null;
     }

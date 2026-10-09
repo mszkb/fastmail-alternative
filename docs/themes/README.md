@@ -42,7 +42,7 @@ Die Layout-Optionen werden beim Aktivieren einmal als Einstellungen dieses Gerä
 ## Prüfungen
 
 - Unbekannte Felder, falsche Werte und Dateien über 32 KB werden abgelehnt; die Fehlermeldung nennt das Feld.
-- **Kontrast:** Text auf Hintergrund (`base-content` auf `base-100/200/300`, jedes `…-content` auf seiner Farbe, `primary` auf `base-100`) muss in hell und dunkel mindestens 4.5:1 erreichen (WCAG AA). Fehlt eine Farbe, zählt die des Standard-Themes. Ein Theme mit zu wenig Kontrast wird abgelehnt.
+- **Kontrast:** Text auf Hintergrund (`base-content` auf `base-100/200/300`, jedes `…-content` auf seiner Farbe, `primary` auf `base-100`) muss in hell und dunkel mindestens 4.5:1 erreichen (WCAG AA). Fehlt eine Farbe, zählt die des Standard-Themes. Ein Theme mit zu wenig Kontrast wird trotzdem installiert, aber mit Warnung: Die Meldung nennt jedes betroffene Farbpaar, in der Liste steht „geringer Kontrast“.
 - Höchstens 20 installierte Themes pro Benutzer.
 
 Selbst prüfen: Die Datei in den Einstellungen installieren – die Fehlermeldung zeigt alle Probleme auf einmal. Editoren mit JSON-Schema-Unterstützung (z. B. VS Code über `json.schemas` mit dem Muster `*.fmatheme.json`) prüfen schon beim Schreiben; ein Feld `$schema` in der Datei selbst ist nicht erlaubt.

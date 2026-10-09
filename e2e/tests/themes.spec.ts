@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { openSettings } from './helpers'
@@ -38,6 +39,27 @@ test('install a theme, preview, activate, reset with ?theme=default, delete', as
     ),
   })
   await expect(page.getByRole('alert')).toContainText('Unbekanntes Feld „css“.')
+
+  // Too little contrast: installed, with a warning naming the pair.
+  const low = JSON.parse(readFileSync(preset, 'utf8')) as Record<string, unknown>
+  await page.getByLabel('Theme-Datei installieren').setInputFiles({
+    name: 'blass.fmatheme.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        ...low,
+        id: 'blass',
+        name: 'Blass',
+        colors: { light: { 'base-content': '#aaaaaa' } },
+      }),
+    ),
+  })
+  await expect(page.getByRole('alert')).toContainText('base-content auf base-100')
+  const blass = page.locator('[data-theme-id="blass"]')
+  await expect(blass).toContainText('geringer Kontrast')
+  page.once('dialog', (dialog) => void dialog.accept())
+  await blass.getByRole('button', { name: 'Löschen' }).click()
+  await expect(blass).toHaveCount(0)
 
   await page.getByLabel('Theme-Datei installieren').setInputFiles(preset)
   await expect(page.getByRole('status').filter({ hasText: 'ist installiert' })).toBeVisible()

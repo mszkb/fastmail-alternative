@@ -51,6 +51,8 @@ const emit = defineEmits<{
 }>()
 
 const scope = ref<GlobalSearchScope>('all')
+/** Spam and Trash are left out unless chosen; their hits are marked. */
+const includeJunk = ref(false)
 // Thousands of hits: rows are prepared once when a page arrives (labels,
 // highlighted subject) and kept shallow.
 interface Row {
@@ -101,7 +103,7 @@ const rangeText = computed(() => {
 })
 
 // Folder names per account, loaded once for the accounts that have hits.
-const folderNames = reactive(new Map<string, Map<string, string>>())
+const folderNames = reactive(new Map<string, Map<string, { name: string; role: string | null }>>())
 const folderLoads = new Set<string>()
 
 function loadFolders(accountId: string): void {
@@ -111,8 +113,9 @@ function loadFolders(accountId: string): void {
     .then((res) => (res.ok ? (res.json() as Promise<FolderListResponse>) : null))
     .then((body) => {
       if (!body) return
-      const names = new Map<string, string>()
-      for (const folder of body.folders) names.set(folder.id, folderName(folder))
+      const names = new Map<string, { name: string; role: string | null }>()
+      for (const folder of body.folders)
+        names.set(folder.id, { name: folderName(folder), role: folder.specialUse })
       folderNames.set(accountId, names)
     })
     .catch(() => folderLoads.delete(accountId))
@@ -158,7 +161,7 @@ async function search(): Promise<void> {
     error.value = parsed
     return
   }
-  query.value = parsed
+  query.value = includeJunk.value ? { ...parsed, includeJunk: true } : parsed
   // The aborted request no longer clears `loading` (its number is stale).
   loading.value = false
   await load(current, null)
@@ -330,7 +333,7 @@ watch(
   () => props.text,
   () => void search(),
 )
-watch(scope, () => void search())
+watch([scope, includeJunk], () => void search())
 
 defineExpose({ search })
 </script>
@@ -362,6 +365,9 @@ defineExpose({ search })
             :disabled="!activeFolderId"
           />
           Nur dieser Ordner</label
+        >
+        <label
+          ><input v-model="includeJunk" type="checkbox" /> Spam und Papierkorb einbeziehen</label
         >
       </fieldset>
       <button type="button" class="secondary" @click="close">Suche beenden</button>
@@ -425,9 +431,15 @@ defineExpose({ search })
                   ><template v-else>{{ part.text }}</template></template
                 ></span
               >
-              <span class="folder">{{
-                folderNames.get(message.accountId)?.get(message.folderId) ?? ''
-              }}</span>
+              <span
+                class="folder"
+                :class="{
+                  junk: ['junk', 'trash'].includes(
+                    folderNames.get(message.accountId)?.get(message.folderId)?.role ?? '',
+                  ),
+                }"
+                >{{ folderNames.get(message.accountId)?.get(message.folderId)?.name ?? '' }}</span
+              >
             </span>
             <!-- Always a third line: every row has the same height (windowing). -->
             <span class="snippet">{{
@@ -591,6 +603,14 @@ defineExpose({ search })
   flex-shrink: 0;
   font-size: var(--fma-text-xs);
   color: var(--fma-muted);
+}
+
+.folder.junk {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--fma-warning-soft);
+  color: var(--fma-warning-text);
+  font-weight: 600;
 }
 
 .folder {

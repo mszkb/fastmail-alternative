@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mszkb/fastmail-alternative/docs/themes/schema.json",
   "title": "fastmail-alternative Theme (*.fmatheme.json)",
-  "description": "Deklaratives Theme (#126): nur Werte aus der Allowlist, kein Code, kein freies CSS, keine URLs. Zusätzlich gilt: Datei höchstens 32 KB, Kontrast der Text/Hintergrund-Paare mindestens 4.5:1 in hell und dunkel (prüft der Validator, nicht das Schema). Werte im Bereich der Größen in rem.",
+  "description": "Deklaratives Theme (#126): nur Werte aus der Allowlist, kein Code, kein freies CSS, keine URLs. Zusätzlich gilt: Datei höchstens 32 KB, Kontrast der Text/Hintergrund-Paare unter 4.5:1 in hell oder dunkel ergibt eine Warnung (prüft der Validator, nicht das Schema). Werte im Bereich der Größen in rem.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "id", "name", "version", "author", "license", "minAppVersion"],

@@ -193,6 +193,7 @@ final class GlobalSearchRoutes
         $pdo = $this->db->pdo();
         $deadline = microtime(true) + self::SEARCH_DEADLINE_SECONDS;
         $folderId = isset($query['folderId']) && \is_string($query['folderId']) ? $query['folderId'] : null;
+        $includeJunk = isset($query['includeJunk']);
         /** @var array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true} $query */
         $criteria = ImapActions::searchCriteria($query);
         $result = ['accounts' => [], 'streams' => []];
@@ -212,7 +213,7 @@ final class GlobalSearchRoutes
                 $result['accounts'][] = ['accountId' => $accountId, 'status' => $status[0], 'code' => $status[1]] + $entry;
                 continue;
             }
-            $folders = ProviderSearch::folders($pdo, $accountId, $folderId);
+            $folders = ProviderSearch::folders($pdo, $accountId, $folderId, $includeJunk);
             try {
                 $accountDeadline = min($deadline, microtime(true) + self::ACCOUNT_DEADLINE_SECONDS);
                 $context = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));

@@ -8,8 +8,8 @@ namespace Fma\Themes;
  * Validator for installable themes (#126), the same rules as validateTheme
  * in packages/shared/src/themes.ts and docs/themes/schema.json: only
  * allowlisted fields and values (colors `#rrggbb`, sizes in rem within
- * limits, fixed layout choices), plain-text manifest fields, and WCAG AA
- * contrast (4.5:1) for the text/background pairs in light and dark.
+ * limits, fixed layout choices) and plain-text manifest fields. Contrast
+ * below WCAG AA (4.5:1) is no error but a warning (contrastWarnings()).
  * Errors are German, name the field and never echo rejected values.
  */
 final class ThemeValidator
@@ -153,10 +153,20 @@ final class ThemeValidator
                 }
             }
         }
-        if ($errors !== []) {
-            return $errors;
-        }
+        return $errors;
+    }
 
+    /**
+     * Text/background pairs below MIN_CONTRAST of a valid theme (installed
+     * anyway, owner decision 2026-10-09).
+     *
+     * @param array<mixed> $input
+     *
+     * @return list<string>
+     */
+    public static function contrastWarnings(array $input): array
+    {
+        $errors = [];
         foreach (['light', 'dark'] as $mode) {
             /** @var array<string, string> $own */
             $own = \is_array($input['colors'][$mode] ?? null) ? $input['colors'][$mode] : [];

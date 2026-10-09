@@ -66,6 +66,14 @@ components:
           - 'true'
           - '0'
           - 'false'
+    SearchIncludeJunk:
+      name: includeJunk
+      in: query
+      required: false
+      description: Also search Spam and Trash (left out by default). Gmail's "All Mail" is never searched.
+      schema:
+        type: string
+        enum: ['1', 'true', '0', 'false']
     SearchAttachment:
       name: attachment
       in: query

@@ -28,11 +28,13 @@ export interface SearchQuery {
   unread?: boolean
   /** Only messages with attachments (multipart/mixed). */
   attachment?: boolean
+  /** Also search Spam and Trash (left out by default). */
+  includeJunk?: boolean
   /** Received on or after this day (YYYY-MM-DD, IMAP SINCE). */
   since?: string
   /** Received before this day (YYYY-MM-DD, exclusive, IMAP BEFORE). */
   before?: string
-  /** Only this folder; default: INBOX and the other selectable folders except Junk/Trash. */
+  /** Only this folder; default: all selectable folders except Junk/Trash and Gmail's "All Mail". */
   folderId?: string
 }
 
@@ -92,7 +94,7 @@ export function parseSearchQuery(input: Record<string, unknown>): SearchQuery | 
   if (query.since && query.before && query.since >= query.before) {
     return 'Der Zeitraum ist leer.'
   }
-  for (const key of ['unread', 'attachment'] as const) {
+  for (const key of ['unread', 'attachment', 'includeJunk'] as const) {
     const raw = input[key]
     if (raw === undefined || raw === '' || raw === false || raw === '0' || raw === 'false') continue
     if (raw !== true && raw !== '1' && raw !== 'true') return 'Ungültiger Filter.'
@@ -103,7 +105,7 @@ export function parseSearchQuery(input: Record<string, unknown>): SearchQuery | 
     if (typeof folderId !== 'string' || !UUID_RE.test(folderId)) return 'Ungültiger Ordner.'
     query.folderId = folderId.toLowerCase()
   }
-  if (Object.keys(query).every((key) => key === 'folderId')) {
+  if (Object.keys(query).every((key) => key === 'folderId' || key === 'includeJunk')) {
     return 'Bitte einen Suchbegriff oder Zeitraum angeben.'
   }
   return query

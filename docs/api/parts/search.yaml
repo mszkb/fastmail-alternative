@@ -57,6 +57,7 @@ paths:
         - $ref: '#/components/parameters/SearchTo'
         - $ref: '#/components/parameters/SearchUnread'
         - $ref: '#/components/parameters/SearchAttachment'
+        - $ref: '#/components/parameters/SearchIncludeJunk'
         - name: since
           in: query
           required: false

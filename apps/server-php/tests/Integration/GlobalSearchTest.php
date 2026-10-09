@@ -322,6 +322,33 @@ final class GlobalSearchTest extends DatabaseTestCase
         self::assertSame(400, $this->search([])->getStatusCode());
     }
 
+    public function testJunkAndTrashOnlyOnRequestAllMailNever(): void
+    {
+        [$a] = $this->accounts;
+        $t = $this->tag;
+        $imapUser = "global-{$t}-0@example.org";
+        $imap = ImapClient::connect(new TransportPolicy(true, true), new HostConfig($this->greenmail, 3143, false, $imapUser, 'pw'));
+        try {
+            foreach (['Trash' => 'trash', 'Spam' => 'junk', 'Alle' => 'all'] as $path => $role) {
+                $imap->command('CREATE ' . ImapClient::quote($path));
+                $id = $this->folder($a, $path);
+                Database::run(self::$db->pdo(), 'UPDATE folder SET special_use = ? WHERE id = ?', [$role, $id]);
+                $raw = "From: x@example.org\r\nTo: {$imapUser}\r\nSubject: Angebot {$t} {$path}\r\nDate: Mon, 05 Jan 2026 10:00:00 +0000\r\n\r\nText.\r\n";
+                $imap->execute(['APPEND ' . ImapClient::quote($path) . ' () ', $raw]);
+            }
+        } finally {
+            $imap->logout();
+        }
+        $subjects = fn(array $q): array => array_column($this->body($q)['messages'], 'subject');
+        $default = $subjects(['subject' => "Angebot {$t}", 'accounts' => $a]);
+        self::assertCount(3, $default);
+        $with = $subjects(['subject' => "Angebot {$t}", 'accounts' => $a, 'includeJunk' => '1']);
+        self::assertCount(5, $with);
+        self::assertContains("Angebot {$t} Trash", $with);
+        self::assertContains("Angebot {$t} Spam", $with);
+        self::assertNotContains("Angebot {$t} Alle", $with);
+    }
+
     public function testOperatorsMapToImapCriteria(): void
     {
         $body = $this->body(['to' => "global-{$this->tag}-2@example.org", 'subject' => $this->tag]);

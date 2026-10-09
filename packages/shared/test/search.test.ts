@@ -73,6 +73,11 @@ describe('global search (#121)', () => {
     expect(parseSearchQuery({ unread: 'ja' })).toBe('Ungültiger Filter.')
     expect(parseSearchQuery({ attachment: false })).toMatch(/Suchbegriff/)
     expect(searchQueryString({ to: 'x', unread: true, attachment: false })).toBe('to=x&unread=1')
+    // Spam/Trash is a scope, not a criterion.
+    expect(parseSearchQuery({ includeJunk: true })).toMatch(/Suchbegriff/)
+    expect(globalSearchPath({ q: 'x', includeJunk: true })).toBe(
+      '/api/search?q=x&includeJunk=1&limit=50',
+    )
   })
 
   it('builds the request path per scope', () => {

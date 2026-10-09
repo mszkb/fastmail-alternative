@@ -65,6 +65,7 @@ final class ThemeRoutesTest extends DatabaseTestCase
         self::assertSame('kompakt-wie-gmail', $item['id']);
         self::assertSame('Kompakt (wie Gmail)', $item['name']);
         self::assertSame(json_decode($this->preset(), true), $item['theme']);
+        self::assertSame([], $item['warnings']);
 
         // Same id again: an update.
         $theme = json_decode($this->preset(), true);
@@ -83,6 +84,19 @@ final class ThemeRoutesTest extends DatabaseTestCase
         self::assertSame(404, $this->call('DELETE', '/api/themes/kompakt-wie-gmail', null, $this->otherToken)->getStatusCode());
         self::assertSame(204, $this->call('DELETE', '/api/themes/kompakt-wie-gmail')->getStatusCode());
         self::assertSame(404, $this->call('DELETE', '/api/themes/kompakt-wie-gmail')->getStatusCode());
+    }
+
+    public function testInstallsLowContrastWithWarnings(): void
+    {
+        $theme = json_decode($this->preset(), true);
+        \assert(\is_array($theme));
+        $theme['colors'] = ['dark' => ['base-content' => '#333333']];
+        $created = $this->call('POST', '/api/themes', (string) json_encode($theme));
+        self::assertSame(201, $created->getStatusCode());
+        $warnings = Http::json($created)['warnings'];
+        self::assertIsArray($warnings);
+        self::assertStringStartsWith('Zu wenig Kontrast (dunkel): base-content auf base-100', (string) $warnings[0]);
+        self::assertNotEmpty(Http::json($this->call('GET', '/api/themes'))['themes'][0]['warnings']);
     }
 
     public function testRejectsInvalidFiles(): void

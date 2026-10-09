@@ -2226,6 +2226,7 @@ components:
         - version
         - installedAt
         - theme
+        - warnings
       properties:
         id:
           type: string
@@ -2238,6 +2239,11 @@ components:
           format: date-time
         theme:
           $ref: "#/components/schemas/ThemeFile"
+        warnings:
+          type: array
+          description: Text/background pairs below WCAG AA (4.5:1); the theme is installed anyway.
+          items:
+            type: string
     ThemeListResponse:
       type: object
       required:
@@ -2273,6 +2279,18 @@ components:
       in: query
       required: false
       description: Only unread messages (IMAP UNSEEN).
+      schema:
+        type: string
+        enum:
+          - "1"
+          - "true"
+          - "0"
+          - "false"
+    SearchIncludeJunk:
+      name: includeJunk
+      in: query
+      required: false
+      description: Also search Spam and Trash (left out by default). Gmail's "All Mail" is never searched.
       schema:
         type: string
         enum:
@@ -2606,8 +2624,8 @@ paths:
       description: |
         Runs IMAP SEARCH at the provider and maps the matching UIDs to
         locally synced messages (newest first, at most 100). Without
-        `folderId`, INBOX and the other selectable folders except Junk/Trash
-        are searched (at most 20). At least one criterion (`q`, `from`, `to`,
+        `folderId`, all selectable folders except Junk/Trash (unless
+        `includeJunk`) and Gmail's "All Mail" are searched (at most 100). At least one criterion (`q`, `from`, `to`,
         `subject`, `since`, `before`, `unread`, `attachment`) is required. At
         most 10 provider searches per account and minute. The query is never
         logged or stored.
@@ -2634,6 +2652,7 @@ paths:
         - $ref: "#/components/parameters/SearchTo"
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
+        - $ref: "#/components/parameters/SearchIncludeJunk"
         - name: since
           in: query
           required: false
@@ -4118,6 +4137,7 @@ paths:
         - $ref: "#/components/parameters/SearchTo"
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
+        - $ref: "#/components/parameters/SearchIncludeJunk"
         - name: since
           in: query
           required: false
@@ -4332,8 +4352,8 @@ paths:
       description: |
         The body is the theme file (`*.fmatheme.json`, at most 32 KB). Only
         fields and values of docs/themes/schema.json pass (no code, no free
-        CSS, no URLs); text/background pairs must reach 4.5:1 contrast in
-        light and dark. A theme with an installed `id` replaces it (200).
+        CSS, no URLs); text/background pairs below 4.5:1 contrast in light
+        or dark are listed in `warnings` (installed anyway). A theme with an installed `id` replaces it (200).
         At most 20 themes per user. Which theme is active is chosen per
         device in the client.
       requestBody:

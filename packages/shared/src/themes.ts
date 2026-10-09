@@ -5,7 +5,8 @@
  * allowlist pass (colors `#rrggbb`, sizes in `rem` within limits, fixed
  * choices), anything else is rejected - so a theme cannot run script,
  * exfiltrate via CSS or track. Text/background pairs must reach WCAG AA
- * (4.5:1) in light and dark, otherwise the theme is rejected.
+ * (4.5:1) in light and dark; below that the theme is accepted with
+ * warnings (owner decision 2026-10-09), shown when installing and in the list.
  *
  * The same rules are checked by the server (apps/server-php ThemeValidator)
  * and described as JSON schema in docs/themes/schema.json.
@@ -97,6 +98,8 @@ export interface InstalledTheme {
   version: string
   installedAt: string
   theme: Theme
+  /** Contrast below AA (installed anyway). */
+  warnings: string[]
 }
 
 export interface ThemeListResponse {
@@ -197,7 +200,9 @@ const LAYOUT_VALUES: Record<string, readonly string[]> = {
   accountRail: ['icons', 'list'],
 }
 
-export type ThemeValidation = { ok: true; theme: Theme } | { ok: false; errors: string[] }
+export type ThemeValidation =
+  | { ok: true; theme: Theme; /** Contrast below AA: installable, but shown. */ warnings: string[] }
+  | { ok: false; errors: string[] }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -282,18 +287,24 @@ export function validateTheme(input: unknown): ThemeValidation {
   if (errors.length > 0) return { ok: false, errors }
 
   const theme = input as unknown as Theme
+  return { ok: true, theme, warnings: themeContrastWarnings(theme) }
+}
+
+/** Text/background pairs below THEME_MIN_CONTRAST, as German texts. */
+export function themeContrastWarnings(theme: Theme): string[] {
+  const warnings: string[] = []
   for (const mode of ['light', 'dark'] as const) {
     const palette = themePalette(theme, mode)
     for (const [text, background] of THEME_CONTRAST_PAIRS) {
       const ratio = contrastRatio(palette[text], palette[background])
       if (ratio < THEME_MIN_CONTRAST)
-        errors.push(
+        warnings.push(
           `Zu wenig Kontrast (${mode === 'light' ? 'hell' : 'dunkel'}): ${text} auf ${background} ` +
             `${ratio.toFixed(2)}:1, mindestens ${THEME_MIN_CONTRAST}:1.`,
         )
     }
   }
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, theme }
+  return warnings
 }
 
 /** Parses and validates the text of a theme file (size limit included). */

@@ -21,8 +21,8 @@ paths:
       description: |
         The body is the theme file (`*.fmatheme.json`, at most 32 KB). Only
         fields and values of docs/themes/schema.json pass (no code, no free
-        CSS, no URLs); text/background pairs must reach 4.5:1 contrast in
-        light and dark. A theme with an installed `id` replaces it (200).
+        CSS, no URLs); text/background pairs below 4.5:1 contrast in light
+        or dark are listed in `warnings` (installed anyway). A theme with an installed `id` replaces it (200).
         At most 20 themes per user. Which theme is active is chosen per
         device in the client.
       requestBody:
@@ -101,7 +101,7 @@ components:
         layout: { type: object }
     InstalledTheme:
       type: object
-      required: [id, name, version, installedAt, theme]
+      required: [id, name, version, installedAt, theme, warnings]
       properties:
         id: { type: string }
         name: { type: string }
@@ -109,6 +109,10 @@ components:
         installedAt: { type: string, format: date-time }
         theme:
           $ref: '#/components/schemas/ThemeFile'
+        warnings:
+          type: array
+          description: Text/background pairs below WCAG AA (4.5:1); the theme is installed anyway.
+          items: { type: string }
     ThemeListResponse:
       type: object
       required: [themes]

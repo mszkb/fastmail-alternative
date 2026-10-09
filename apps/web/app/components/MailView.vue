@@ -166,6 +166,7 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   archive: 'Archiv',
   junk: 'Spam',
   trash: 'Papierkorb',
+  all: 'Alle Nachrichten',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
 /** Messages of a folder list kept offline (three pages of 50). */

@@ -87,7 +87,7 @@ final class SearchRoutes
         }
 
         $folderId = $query['folderId'] ?? null;
-        $folders = ProviderSearch::folders($pdo, $accountId, $folderId);
+        $folders = ProviderSearch::folders($pdo, $accountId, $folderId, isset($query['includeJunk']));
         if ($folderId !== null && $folders === []) {
             return Json::write($response, ['message' => 'Ordner nicht gefunden.'], 404);
         }
@@ -125,9 +125,10 @@ final class SearchRoutes
      * @param array<mixed> $input
      *
      * Text criteria: q, from, to, subject; dates: since, before; flags
-     * (`1`/`true`): unread, attachment.
+     * (`1`/`true`): unread, attachment; scope: includeJunk (also search
+     * Spam and Trash), folderId.
      *
-     * @return array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, folderId?: string}|string
+     * @return array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, includeJunk?: true, folderId?: string}|string
      */
     public static function parseQuery(array $input): array|string
     {
@@ -162,7 +163,7 @@ final class SearchRoutes
         if (isset($query['since'], $query['before']) && $query['since'] >= $query['before']) {
             return 'Der Zeitraum ist leer.';
         }
-        foreach (['unread', 'attachment'] as $key) {
+        foreach (['unread', 'attachment', 'includeJunk'] as $key) {
             $raw = $input[$key] ?? null;
             if ($raw === null || $raw === '' || $raw === '0' || $raw === 'false') {
                 continue;
@@ -179,7 +180,7 @@ final class SearchRoutes
             }
             $query['folderId'] = strtolower($folderId);
         }
-        if (array_diff_key($query, ['folderId' => true]) === []) {
+        if (array_diff_key($query, ['folderId' => true, 'includeJunk' => true]) === []) {
             return 'Bitte einen Suchbegriff oder Zeitraum angeben.';
         }
 
@@ -198,7 +199,7 @@ final class SearchRoutes
 
     /**
      * @param list<array{id: string, path: string, special_use: ?string}> $folders
-     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, folderId?: string} $query
+     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, includeJunk?: true, folderId?: string} $query
      *
      * @return array{folders: list<array{folderId: string, uidvalidity: string, uids: list<int>}>, foldersFailed: int}
      */

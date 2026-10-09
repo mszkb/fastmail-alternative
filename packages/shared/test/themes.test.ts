@@ -28,7 +28,7 @@ function errors(input: unknown): string[] {
 
 describe('validateTheme (#126)', () => {
   it('accepts a valid theme', () => {
-    expect(validateTheme(valid)).toEqual({ ok: true, theme: valid })
+    expect(validateTheme(valid)).toEqual({ ok: true, theme: valid, warnings: [] })
     expect(
       validateTheme({ ...valid, colors: undefined, sizes: undefined, layout: undefined }).ok,
     ).toBe(true)
@@ -66,10 +66,14 @@ describe('validateTheme (#126)', () => {
     expect(errors({ ...valid, '<img src=x>': 1 })[0]).not.toContain('<')
   })
 
-  it('rejects too little contrast in light or dark', () => {
-    const low = errors({ ...valid, colors: { dark: { 'base-content': '#333333' } } })
-    expect(low[0]).toMatch(/^Zu wenig Kontrast \(dunkel\): base-content auf base-100/)
-    expect(errors({ ...valid, colors: { light: { 'primary-content': '#1060c0' } } })).toEqual([
+  it('accepts too little contrast with warnings', () => {
+    const low = validateTheme({ ...valid, colors: { dark: { 'base-content': '#333333' } } })
+    expect(low.ok).toBe(true)
+    expect(low.ok && low.warnings[0]).toMatch(
+      /^Zu wenig Kontrast \(dunkel\): base-content auf base-100/,
+    )
+    const light = validateTheme({ ...valid, colors: { light: { 'primary-content': '#1060c0' } } })
+    expect(light.ok && light.warnings).toEqual([
       expect.stringMatching(/hell.*primary-content auf primary/),
     ])
   })
@@ -107,7 +111,7 @@ describe('switcher presets (themes/)', () => {
     expect(files).toHaveLength(3)
     for (const file of files) {
       const result = parseThemeFile(readFileSync(new URL(file, dir), 'utf8'))
-      expect(result, file).toMatchObject({ ok: true })
+      expect(result, file).toMatchObject({ ok: true, warnings: [] })
       if (!result.ok) continue
       expect(result.theme.name, file).toMatch(/\(wie (Gmail|Outlook|Fastmail)\)$/)
       expect(result.theme.description, file).toMatch(/keine Verbindung/)
