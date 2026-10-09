@@ -264,7 +264,9 @@ final class IdleManager
             $connection->state = IdleConnection::WAITING;
             ++$connection->failures;
             $code = self::errorCode($e);
-            $delay = \in_array($code, ['AUTH_FAILED', 'CREDENTIALS_REQUIRED', 'IDLE_UNSUPPORTED'], true)
+            // Sign-in problems (incl. revoked OAuth grants) and servers without IDLE won't heal soon.
+            $permanent = ($e instanceof AccountErrorException && $e->kind() === 'auth') || \in_array($code, ['AUTH_FAILED', 'IDLE_UNSUPPORTED'], true);
+            $delay = $permanent
                 ? (float) self::BACKOFF_MAX_SECONDS
                 : self::backoffSeconds($connection->failures);
             $connection->retryAt = microtime(true) + $delay;

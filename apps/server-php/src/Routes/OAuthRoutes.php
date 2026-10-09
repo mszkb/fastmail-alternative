@@ -47,7 +47,7 @@ final class OAuthRoutes
 {
     private const STATE_TTL_SECONDS = 600;
     /** Error reasons the PWA can show (?oauth=error&reason=...). */
-    private const REASONS = ['state', 'denied', 'not_configured', 'provider', 'network', 'no_refresh_token', 'no_email', 'invalid_grant', 'imap', 'smtp', 'wrong_account', 'limit'];
+    private const REASONS = ['state', 'denied', 'not_configured', 'invalid_client', 'provider', 'network', 'no_refresh_token', 'no_email', 'invalid_grant', 'imap', 'smtp', 'wrong_account', 'limit'];
 
     public function __construct(
         private readonly Database $db,
@@ -132,7 +132,7 @@ final class OAuthRoutes
         $query = $request->getQueryParams();
         $state = $query['state'] ?? null;
         if (!\is_string($state) || $state === '' || \strlen($state) > 200) {
-            return self::redirect($response, 'error', 'state');
+            return $this->redirect($response, 'error', 'state');
         }
         $pdo = $this->db->pdo();
         $hash = hash('sha256', $state, true);
@@ -145,16 +145,16 @@ final class OAuthRoutes
         // Single use, whatever happens next.
         Database::run($pdo, 'DELETE FROM oauth_state WHERE state_hash = ?', [$hash]);
         if ($pending === false) {
-            return self::redirect($response, 'error', 'state');
+            return $this->redirect($response, 'error', 'state');
         }
         $code = $query['code'] ?? null;
         if (isset($query['error']) || !\is_string($code) || $code === '') {
-            return self::redirect($response, 'error', 'denied');
+            return $this->redirect($response, 'error', 'denied');
         }
         $provider = Provider::fromConfig($this->config, $pending['provider']);
         $redirectUri = $this->flow()->redirectUri();
         if ($provider === null || $redirectUri === null) {
-            return self::redirect($response, 'error', 'not_configured');
+            return $this->redirect($response, 'error', 'not_configured');
         }
 
         try {
@@ -162,18 +162,18 @@ final class OAuthRoutes
         } catch (OAuthException $e) {
             $this->logger->warn('oauth code exchange failed', ['provider' => $provider->id, 'errorCode' => $e->errorCode]);
 
-            return self::redirect($response, 'error', $e->errorCode);
+            return $this->redirect($response, 'error', $e->errorCode);
         }
         $email = (string) $tokens->email;
         $imap = new HostConfig($provider->imapHost, $provider->imapPort, TransportPolicy::isSecurePort($provider->imapPort), $email, '', $tokens->accessToken);
         $smtp = new HostConfig($provider->smtpHost, $provider->smtpPort, TransportPolicy::isSecurePort($provider->smtpPort), $email, '', $tokens->accessToken);
         $imapResult = $this->tester->testImap($imap);
         if (!$imapResult->ok) {
-            return self::redirect($response, 'error', 'imap', $imapResult->code);
+            return $this->redirect($response, 'error', 'imap', $imapResult->code);
         }
         $smtpResult = $this->tester->testSmtp($smtp);
         if (!$smtpResult->ok) {
-            return self::redirect($response, 'error', 'smtp', $smtpResult->code);
+            return $this->redirect($response, 'error', 'smtp', $smtpResult->code);
         }
 
         // Signing in again: the requested account, or an OAuth account of this user with the same address.
@@ -188,7 +188,7 @@ final class OAuthRoutes
 
         $count = (int) Database::run($pdo, 'SELECT COUNT(*) FROM mail_account WHERE user_id = ?', [$pending['user_id']])->fetchColumn();
         if ($count >= AccountRoutes::MAX_ACCOUNTS) {
-            return self::redirect($response, 'error', 'limit');
+            return $this->redirect($response, 'error', 'limit');
         }
         $credentials = AccountTokens::credentials($provider->id, $email, $tokens);
         $accountId = AccountRoutes::insertAccount(
@@ -207,7 +207,7 @@ final class OAuthRoutes
         );
         $this->logger->info('oauth account connected', ['accountId' => $accountId, 'provider' => $provider->id]);
 
-        return self::redirect($response, 'connected', null, null, $accountId);
+        return $this->redirect($response, 'connected', null, null, $accountId);
     }
 
     /** @param list<string> $capabilities */
@@ -221,25 +221,32 @@ final class OAuthRoutes
             [$accountId, $userId, $provider->id],
         )->fetch();
         if ($account === false) {
-            return self::redirect($response, 'error', 'state');
+            return $this->redirect($response, 'error', 'state');
         }
         // The grant must belong to the same mailbox.
         if (mb_strtolower($account['email_address']) !== $email) {
-            return self::redirect($response, 'error', 'wrong_account');
+            return $this->redirect($response, 'error', 'wrong_account');
         }
         $dek = Envelope::unwrapAccountKey($this->config->get('MASTER_KEY'), $account['wrapped_dek']);
         Database::run(
             $pdo,
-            "UPDATE mail_account SET credential_enc = ?, capabilities = ?, status = 'ok', error_count = 0, next_retry_at = NULL, last_error_code = NULL WHERE id = ?",
-            [AccountTokens::encrypt($dek, $accountId, AccountTokens::credentials($provider->id, $email, $tokens)), json_encode($capabilities, JSON_THROW_ON_ERROR), $accountId],
+            // The provider's fixed servers replace whatever the row had (e.g. from an import).
+            "UPDATE mail_account SET credential_enc = ?, capabilities = ?, imap_host = ?, imap_port = ?, smtp_host = ?, smtp_port = ?,
+               status = 'ok', error_count = 0, next_retry_at = NULL, last_error_code = NULL WHERE id = ?",
+            [
+                AccountTokens::encrypt($dek, $accountId, AccountTokens::credentials($provider->id, $email, $tokens)),
+                json_encode($capabilities, JSON_THROW_ON_ERROR),
+                $provider->imapHost, $provider->imapPort, $provider->smtpHost, $provider->smtpPort,
+                $accountId,
+            ],
         );
         $this->jobs->enqueue('folder_sync', $accountId);
         $this->logger->info('oauth account renewed', ['accountId' => $accountId, 'provider' => $provider->id]);
 
-        return self::redirect($response, 'connected', null, null, $accountId);
+        return $this->redirect($response, 'connected', null, null, $accountId);
     }
 
-    private static function redirect(Response $response, string $result, ?string $reason = null, ?string $code = null, ?string $accountId = null): Response
+    private function redirect(Response $response, string $result, ?string $reason = null, ?string $code = null, ?string $accountId = null): Response
     {
         $params = ['oauth' => $result];
         if ($reason !== null) {
@@ -252,7 +259,10 @@ final class OAuthRoutes
             $params['account'] = $accountId;
         }
 
-        return $response->withStatus(303)->withHeader('Location', '/?' . http_build_query($params))->withHeader('Cache-Control', 'no-store');
+        // Back to the PWA, also when PUBLIC_URL mounts it under a path.
+        $base = rtrim((string) parse_url(OAuthFlow::publicUrl($this->config) ?? '', PHP_URL_PATH), '/');
+
+        return $response->withStatus(303)->withHeader('Location', $base . '/?' . http_build_query($params))->withHeader('Cache-Control', 'no-store');
     }
 
     private static function session(Request $request): Session

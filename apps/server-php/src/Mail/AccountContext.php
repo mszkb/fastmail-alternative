@@ -9,6 +9,7 @@ use Fma\Crypto\Envelope;
 use Fma\Db\Database;
 use Fma\Jobs\AccountErrorException;
 use Fma\OAuth\AccountTokens;
+use Fma\OAuth\Provider;
 use Fma\OAuth\TokenClient;
 
 /**
@@ -33,10 +34,10 @@ final class AccountContext
      */
     public static function load(\PDO $pdo, string $accountId, Config $config, ?TokenClient $tokens = null): self
     {
-        /** @var array{id: string, email_address: string, imap_host: string, imap_port: int|string, smtp_host: string, smtp_port: int|string, wrapped_dek: string, credential_enc: string, credential_kind: string}|false $row */
+        /** @var array{id: string, email_address: string, imap_host: string, imap_port: int|string, smtp_host: string, smtp_port: int|string, wrapped_dek: string, credential_enc: string, credential_kind: string, oauth_provider: ?string}|false $row */
         $row = Database::run(
             $pdo,
-            'SELECT id, email_address, imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc, credential_kind FROM mail_account WHERE id = ?',
+            'SELECT id, email_address, imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc, credential_kind, oauth_provider FROM mail_account WHERE id = ?',
             [$accountId],
         )->fetch();
         if ($row === false) {
@@ -53,6 +54,12 @@ final class AccountContext
         $smtpSecure = TransportPolicy::isSecurePort($smtpPort);
 
         if ($row['credential_kind'] === 'oauth2') {
+            // Always the provider's own servers: the token must never reach a
+            // host from the row (e.g. one an imported config file put there).
+            $provider = Provider::fromConfig($config, (string) $row['oauth_provider']);
+            if ($provider === null) {
+                throw new AccountErrorException('OAUTH_NOT_CONFIGURED');
+            }
             // XOAUTH2 with the same user and token for IMAP and SMTP.
             $token = AccountTokens::accessToken($pdo, $config, $tokens, $row['id'], $dek, $credentials);
             $user = $credentials['imapUser'];
@@ -61,8 +68,8 @@ final class AccountContext
                 $row['id'],
                 $row['email_address'],
                 $dek,
-                new HostConfig($row['imap_host'], $imapPort, $imapSecure, $user, '', $token),
-                new HostConfig($row['smtp_host'], $smtpPort, $smtpSecure, $user, '', $token),
+                new HostConfig($provider->imapHost, $provider->imapPort, TransportPolicy::isSecurePort($provider->imapPort), $user, '', $token),
+                new HostConfig($provider->smtpHost, $provider->smtpPort, TransportPolicy::isSecurePort($provider->smtpPort), $user, '', $token),
             );
         }
 

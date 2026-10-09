@@ -463,7 +463,7 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
     'Der Mailanbieter bremst gerade (zu viele Verbindungen oder Anfragen); der Abgleich pausiert kurz.',
   OAUTH_EXPIRED: 'Die Anmeldung beim Anbieter ist abgelaufen oder wurde widerrufen.',
   OAUTH_NOT_CONFIGURED:
-    'Die Anmeldung über diesen Anbieter ist auf dem Server nicht mehr eingerichtet (Betreiber).',
+    'Die Anmeldung über diesen Anbieter ist auf dem Server nicht (mehr) richtig eingerichtet – Betreiber informieren (z. B. Client-Secret abgelaufen).',
 }
 
 export interface AccountStatusInfo {

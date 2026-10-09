@@ -28,6 +28,8 @@ const REASONS: Record<string, string> = {
     'Die Anmeldung ist abgelaufen oder wurde schon verwendet. Bitte erneut auf „Anmelden“ klicken.',
   denied: 'Die Anmeldung wurde beim Anbieter abgebrochen oder der Zugriff nicht erlaubt.',
   not_configured: 'Die Anmeldung über diesen Anbieter ist auf dem Server nicht eingerichtet.',
+  invalid_client:
+    'Der Anbieter hat die OAuth-App dieses Servers abgelehnt (Client-ID oder Secret falsch oder abgelaufen). Bitte den Betreiber informieren.',
   provider: 'Der Anbieter hat die Anmeldung abgelehnt. Bitte später erneut versuchen.',
   network: 'Der Anbieter war nicht erreichbar. Bitte später erneut versuchen.',
   invalid_grant: 'Der Anmeldecode war ungültig oder abgelaufen. Bitte erneut anmelden.',

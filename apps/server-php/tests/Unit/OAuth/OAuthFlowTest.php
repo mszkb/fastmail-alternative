@@ -139,18 +139,19 @@ final class OAuthFlowTest extends TestCase
         $client = (new FakeTokenClient())
             ->respond(400, ['error' => 'invalid_grant', 'error_description' => 'Token has been expired or revoked.'])
             ->respond(500, ['error' => 'server_error'])
+            ->respond(401, ['error' => 'invalid_client'])
             ->respond(200, ['token_type' => 'Bearer']);
         $client->responses[] = 'network';
         $flow = new OAuthFlow(self::config(), $client);
         $codes = [];
-        for ($i = 0; $i < 4; ++$i) {
+        for ($i = 0; $i < 5; ++$i) {
             try {
                 $flow->refresh(self::provider('microsoft'), 'rt');
             } catch (OAuthException $e) {
                 $codes[] = [$e->errorCode, $e->needsNewLogin()];
             }
         }
-        self::assertSame([['invalid_grant', true], ['provider', false], ['provider', false], ['network', false]], $codes);
+        self::assertSame([['invalid_grant', true], ['provider', false], ['invalid_client', false], ['provider', false], ['network', false]], $codes);
         self::assertSame(['grant_type' => 'refresh_token', 'refresh_token' => 'rt', 'client_id' => 'ms-client', 'client_secret' => 'ms-secret'], $client->requests[0]['form']);
     }
 

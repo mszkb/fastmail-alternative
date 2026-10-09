@@ -6,8 +6,9 @@ namespace Fma\OAuth;
 
 /**
  * OAuth failure with a stable code: `invalid_grant` (refresh token revoked or
- * expired: the user has to sign in again), `network`, `provider` (any other
- * error answer), `no_refresh_token`, `no_email`, `state`. Never carries
+ * expired: the user has to sign in again), `invalid_client` (client id or
+ * secret rejected: the operator has to fix the setup), `network`, `provider`
+ * (any other error answer), `no_refresh_token`, `no_email`, `state`. Never carries
  * provider texts or tokens.
  */
 final class OAuthException extends \RuntimeException

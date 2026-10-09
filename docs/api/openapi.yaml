@@ -3748,7 +3748,7 @@ paths:
         folder sync. Always answers with a redirect to the PWA:
         `/?oauth=connected&account={id}` or
         `/?oauth=error&reason={reason}[&code={AccountErrorCode}]` with reason
-        one of `state`, `denied`, `not_configured`, `provider`, `network`,
+        one of `state`, `denied`, `not_configured`, `invalid_client`, `provider`, `network`,
         `no_refresh_token`, `no_email`, `invalid_grant`, `imap`, `smtp`,
         `wrong_account`, `limit`.
       parameters:

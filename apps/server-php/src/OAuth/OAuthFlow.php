@@ -107,7 +107,11 @@ final class OAuthFlow
         ]);
         $body = $result['body'];
         if ($result['status'] !== 200) {
-            throw new OAuthException(($body['error'] ?? null) === 'invalid_grant' ? 'invalid_grant' : 'provider');
+            throw new OAuthException(match ($body['error'] ?? null) {
+                'invalid_grant' => 'invalid_grant',
+                'invalid_client', 'unauthorized_client' => 'invalid_client',
+                default => 'provider',
+            });
         }
         $access = $body['access_token'] ?? null;
         if (!\is_string($access) || $access === '') {

@@ -20,6 +20,7 @@ describe('oauth result (#36)', () => {
       /IMAP.*Zugangsdaten abgelehnt/,
     )
     expect(oauthResultFromQuery('?oauth=error&reason=imap')?.message).toMatch(/Gmail/)
+    expect(oauthResultFromQuery('?oauth=error&reason=invalid_client')?.message).toMatch(/Betreiber/)
     expect(oauthResultFromQuery('?oauth=error&reason=whatever')?.message).toBe(
       'Die Anmeldung ist fehlgeschlagen.',
     )

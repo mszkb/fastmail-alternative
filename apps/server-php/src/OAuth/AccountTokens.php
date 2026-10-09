@@ -12,9 +12,11 @@ use Fma\Jobs\AccountErrorException;
 /**
  * Access token of an OAuth account (credential_kind 'oauth2'). Credentials
  * JSON: {imapUser, oauth: {provider, refreshToken, accessToken, expiresAt}},
- * encrypted like passwords (ADR-0011). An expired token is refreshed under a
- * row lock, so parallel jobs refresh once; a rotated refresh token is stored.
- * A revoked grant ends in OAUTH_EXPIRED (auth_error for this account only).
+ * encrypted like passwords (ADR-0011). An expired token is refreshed without
+ * holding a row lock and written back only if the row is unchanged, so a
+ * parallel refresh or new sign-in is never overwritten; a rotated refresh
+ * token is stored. A revoked grant ends in OAUTH_EXPIRED, a rejected client
+ * (secret expired) in OAUTH_NOT_CONFIGURED - auth_error for the account only.
  */
 final class AccountTokens
 {
@@ -37,42 +39,40 @@ final class AccountTokens
             throw new AccountErrorException('OAUTH_NOT_CONFIGURED');
         }
 
-        $pdo->beginTransaction();
-        try {
-            $encrypted = Database::run($pdo, 'SELECT credential_enc FROM mail_account WHERE id = ? FOR UPDATE', [$accountId])->fetchColumn();
-            $current = \is_string($encrypted) ? json_decode(Envelope::decryptField($dek, $encrypted, Envelope::credentialAad($accountId)), true) : null;
-            $oauth = self::oauth(\is_array($current) ? $current : $credentials);
-            // Another job may have refreshed meanwhile.
-            if ($oauth['expiresAt'] > time() + self::MARGIN_SECONDS) {
-                $pdo->commit();
-
-                return $oauth['accessToken'];
-            }
-            try {
-                $tokens = (new OAuthFlow($config, $client ?? new HttpTokenClient()))->refresh($provider, $oauth['refreshToken']);
-            } catch (OAuthException $e) {
-                throw new AccountErrorException($e->needsNewLogin() ? 'OAUTH_EXPIRED' : 'TIMEOUT', $e);
-            }
-            $updated = \is_array($current) ? $current : $credentials;
-            $updated['oauth'] = [
-                'provider' => $oauth['provider'],
-                'refreshToken' => $tokens->refreshToken ?? $oauth['refreshToken'],
-                'accessToken' => $tokens->accessToken,
-                'expiresAt' => $tokens->expiresAt,
-            ];
-            Database::run($pdo, 'UPDATE mail_account SET credential_enc = ? WHERE id = ?', [
-                self::encrypt($dek, $accountId, $updated),
-                $accountId,
-            ]);
-            $pdo->commit();
-
-            return $tokens->accessToken;
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
+        // The stored row as read now; another job may have refreshed already.
+        $before = Database::run($pdo, 'SELECT credential_enc FROM mail_account WHERE id = ?', [$accountId])->fetchColumn();
+        $current = \is_string($before) ? json_decode(Envelope::decryptField($dek, $before, Envelope::credentialAad($accountId)), true) : null;
+        $current = \is_array($current) ? $current : $credentials;
+        $oauth = self::oauth($current);
+        if ($oauth['expiresAt'] > time() + self::MARGIN_SECONDS) {
+            return $oauth['accessToken'];
         }
+        // No row lock while the provider answers (up to the HTTP timeout).
+        try {
+            $tokens = (new OAuthFlow($config, $client ?? new HttpTokenClient()))->refresh($provider, $oauth['refreshToken']);
+        } catch (OAuthException $e) {
+            throw new AccountErrorException(match (true) {
+                $e->needsNewLogin() => 'OAUTH_EXPIRED',
+                // Wrong or expired client secret: the operator has to fix the setup.
+                $e->errorCode === 'invalid_client' => 'OAUTH_NOT_CONFIGURED',
+                default => 'TIMEOUT',
+            }, $e);
+        }
+        $current['oauth'] = [
+            'provider' => $oauth['provider'],
+            'refreshToken' => $tokens->refreshToken ?? $oauth['refreshToken'],
+            'accessToken' => $tokens->accessToken,
+            'expiresAt' => $tokens->expiresAt,
+        ];
+        // Written only when nobody changed the row meanwhile (a parallel
+        // refresh or a new sign-in wins; our access token is valid anyway).
+        Database::run(
+            $pdo,
+            'UPDATE mail_account SET credential_enc = ? WHERE id = ? AND credential_enc = ?',
+            [self::encrypt($dek, $accountId, $current), $accountId, \is_string($before) ? $before : ''],
+        );
+
+        return $tokens->accessToken;
     }
 
     /**

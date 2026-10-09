@@ -14,6 +14,8 @@ final class FakeTokenClient implements TokenClient
     public array $requests = [];
     /** @var list<array{status: int, body: array<string, mixed>}|'network'> */
     public array $responses = [];
+    /** Runs while a request is "in flight" (e.g. a parallel job changes the row). */
+    public ?\Closure $during = null;
 
     /**
      * An id_token with the given claims (unsigned, like the flow reads it).
@@ -38,6 +40,9 @@ final class FakeTokenClient implements TokenClient
     public function post(string $url, #[\SensitiveParameter] array $form): array
     {
         $this->requests[] = ['url' => $url, 'form' => $form];
+        if ($this->during !== null) {
+            ($this->during)();
+        }
         $next = array_shift($this->responses) ?? ['status' => 200, 'body' => ['access_token' => 'access-' . \count($this->requests), 'expires_in' => 3600]];
         if ($next === 'network') {
             throw new OAuthException('network');

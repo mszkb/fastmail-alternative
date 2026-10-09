@@ -328,6 +328,10 @@ final class OAuthTest extends DatabaseTestCase
         $this->tokens->responses[] = 'network';
         $this->assertLoadFails($accountId, 'TIMEOUT', 'unreachable');
 
+        // Client secret expired or wrong: the operator has to fix it, no retries.
+        $this->tokens->respond(401, ['error' => 'invalid_client']);
+        $this->assertLoadFails($accountId, 'OAUTH_NOT_CONFIGURED', 'auth');
+
         // Provider removed from the configuration.
         $this->assertLoadFails($accountId, 'OAUTH_NOT_CONFIGURED', 'auth', Config::fromArray(['MASTER_KEY' => $this->masterKey]));
         self::assertFalse(self::$db->pdo()->inTransaction());
@@ -358,6 +362,64 @@ final class OAuthTest extends DatabaseTestCase
         }
     }
 
+    public function testAParallelRefreshOrSignInIsNotOverwritten(): void
+    {
+        $accountId = $this->connect();
+        $this->expire($accountId);
+        $this->tokens->respond(200, ['access_token' => 'ours', 'refresh_token' => 'refresh-ours', 'expires_in' => 3600]);
+        // While our refresh waits for the provider, a new sign-in stores other tokens.
+        $this->tokens->during = function () use ($accountId): void {
+            $this->tokens->during = null;
+            $credentials = $this->credentials($accountId);
+            \assert(\is_array($credentials['oauth']));
+            $credentials['oauth'] = ['refreshToken' => 'refresh-parallel', 'accessToken' => 'parallel', 'expiresAt' => time() + 3600] + $credentials['oauth'];
+            /** @var string $wrapped */
+            $wrapped = Database::run(self::$db->pdo(), 'SELECT wrapped_dek FROM mail_account WHERE id = ?', [$accountId])->fetchColumn();
+            $dek = Envelope::unwrapAccountKey($this->masterKey, $wrapped);
+            Database::run(self::$db->pdo(), 'UPDATE mail_account SET credential_enc = ? WHERE id = ?', [
+                Envelope::encryptField($dek, json_encode($credentials, JSON_THROW_ON_ERROR), Envelope::credentialAad($accountId)),
+                $accountId,
+            ]);
+        };
+        $context = AccountContext::load(self::$db->pdo(), $accountId, $this->appConfig, $this->tokens);
+        self::assertSame('ours', $context->imap->oauthToken);
+        $oauth = $this->credentials($accountId)['oauth'];
+        \assert(\is_array($oauth));
+        self::assertSame(['parallel', 'refresh-parallel'], [$oauth['accessToken'], $oauth['refreshToken']]);
+    }
+
+    public function testTokensOnlyGoToTheProvidersServers(): void
+    {
+        $accountId = $this->connect();
+        // A host in the row (e.g. from an imported config file) is ignored.
+        Database::run(self::$db->pdo(), "UPDATE mail_account SET imap_host = 'evil.example.org', imap_port = 143, smtp_host = 'evil.example.org' WHERE id = ?", [$accountId]);
+        $context = AccountContext::load(self::$db->pdo(), $accountId, $this->appConfig, $this->tokens);
+        self::assertSame(['imap.gmail.com', 993, true], [$context->imap->host, $context->imap->port, $context->imap->secure]);
+        self::assertSame(['smtp.gmail.com', 465, true], [$context->smtp->host, $context->smtp->port, $context->smtp->secure]);
+
+        // Signing in again also resets the stored servers.
+        $state = $this->start(['accountId' => $accountId]);
+        $this->grant();
+        $this->returnFromProvider(http_build_query(['state' => $state, 'code' => 'c']));
+        /** @var array{imap_host: string, imap_port: int|string, smtp_host: string} $row */
+        $row = Database::run(self::$db->pdo(), 'SELECT imap_host, imap_port, smtp_host FROM mail_account WHERE id = ?', [$accountId])->fetch();
+        self::assertSame(['imap.gmail.com', 993, 'smtp.gmail.com'], [$row['imap_host'], (int) $row['imap_port'], $row['smtp_host']]);
+    }
+
+    public function testRedirectKeepsThePathOfPublicUrl(): void
+    {
+        $app = App::create(
+            Config::fromArray(['MASTER_KEY' => $this->masterKey, 'PUBLIC_URL' => 'https://proxy.example.org/mail', 'OAUTH_GOOGLE_CLIENT_ID' => 'id', 'OAUTH_GOOGLE_CLIENT_SECRET' => 's']),
+            self::$db,
+            new Logger('api', 'info', Http::memoryStream()),
+            [],
+            $this->tester,
+            $this->tokens,
+        );
+        $response = $app->handle(Http::request('GET', '/api/oauth/callback?state=x', ['Sec-Fetch-Site' => 'cross-site']));
+        self::assertSame('/mail/?oauth=error&reason=state', $response->getHeaderLine('Location'));
+    }
+
     public function testImportedOAuthAccountWaitsForANewSignIn(): void
     {
         $file = [
@@ -370,7 +432,8 @@ final class OAuthTest extends DatabaseTestCase
                 'emailAddress' => 'me@gmail.com',
                 'credentialKind' => 'oauth2',
                 'oauthProvider' => 'google',
-                'imap' => ['host' => 'imap.gmail.com', 'port' => 993, 'user' => 'me@gmail.com'],
+                // A crafted file: the token must still only go to Google (see renew()).
+                'imap' => ['host' => 'imap.evil.example.org', 'port' => 993, 'user' => 'me@gmail.com'],
                 'smtp' => ['host' => 'smtp.gmail.com', 'port' => 465, 'user' => 'me@gmail.com'],
                 'identities' => [],
                 'folderRoles' => [],
@@ -386,6 +449,7 @@ final class OAuthTest extends DatabaseTestCase
         $state = $this->start(['accountId' => $row['id']]);
         $this->grant();
         self::assertSame(['oauth' => 'connected', 'account' => $row['id']], self::redirectQuery($this->returnFromProvider(http_build_query(['state' => $state, 'code' => 'c']))));
+        self::assertSame('imap.gmail.com', Database::run(self::$db->pdo(), 'SELECT imap_host FROM mail_account WHERE id = ?', [$row['id']])->fetchColumn());
     }
 
     public function testImapClientAuthenticatesWithXoauth2(): void
