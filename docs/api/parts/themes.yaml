@@ -1,0 +1,128 @@
+# Installable themes (#126); format: docs/themes/schema.json.
+paths:
+  /api/themes:
+    get:
+      operationId: listThemes
+      tags: [settings]
+      summary: Installed themes of the user
+      responses:
+        '200':
+          description: Installed themes, by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThemeListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: installTheme
+      tags: [settings]
+      summary: Install or update a theme
+      description: |
+        The body is the theme file (`*.fmatheme.json`, at most 32 KB). Only
+        fields and values of docs/themes/schema.json pass (no code, no free
+        CSS, no URLs); text/background pairs must reach 4.5:1 contrast in
+        light and dark. A theme with an installed `id` replaces it (200).
+        At most 20 themes per user. Which theme is active is chosen per
+        device in the client.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ThemeFile'
+      responses:
+        '200':
+          description: Installed theme replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledTheme'
+        '201':
+          description: Theme installed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstalledTheme'
+        '400':
+          description: Not JSON or not a valid theme
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThemeError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: 20 themes are installed already
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '413':
+          description: Larger than 32 KB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThemeError'
+  /api/themes/{id}:
+    delete:
+      operationId: deleteTheme
+      tags: [settings]
+      summary: Delete an installed theme
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,47}$' }
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  schemas:
+    ThemeFile:
+      type: object
+      description: A theme file; the full rules are in docs/themes/schema.json.
+      required: [format, id, name, version, author, license, minAppVersion]
+      properties:
+        format: { const: 1 }
+        id: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,47}$' }
+        name: { type: string, maxLength: 60 }
+        version: { type: string }
+        author: { type: string, maxLength: 100 }
+        license: { type: string, maxLength: 60 }
+        minAppVersion: { type: string }
+        description: { type: string, maxLength: 300 }
+        colors: { type: object }
+        sizes: { type: object }
+        layout: { type: object }
+    InstalledTheme:
+      type: object
+      required: [id, name, version, installedAt, theme]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        installedAt: { type: string, format: date-time }
+        theme:
+          $ref: '#/components/schemas/ThemeFile'
+    ThemeListResponse:
+      type: object
+      required: [themes]
+      properties:
+        themes:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstalledTheme'
+    ThemeError:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        errors:
+          type: array
+          description: Every problem found, German, naming the field (never the rejected value).
+          items: { type: string }

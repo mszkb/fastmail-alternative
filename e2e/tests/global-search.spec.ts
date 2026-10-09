@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ACCOUNT_A, MAILBOX_A, MAILBOX_B, deliver, textMail } from './helpers'
+import { ACCOUNT_A, MAILBOX_A, MAILBOX_B, appendOld, createFolder, textMail } from './helpers'
 
 // Global search (#121): search field in the header, hits of all accounts
 // merged by date, loading more while scrolling, opening a hit, ending the search.
@@ -7,13 +7,19 @@ import { ACCOUNT_A, MAILBOX_A, MAILBOX_B, deliver, textMail } from './helpers'
 const run = process.env.E2E_RUN!
 
 test('header search across accounts: more hits while scrolling, open, end', async ({ browser }) => {
-  // 60 hits in B (more than one page of 50) and one in A, newest last.
+  // 60 hits in B (more than one page of 50) and one in A, newest last - in
+  // folders of their own, so the inboxes the other specs use stay as they are.
+  const folder = `Sammel-${run}`
+  await createFolder(MAILBOX_A, folder)
+  await createFolder(MAILBOX_B, folder)
   const base = Date.now() - 3_600_000
   for (let i = 1; i <= 60; i++) {
     const subject = `Sammel ${run} B${String(i).padStart(2, '0')}`
-    await deliver(MAILBOX_B, textMail(MAILBOX_B, subject, 'Text', new Date(base + i * 1000)))
+    const date = new Date(base + i * 1000)
+    await appendOld(MAILBOX_B, textMail(MAILBOX_B, subject, 'Text', date), date, folder)
   }
-  await deliver(MAILBOX_A, textMail(MAILBOX_A, `Sammel ${run} A`, 'Text', new Date(base + 90_000)))
+  const dateA = new Date(base + 90_000)
+  await appendOld(MAILBOX_A, textMail(MAILBOX_A, `Sammel ${run} A`, 'Text', dateA), dateA, folder)
 
   const context = await browser.newContext({
     storageState: '.auth/state.json',
@@ -21,6 +27,17 @@ test('header search across accounts: more hits while scrolling, open, end', asyn
   })
   const page = await context.newPage()
   await page.goto('/')
+  // The search covers folders the server knows: sync until both have the new one.
+  const accounts = (await (await page.request.get('/api/accounts')).json()) as {
+    accounts: { id: string }[]
+  }
+  await expect(async () => {
+    await page.request.post('/api/sync')
+    for (const account of accounts.accounts) {
+      const res = await page.request.get(`/api/accounts/${account.id}/folders`)
+      expect(JSON.stringify(await res.json())).toContain(folder)
+    }
+  }).toPass({ timeout: 60_000, intervals: [2_000] })
   await page.getByRole('banner').getByLabel('Suchbegriff').fill(`subject:"Sammel ${run}"`)
   await page.keyboard.press('Enter')
 

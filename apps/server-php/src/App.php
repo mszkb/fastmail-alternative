@@ -95,6 +95,7 @@ final class App
         (new Routes\MessageContentRoutes($db, $config, new Mail\RawStorage($config, $logger), $logger))->register($app, $requireAuth);
         (new Routes\SearchRoutes($db, $config, $logger))->register($app, $requireAuth);
         (new Routes\GlobalSearchRoutes($db, $config, $logger))->register($app, $requireAuth);
+        (new Routes\ThemeRoutes($db))->register($app, $requireAuth);
         (new Routes\OutboxRoutes($db, $config, $jobs, $logger))->register($app, $requireAuth);
         (new Routes\DraftRoutes($db, $config, $jobs, new Mail\RawStorage($config, $logger), $logger))->register($app, $requireAuth);
         (new Routes\UploadRoutes($db, $config, new Mail\RawStorage($config, $logger), $logger))->register($app, $requireAuth);

@@ -1438,7 +1438,14 @@ function searchFor(query: string): void {
   void runSearch()
 }
 
-defineExpose({ goBack, openFromUnified, switchAccount, searchFor, currentFolder: shownFolderId })
+defineExpose({
+  goBack,
+  openFromUnified,
+  switchAccount,
+  searchFor,
+  currentFolder: shownFolderId,
+  setReadingPane,
+})
 
 function closeDetail(): void {
   detailRequest++

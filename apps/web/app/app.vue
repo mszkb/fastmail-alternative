@@ -54,7 +54,9 @@ import type {
   AccountListResponse,
   AccountSummary,
   AccountSyncStatus,
+  ReadingPane,
   SyncStatusResponse,
+  ThemeLayout,
   UserSettings,
 } from '@fma/shared'
 import {
@@ -137,6 +139,7 @@ const mailView = ref<{
   switchAccount: (id: string) => boolean
   searchFor: (query: string) => void
   currentFolder: () => string
+  setReadingPane: (pane: ReadingPane) => void
 } | null>(null)
 const swipe = new SwipeBack()
 const swipeDistance = ref(0)
@@ -530,6 +533,13 @@ async function openSettings(): Promise<void> {
 }
 
 const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** Layout options of an activated theme (#126), taken over once for this device. */
+function applyThemeLayout(layout: ThemeLayout): void {
+  if (layout.density) setAppearance(themeChoice.value, layout.density)
+  if (layout.accountRail) setRailExpanded(layout.accountRail === 'list')
+  if (layout.readingPane) mailView.value?.setReadingPane(layout.readingPane)
+}
 
 /** Settings: theme and density (#112, per device). */
 function onAppearanceChange(event: Event): void {
@@ -1097,6 +1107,7 @@ onBeforeUnmount(() => {
               Gilt für dieses Gerät. „Kompakt“ zeigt mehr Nachrichten und blendet die Vorschauzeile
               aus.
             </p>
+            <ThemeSettings @layout="applyThemeLayout" />
           </div>
 
           <div class="card">
