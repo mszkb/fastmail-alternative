@@ -184,6 +184,12 @@ Ziel: Self-Hosting auf jedem Webhoster mit PHP und MySQL; Docker Compose bleibt 
 | 8.3 | Managed Backups                                        | P2   | M       | 6.2            | –                                                  |
 | 8.4 | Business-Funktionen (Team-Delegation, SSO, Audit-Logs) | P2   | XL      | 8.2            | –                                                  |
 
+## Phase 9 – Native Apps 🟨
+
+| #   | Epic / Aufgabe                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Prio | Aufwand | Abhängigkeiten | Akzeptanz                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------- | -------------- | ------------------------------------------ |
+| 9.1 | 🟨 **#136** Native Apps für iOS und Android (Kotlin Multiplatform + Compose Multiplatform) – Stand: Android-Preview (Sideload-APK aus CI, `apps/mobile`) mit Login per Geräte-Token (#138), Kontowechsel, Ordnern, Nachrichtenliste, Lesen im gesperrten WebView, Aktionen, Verfassen/Antworten und FCM-Push (#139) bzw. Abfrage alle 15 min als Notlösung; offen: Offline-Cache (#145), iOS, Design-Tokens, Store-Releases ([Anleitung](docs/operations/android-preview.md)) | P2   | XL      | ADR-0010       | Apps in App Store und Google Play mit Push |
+
 ---
 
 ## MVP-Akzeptanzkriterien
