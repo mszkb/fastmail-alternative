@@ -67,6 +67,9 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
     var inReplyTo by remember { mutableStateOf<String?>(null) }
     var references by remember { mutableStateOf<List<String>?>(null) }
     var sending by remember { mutableStateOf(false) }
+    // Navigation happens in composition (main thread), not from the send coroutine.
+    var sent by remember { mutableStateOf(false) }
+    LaunchedEffect(sent) { if (sent) onClose() }
     var error by remember { mutableStateOf<String?>(null) }
     // Idempotency key: a retry after a network error does not send twice.
     val clientId = remember { Uuid.random().toString() }
@@ -113,7 +116,7 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
         if (error != null) return
         sending = true
         scope.launch {
-            val sent = try {
+            sent = try {
                 api.send(
                     SendMessageRequest(
                         accountId = account,
@@ -134,7 +137,6 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
             } finally {
                 sending = false
             }
-            if (sent) onClose()
         }
     }
 
