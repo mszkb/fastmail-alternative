@@ -32,8 +32,23 @@ data class MailState(
     val refreshing: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
+    /** The optional unified inbox is enabled on the server (off by default, principle 8). */
+    val unifiedEnabled: Boolean = false,
+    /** Unified inbox: message id -> INBOX folder of its account. */
+    val folderOf: Map<String, String> = emptyMap(),
 ) {
+    val unified: Boolean get() = selectedAccountId == UNIFIED
     val selectedAccount: AccountSummary? get() = accounts.firstOrNull { it.id == selectedAccountId }
+
+    /** The folder an action on [messageId] refers to. */
+    fun folderFor(messageId: String): String? = folderOf[messageId] ?: selectedFolderId
+
+    /** The account new mail is written from: the selected one, or the first in the unified view. */
+    val composeAccountId: String? get() = selectedAccount?.id ?: accounts.firstOrNull()?.id
+
+    companion object {
+        const val UNIFIED = "__unified__"
+    }
     val selectedFolder: FolderSummary? get() = folders.firstOrNull { it.id == selectedFolderId }
 }
 
@@ -55,6 +70,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         private set
 
     private val throttle = SyncThrottle()
+    private var settingsLoaded = false
     private var pollJob: Job? = null
 
     init {
@@ -200,13 +216,25 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
             showError(e)
             return null
         }
+        if (!settingsLoaded) {
+            settingsLoaded = true
+            val unified = runCatching { api.settings().unifiedInbox }.getOrDefault(false)
+            _mail.update { it.copy(unifiedEnabled = unified && accounts.size > 1) }
+        }
         val before = _mail.value.selectedAccount
-        val selected = _mail.value.selectedAccountId?.takeIf { id -> accounts.any { it.id == id } }
-            ?: accounts.firstOrNull()?.id
+        val wasUnified = _mail.value.unified
+        val unreadBefore = _mail.value.accounts.sumOf { it.unreadCount }
+        val selected = _mail.value.selectedAccountId?.takeIf { id ->
+            accounts.any { it.id == id } || (id == MailState.UNIFIED && _mail.value.unifiedEnabled)
+        } ?: accounts.firstOrNull()?.id
         _mail.update { it.copy(accounts = accounts, selectedAccountId = selected) }
         val after = _mail.value.selectedAccount
         when {
             selected == null -> Unit
+            selected == MailState.UNIFIED -> {
+                val changed = accounts.sumOf { it.unreadCount } != unreadBefore || accounts.any { it.syncing }
+                if (!wasUnified || changed || _mail.value.messages.isEmpty()) reloadFirstPage(replace = !wasUnified)
+            }
             _mail.value.folders.isEmpty() || before?.id != selected -> loadFolders(selected)
             before?.lastSyncAt != after?.lastSyncAt || before?.unreadCount != after?.unreadCount ||
                 (before?.syncing == true && after?.syncing == false) -> {
@@ -219,8 +247,15 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
 
     fun selectAccount(accountId: String) {
         if (accountId == _mail.value.selectedAccountId) return
-        _mail.update { it.copy(selectedAccountId = accountId, folders = emptyList(), selectedFolderId = null, messages = emptyList(), nextCursor = null) }
-        viewModelScope.launch { loadFolders(accountId) }
+        _mail.update {
+            it.copy(
+                selectedAccountId = accountId, folders = emptyList(), selectedFolderId = null,
+                messages = emptyList(), nextCursor = null, folderOf = emptyMap(),
+            )
+        }
+        viewModelScope.launch {
+            if (accountId == MailState.UNIFIED) reloadFirstPage(replace = true) else loadFolders(accountId)
+        }
     }
 
     private suspend fun loadFolders(accountId: String) {
@@ -262,6 +297,26 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
      */
     suspend fun reloadFirstPage(replace: Boolean = false) {
         val api = api ?: return
+        if (_mail.value.unified) {
+            if (replace) _mail.update { it.copy(loadingMessages = true) }
+            try {
+                val page = api.unifiedInbox()
+                if (!_mail.value.unified) return
+                _mail.update {
+                    it.copy(
+                        messages = page.messages.map { m -> m.toListItem() },
+                        folderOf = page.messages.associate { m -> m.id to m.folderId },
+                        nextCursor = page.nextCursor,
+                        loadingMessages = false,
+                        error = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _mail.update { it.copy(loadingMessages = false) }
+                showError(e)
+            }
+            return
+        }
         val folderId = _mail.value.selectedFolderId ?: return
         if (replace) _mail.update { it.copy(loadingMessages = true) }
         try {
@@ -290,8 +345,28 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
     fun loadMore() {
         val state = _mail.value
         val cursor = state.nextCursor ?: return
-        val folderId = state.selectedFolderId ?: return
         if (state.loadingMore) return
+        if (state.unified) {
+            _mail.update { it.copy(loadingMore = true) }
+            viewModelScope.launch {
+                try {
+                    val page = api?.unifiedInbox(cursor) ?: return@launch
+                    _mail.update { s ->
+                        s.copy(
+                            messages = s.messages + page.messages.map { it.toListItem() }.filter { m -> s.messages.none { it.id == m.id } },
+                            folderOf = s.folderOf + page.messages.associate { it.id to it.folderId },
+                            nextCursor = page.nextCursor,
+                        )
+                    }
+                } catch (e: Exception) {
+                    showError(e)
+                } finally {
+                    _mail.update { it.copy(loadingMore = false) }
+                }
+            }
+            return
+        }
+        val folderId = state.selectedFolderId ?: return
         _mail.update { it.copy(loadingMore = true) }
         viewModelScope.launch {
             try {
@@ -314,6 +389,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
     /** Asks the server to fetch older mail of the folder from the provider (beyond sync_since). */
     fun loadOlder() {
         val api = api ?: return
+        if (_mail.value.unified) return
         val folderId = _mail.value.selectedFolderId ?: return
         viewModelScope.launch {
             try {
@@ -347,7 +423,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         onDone: (String?) -> Unit = {},
     ) {
         val api = api ?: return
-        val folder = folderId ?: _mail.value.selectedFolderId ?: return
+        val folder = folderId ?: _mail.value.folderFor(messageId) ?: return
         applyLocally(messageId, action)
         viewModelScope.launch {
             try {

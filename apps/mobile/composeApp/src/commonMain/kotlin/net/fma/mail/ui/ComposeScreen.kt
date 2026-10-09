@@ -57,7 +57,8 @@ import kotlin.uuid.Uuid
 @Composable
 fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val accountId = remember { vm.mail.value.selectedAccountId }
+    // Replies and forwards always go out from the message's own account (also in the unified view).
+    var accountId by remember { mutableStateOf(if (messageId == null) vm.mail.value.composeAccountId else null) }
     var identities by remember { mutableStateOf<List<ComposeIdentity>>(emptyList()) }
     var identity by remember { mutableStateOf<ComposeIdentity?>(null) }
     var to by remember { mutableStateOf("") }
@@ -74,15 +75,17 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
     // Idempotency key: a retry after a network error does not send twice.
     val clientId = remember { Uuid.random().toString() }
 
-    LaunchedEffect(accountId, messageId) {
+    LaunchedEffect(messageId) {
         val api = vm.api ?: return@LaunchedEffect
-        if (accountId == null) return@LaunchedEffect
         try {
-            identities = api.identities(accountId)
+            val original = if (messageId != null && mode != "new") api.message(messageId) else null
+            val account = original?.accountId ?: vm.mail.value.composeAccountId ?: return@LaunchedEffect
+            accountId = account
+            identities = api.identities(account)
             identity = identities.firstOrNull { it.isDefault } ?: identities.firstOrNull()
-            if (messageId != null && mode != "new") {
-                val original = api.message(messageId)
-                val own = identities.map { it.emailAddress } + listOfNotNull(vm.mail.value.selectedAccount?.emailAddress)
+            if (original != null) {
+                val own = identities.map { it.emailAddress } +
+                    listOfNotNull(vm.mail.value.accounts.firstOrNull { it.id == account }?.emailAddress)
                 val draft = when (mode) {
                     "forward" -> forward(original)
                     "replyAll" -> replyAll(original, own).also { cc = it.second }.first
@@ -169,7 +172,9 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
         },
     ) { padding ->
         if (accountId == null) {
-            Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { Text("Kein Konto ausgewählt.") }
+            Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
+                if (messageId != null && error == null) CircularProgressIndicator() else Text(error ?: "Kein Konto ausgewählt.")
+            }
             return@Scaffold
         }
         Column(

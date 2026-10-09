@@ -108,6 +108,16 @@ class FmaApi(
 
     suspend fun accounts(): List<AccountSummary> = client.get("api/accounts") { auth() }.read<AccountListResponse>().accounts
 
+    suspend fun settings(): Settings = client.get("api/settings") { auth() }.read()
+
+    /** Optional unified inbox (404 when the setting is off, principle 8). */
+    suspend fun unifiedInbox(cursor: String? = null, limit: Int = 50): UnifiedPage =
+        client.get("api/unified/inbox") {
+            auth()
+            parameter("limit", limit)
+            cursor?.let { parameter("cursor", it) }
+        }.read()
+
     suspend fun syncAll(): SyncResponse = client.post("api/sync") { auth() }.read()
 
     suspend fun syncStatus(): List<AccountSyncStatus> = client.get("api/sync/status") { auth() }.read<SyncStatusResponse>().accounts

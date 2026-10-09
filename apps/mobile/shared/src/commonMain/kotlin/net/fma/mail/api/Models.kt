@@ -147,6 +147,30 @@ data class SearchResponse(
 )
 
 @Serializable
+data class Settings(val unifiedInbox: Boolean = false)
+
+/** An item of the optional unified inbox: MessageListItem plus its account and INBOX. */
+@Serializable
+data class UnifiedItem(
+    val id: String,
+    val subject: String,
+    val from: MailPerson? = null,
+    val date: String,
+    val snippet: String = "",
+    val flags: MessageFlags,
+    val hasAttachments: Boolean = false,
+    val threadId: String? = null,
+    val threadCount: Int = 1,
+    val accountId: String,
+    val folderId: String,
+) {
+    fun toListItem() = MessageListItem(id, subject, from, date, snippet, flags, hasAttachments, threadId, threadCount)
+}
+
+@Serializable
+data class UnifiedPage(val messages: List<UnifiedItem>, val nextCursor: String? = null)
+
+@Serializable
 data class LoadOlderResponse(val queued: Boolean)
 
 @Serializable

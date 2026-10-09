@@ -114,20 +114,22 @@ fun MailScreen(
             topBar = {
                 Column {
                     TopAppBar(
-                        title = { Text(state.selectedFolder?.let { folderTitle(it) } ?: "E-Mail") },
+                        title = {
+                            Text(if (state.unified) "Alle Konten" else state.selectedFolder?.let { folderTitle(it) } ?: "E-Mail")
+                        },
                         navigationIcon = {
                             IconButton(onClick = { scope.launch { drawer.open() } }) {
                                 Icon(Icons.Filled.Menu, contentDescription = "Ordner")
                             }
                         },
                         actions = {
-                            if (state.selectedAccountId != null) {
+                            if (state.selectedAccount != null) {
                                 IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, contentDescription = "Suchen") }
                             }
                             IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, contentDescription = "Einstellungen") }
                         },
                     )
-                    AccountBar(state.accounts, state.selectedAccountId, vm::selectAccount)
+                    AccountBar(state.accounts, state.selectedAccountId, state.unifiedEnabled, vm::selectAccount)
                     if (state.selectedAccount?.syncing == true) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
@@ -161,7 +163,7 @@ fun MailScreen(
                         onLoadMore = vm::loadMore,
                         onLoadOlder = vm::loadOlder,
                         onSwipe = { id, action -> vm.messageAction(id, action) },
-                        onOpen = { id -> state.selectedFolderId?.let { onOpenMessage(id, it) } },
+                        onOpen = { id -> state.folderFor(id)?.let { onOpenMessage(id, it) } },
                     )
                 }
             }
@@ -184,12 +186,21 @@ private fun FolderRow(folder: FolderSummary, selected: Boolean, onClick: () -> U
 
 /** One account at a time (principle 8): chips with unread badge and error dot. */
 @Composable
-private fun AccountBar(accounts: List<AccountSummary>, selectedId: String?, onSelect: (String) -> Unit) {
+private fun AccountBar(accounts: List<AccountSummary>, selectedId: String?, unifiedEnabled: Boolean, onSelect: (String) -> Unit) {
     if (accounts.size <= 1 && accounts.firstOrNull()?.hasError != true) return
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
+        if (unifiedEnabled) {
+            item(key = MailState.UNIFIED) {
+                FilterChip(
+                    selected = selectedId == MailState.UNIFIED,
+                    onClick = { onSelect(MailState.UNIFIED) },
+                    label = { Text("Alle Konten") },
+                )
+            }
+        }
         items(accounts, key = { it.id }) { account ->
             FilterChip(
                 selected = account.id == selectedId,
