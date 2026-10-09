@@ -17,6 +17,7 @@ Phase 0 (Discovery), ADRs entschieden. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.
 | Phasen, Milestones, Epics  | `ROADMAP.md`                            |
 | Vision, Zielgruppen, Scope | `docs/product/vision.md`                |
 | Offene Produktfragen       | `docs/product/offene-fragen.md`         |
+| Funktionen Web ↔ App       | `docs/product/feature-matrix.md`        |
 | Architektur                | `docs/architecture/overview.md`         |
 | Datenmodell (ER)           | `docs/architecture/data-model.md`       |
 | Daten- & Sicherheitsmodell | `docs/architecture/security.md`         |
@@ -43,6 +44,7 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 
 - **Sprache:** Dokumentation auf Deutsch; Code, Bezeichner, Commit-Messages und Code-Kommentare auf Englisch.
 - **Architekturentscheidungen** werden als ADR in `docs/adr/` festgehalten (Vorlage: `docs/adr/0000-template.md`). Eine Entscheidung, die eine ADR betrifft, nicht stillschweigend im Code ändern – erst die ADR aktualisieren oder ersetzen.
+- **Feature-Verzeichnis pflegen:** Web-PWA und App sollen dieselben Funktionen und dieselbe Logik haben. Wird eine Funktion in einem Client gebaut, geändert oder entfernt, den Eintrag in `docs/product/features.yaml` anpassen (Status und Dateien je Client, gemeinsame Logik unter `logic`) und `pnpm features` ausführen. Ändert sich eine unter `logic` genannte Regel (z. B. `packages/shared/src/foreground-sync.ts` ↔ `apps/mobile/.../SyncRules.kt`), die Gegenseite im selben PR nachziehen oder ein Issue anlegen. Übersicht: [`docs/product/feature-matrix.md`](docs/product/feature-matrix.md).
 - **Roadmap pflegen:** Wird ein Epic begonnen/abgeschlossen, den Status in `ROADMAP.md` aktualisieren.
 - **Scope:** Was in `docs/product/vision.md` unter „Bewusst nicht im MVP" steht, nicht ohne Rücksprache einbauen.
 - **Definition of Done** (`docs/process/definition-of-done.md`) gilt für jeden PR.
@@ -74,21 +76,22 @@ Issues mit dem Label `ready` arbeitet ein lokaler Runner autonom ab (Ablauf, Lab
 
 Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (PWA, Tests; `npm i -g pnpm` oder Corepack), PHP ≥ 8.2 mit `pdo_mysql` und Composer (Backend).
 
-| Befehl                                                   | Wirkung                                                          |
-| -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `pnpm install`                                           | JS-Abhängigkeiten installieren                                   |
-| `pnpm lint` / `pnpm format`                              | ESLint / Prettier (nur prüfen: `pnpm format:check`)              |
-| `pnpm typecheck`                                         | TypeScript-Check über alle Pakete (web via vue-tsc)              |
-| `pnpm test`                                              | Tests (Vitest) über alle Pakete                                  |
-| `pnpm build`                                             | PWA bauen (statische Dateien)                                    |
-| `pnpm dev:web` / `dev:api` / `dev:worker`                | Dev-Server der PWA / PHP-API (`php -S`, Port 3001) / PHP-Worker  |
-| `composer install` (in `apps/server-php`)                | PHP-Abhängigkeiten installieren                                  |
-| `composer cs` / `analyse` / `test`                       | PHP-CS-Fixer / PHPStan / PHPUnit (Unit-Tests)                    |
-| `composer test:integration`                              | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail       |
-| `make check`                                             | alles wie in CI, plus PHP-Integrationstests                      |
-| `pnpm tokens`                                            | Design-Tokens (`packages/design-tokens`) → Compose-Theme der App |
-| `./gradlew :shared:jvmTest` (in `apps/mobile`)           | Tests der geteilten KMP-Logik (JDK 17+)                          |
-| `./gradlew :androidApp:assembleDebug` (in `apps/mobile`) | Android-Debug-APK (braucht Android-SDK; CI: `mobile-android`)    |
+| Befehl                                                   | Wirkung                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `pnpm install`                                           | JS-Abhängigkeiten installieren                                           |
+| `pnpm lint` / `pnpm format`                              | ESLint / Prettier (nur prüfen: `pnpm format:check`)                      |
+| `pnpm typecheck`                                         | TypeScript-Check über alle Pakete (web via vue-tsc)                      |
+| `pnpm test`                                              | Tests (Vitest) über alle Pakete                                          |
+| `pnpm build`                                             | PWA bauen (statische Dateien)                                            |
+| `pnpm dev:web` / `dev:api` / `dev:worker`                | Dev-Server der PWA / PHP-API (`php -S`, Port 3001) / PHP-Worker          |
+| `composer install` (in `apps/server-php`)                | PHP-Abhängigkeiten installieren                                          |
+| `composer cs` / `analyse` / `test`                       | PHP-CS-Fixer / PHPStan / PHPUnit (Unit-Tests)                            |
+| `composer test:integration`                              | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail               |
+| `make check`                                             | alles wie in CI, plus PHP-Integrationstests                              |
+| `pnpm features`                                          | Feature-Verzeichnis (`docs/product/features.yaml`) → `feature-matrix.md` |
+| `pnpm tokens`                                            | Design-Tokens (`packages/design-tokens`) → Compose-Theme der App         |
+| `./gradlew :shared:jvmTest` (in `apps/mobile`)           | Tests der geteilten KMP-Logik (JDK 17+)                                  |
+| `./gradlew :androidApp:assembleDebug` (in `apps/mobile`) | Android-Debug-APK (braucht Android-SDK; CI: `mobile-android`)            |
 
 Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright), `apps/mobile` (Kotlin Multiplatform: `shared`, `composeApp`, `androidApp`; Epic #136) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 
