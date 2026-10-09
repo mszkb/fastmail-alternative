@@ -114,19 +114,6 @@ jobs:
   api-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    services:
-      mariadb:
-        image: mariadb:11
-        env:
-          MARIADB_DATABASE: mail_test
-          MARIADB_USER: mail
-          MARIADB_PASSWORD: mail
-          MARIADB_RANDOM_ROOT_PASSWORD: '1'
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd "healthcheck.sh --connect --innodb_initialized"
-          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       DATABASE_URL: mysql://mail:mail@127.0.0.1:3306/mail_test
       SETUP_TOKEN: e2e-setup-code
@@ -144,6 +131,12 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      # The runner image ships MySQL 8 (supported, ADR-0013); a service
+      # container would depend on Docker Hub pulls, which hit rate limits.
+      - name: Start MySQL
+        run: |
+          sudo systemctl start mysql
+          mysql -uroot -proot -e "CREATE DATABASE mail_test; CREATE USER 'mail'@'%' IDENTIFIED BY 'mail'; GRANT ALL ON mail_test.* TO 'mail'@'%';"
       - name: Start PHP API
         run: |
           composer install --no-interaction --no-progress -d apps/server-php
@@ -156,4 +149,4 @@ jobs:
         run: ./gradlew --no-daemon :shared:jvmTest --tests 'net.fma.mail.ApiSmokeTest'
       - name: API log on failure
         if: failure()
-        run: tail -n 100 php.log
+        run: tail -n 100 php.log || true
