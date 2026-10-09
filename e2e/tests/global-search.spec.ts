@@ -43,20 +43,23 @@ test('header search across accounts: more hits while scrolling, open, end', asyn
 
   const results = page.getByRole('region', { name: 'Suche in allen Konten' })
   const items = results.getByRole('listitem').filter({ hasText: `Sammel ${run}` })
-  // Newest first across accounts: the hit of A, then B60, B59, ...
-  await expect(items).toHaveCount(50, { timeout: 30_000 })
+  // Newest first across accounts: the hit of A, then B60, B59, ... (only the
+  // rows around the visible part are rendered).
+  await expect(results.getByRole('status')).toHaveText('1–50 von ca. 61', { timeout: 30_000 })
   await expect(items.first()).toContainText(`Sammel ${run} A`)
+  await expect(items.first()).toHaveAttribute('aria-setsize', '50')
   await expect(items.nth(1)).toContainText(`Sammel ${run} B60`)
-  await expect(results.getByRole('status')).toHaveText('1–50 von ca. 61')
   // The term is highlighted, the account icon shows the initials.
   await expect(items.first().locator('mark').first()).toHaveText(`Sammel`)
   await expect(items.first().locator('.avatar')).toHaveText(/^P/)
 
   // Scrolling to the end loads the rest.
-  await items.last().scrollIntoViewIfNeeded()
-  await expect(items).toHaveCount(61, { timeout: 30_000 })
-  await expect(items.last()).toContainText(`Sammel ${run} B01`)
-  await expect(results.getByRole('status')).toHaveText('61 Treffer')
+  await expect(async () => {
+    await items.last().scrollIntoViewIfNeeded()
+    await expect(results.getByRole('status')).toHaveText('61 Treffer', { timeout: 1_000 })
+    await expect(items.last()).toContainText(`Sammel ${run} B01`, { timeout: 1_000 })
+  }).toPass({ timeout: 30_000 })
+  await expect(items.last()).toHaveAttribute('aria-posinset', '61')
 
   // Scope: only the active account (A).
   await results.getByLabel('Nur dieses Konto').check()

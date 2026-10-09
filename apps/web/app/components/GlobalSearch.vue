@@ -6,8 +6,8 @@
 // accounts come merged by date, each with its account icon and folder, the
 // terms highlighted in the subject (text parts, no HTML). More hits load
 // while scrolling (IntersectionObserver on the end of the list, a button as
-// fallback); long lists stay smooth because rows off screen are not laid out
-// (content-visibility). Accounts that failed get a line with the reason and
+// fallback); long lists stay smooth because only the rows around the visible
+// part are rendered (windowing). Accounts that failed get a line with the reason and
 // "Erneut versuchen". A new search or closing aborts the request in flight
 // (AbortController), late answers are dropped. Opening a hit hands it to the
 // mail view of its account, in the folder it was found in, so actions and
@@ -51,7 +51,16 @@ const emit = defineEmits<{
 }>()
 
 const scope = ref<GlobalSearchScope>('all')
-const messages = ref<GlobalSearchItem[]>([])
+// Thousands of hits: rows are prepared once when a page arrives (labels,
+// highlighted subject) and kept shallow.
+interface Row {
+  key: string
+  message: GlobalSearchItem
+  from: string
+  date: string
+  subject: { text: string; match: boolean }[]
+}
+const messages = shallowRef<Row[]>([])
 const accountResults = ref<GlobalSearchAccount[]>([])
 const total = ref(0)
 const nextCursor = ref<string | null>(null)
@@ -183,7 +192,8 @@ async function load(current: number, cursor: string | null): Promise<void> {
     }
     const body = (await res.json()) as GlobalSearchResponse
     if (current !== request) return
-    messages.value = cursor ? [...messages.value, ...body.messages] : body.messages
+    const rows = body.messages.map((message) => toRow(message))
+    messages.value = cursor ? messages.value.concat(rows) : rows
     accountResults.value = body.accounts
     total.value = body.total
     nextCursor.value = body.nextCursor
@@ -206,15 +216,81 @@ function close(): void {
   emit('close')
 }
 
+function toRow(message: GlobalSearchItem): Row {
+  return {
+    key: `${message.folderId}:${message.uid}`,
+    message,
+    from: personLabel(message.from),
+    date: shortDate(message.date),
+    subject: highlightParts(message.subject || '(kein Betreff)', terms.value),
+  }
+}
+
 function open(item: GlobalSearchItem): void {
   if (item.id) emit('open', item.accountId, item.folderId, item.id)
 }
+
+// Windowed list: only the rows around the visible part are in the DOM
+// (rows have one height, measured from a rendered row), spacers keep the
+// scroll height. The scroll container is the nearest scrolling ancestor.
+const OVERSCAN = 15
+const listEl = ref<HTMLElement | null>(null)
+const rowHeight = ref(68)
+const range = ref({ start: 0, end: 60 })
+let scroller: HTMLElement | Window | null = null
+let frame = 0
+
+const visibleRows = computed(() =>
+  messages.value
+    .slice(range.value.start, range.value.end)
+    .map((row, i) => ({ row, index: range.value.start + i })),
+)
+const padTop = computed(() => range.value.start * rowHeight.value)
+const padBottom = computed(
+  () => Math.max(0, messages.value.length - range.value.end) * rowHeight.value,
+)
+
+function findScroller(el: HTMLElement): HTMLElement | Window {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight)
+      return node
+  }
+  return window
+}
+
+function updateRange(): void {
+  frame = 0
+  const list = listEl.value
+  if (!list) return
+  scroller ??= findScroller(list)
+  const first = list.querySelector<HTMLElement>(':scope > li')
+  if (first && first.offsetHeight > 0) rowHeight.value = first.offsetHeight
+  const viewport = scroller instanceof Window ? window.innerHeight : scroller.clientHeight
+  const viewportTop = scroller instanceof Window ? 0 : scroller.getBoundingClientRect().top
+  // Pixels of the list above the top of the viewport.
+  const above = Math.max(0, viewportTop - list.getBoundingClientRect().top)
+  const start = Math.max(0, Math.floor(above / rowHeight.value) - OVERSCAN)
+  const end = Math.min(
+    messages.value.length,
+    Math.ceil((above + viewport) / rowHeight.value) + OVERSCAN,
+  )
+  if (start !== range.value.start || end !== range.value.end) range.value = { start, end }
+}
+
+function scheduleRange(): void {
+  if (!frame) frame = requestAnimationFrame(updateRange)
+}
+
+watch(messages, () => void nextTick(updateRange))
 
 // Load more when the end of the list comes into view.
 const sentinel = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('scroll', scheduleRange, { passive: true, capture: true })
+  window.addEventListener('resize', scheduleRange, { passive: true })
   if (typeof IntersectionObserver !== 'undefined') {
     observer = new IntersectionObserver(
       (entries) => {
@@ -235,6 +311,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('scroll', scheduleRange, { capture: true })
+  window.removeEventListener('resize', scheduleRange)
+  if (frame) cancelAnimationFrame(frame)
   observer?.disconnect()
   controller?.abort()
   request++
@@ -300,8 +379,17 @@ defineExpose({ search })
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-else-if="!loading && query && messages.length === 0" class="hint">Keine Treffer.</p>
 
-    <ul class="messages">
-      <li v-for="message in messages" :key="`${message.folderId}:${message.uid}`">
+    <ul
+      ref="listEl"
+      class="messages"
+      :style="{ paddingTop: `${padTop}px`, paddingBottom: `${padBottom}px` }"
+    >
+      <li
+        v-for="{ row: { key, message, from, date, subject }, index } in visibleRows"
+        :key="key"
+        :aria-posinset="index + 1"
+        :aria-setsize="messages.length"
+      >
         <button
           type="button"
           class="item"
@@ -320,17 +408,12 @@ defineExpose({ search })
           >
           <span class="body">
             <span class="row">
-              <span class="from">{{ personLabel(message.from) }}</span>
-              <span class="date">{{ shortDate(message.date) }}</span>
+              <span class="from">{{ from }}</span>
+              <span class="date">{{ date }}</span>
             </span>
             <span class="row">
               <span class="subject"
-                ><template
-                  v-for="(part, index) in highlightParts(
-                    message.subject || '(kein Betreff)',
-                    terms,
-                  )"
-                  :key="index"
+                ><template v-for="(part, index) in subject" :key="index"
                   ><mark v-if="part.match">{{ part.text }}</mark
                   ><template v-else>{{ part.text }}</template></template
                 ></span
@@ -339,8 +422,10 @@ defineExpose({ search })
                 folderNames.get(message.accountId)?.get(message.folderId) ?? ''
               }}</span>
             </span>
-            <span v-if="message.snippet" class="snippet">{{ message.snippet }}</span>
-            <span v-else-if="!message.synced" class="snippet">Noch nicht synchronisiert</span>
+            <!-- Always a third line: every row has the same height (windowing). -->
+            <span class="snippet">{{
+              message.snippet || (message.synced ? '\u00a0' : 'Noch nicht synchronisiert')
+            }}</span>
           </span>
         </button>
       </li>
@@ -416,12 +501,6 @@ defineExpose({ search })
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.messages li {
-  /* Rows off screen are not laid out: thousands of hits stay smooth. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 4.2rem;
 }
 
 .item {
