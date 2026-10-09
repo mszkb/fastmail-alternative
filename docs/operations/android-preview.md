@@ -87,8 +87,9 @@ Voraussetzung: Android 8.0 (API 26) oder neuer.
    - „Push über Firebase Cloud Messaging aktiv.“ – alles bereit;
    - „… Notlösung aktiv: Abfrage alle 15 Minuten.“ – App ohne Firebase gebaut oder Server ohne FCM.
    - Unter **Geräte** erscheint das Handy; in der Web-App unter _Einstellungen → Geräte_ ebenfalls, dort lässt es sich auch abmelden.
-5. **Push-Test:** App in den Hintergrund schicken (Home-Taste) und von einer anderen Adresse eine Testmail an eines der verbundenen Konten senden. Nach dem nächsten Sync des Servers (mit IMAP IDLE wenige Sekunden, sonst bis `SYNC_INTERVAL_SECONDS`) erscheint die Benachrichtigung **„Neue E-Mail“** – absichtlich ohne Absender und Betreff. Antippen öffnet den Posteingang und synchronisiert.
-6. Zum Prüfen auf dem Pi: `docker compose logs --tail=50 worker | grep push_notify` zeigt `sent`/`removed`/`failed` (ohne Tokens oder Inhalte).
+5. **Schneller Push-Test:** In den Einstellungen **Test-Benachrichtigung senden** tippen und die App sofort in den Hintergrund schicken. Nach dem nächsten Lauf des Servers erscheint „Neue E-Mail“. Damit ist die Kette Server → FCM → Handy geprüft, ohne dass eine Mail nötig ist. Bei offener App gibt es absichtlich keine Benachrichtigung, sie aktualisiert dann nur die Liste.
+6. **Push-Test mit echter Mail:** App in den Hintergrund schicken (Home-Taste) und von einer anderen Adresse eine Testmail an eines der verbundenen Konten senden. Nach dem nächsten Sync des Servers (mit IMAP IDLE wenige Sekunden, sonst bis `SYNC_INTERVAL_SECONDS`) erscheint die Benachrichtigung **„Neue E-Mail“** – absichtlich ohne Absender und Betreff. Antippen öffnet den Posteingang und synchronisiert.
+7. Zum Prüfen auf dem Pi: `docker compose logs --tail=50 worker | grep push_notify` zeigt `sent`/`removed`/`failed` (ohne Tokens oder Inhalte).
 
 Mit der Notlösung kommt die Benachrichtigung erst beim nächsten Abfragezeitpunkt (alle ~15 Minuten, Android kann das im Energiesparmodus weiter verzögern).
 

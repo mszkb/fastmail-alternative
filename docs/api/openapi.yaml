@@ -3878,6 +3878,34 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /api/push/test:
+    post:
+      operationId: sendTestPush
+      tags:
+        - push
+      summary: Queue a test notification
+      description: |
+        Queues the same content-free push_notify job as new mail does, for
+        all active subscriptions of the user (Web Push and FCM), with the
+        same coalescing (at most one queued job, at least 30 s apart).
+        `queued: false` when there is no active subscription or a job is
+        already waiting.
+      responses:
+        "202":
+          description: Request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - queued
+                properties:
+                  queued:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/push/vapid-public-key:
     get:
       operationId: getVapidPublicKey

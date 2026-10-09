@@ -46,6 +46,9 @@ class ApiSmokeTest {
             assertEquals(422, e.status)
         }
 
+        // No subscription yet: nothing to queue.
+        assertEquals(false, api.testPush())
+
         api.logout()
         try {
             api.accounts()

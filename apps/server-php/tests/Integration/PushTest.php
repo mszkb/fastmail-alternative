@@ -372,6 +372,18 @@ final class PushTest extends DatabaseTestCase
         self::assertStringNotContainsString('ya29.test', $log);
     }
 
+    public function testTestNotificationIsQueuedOnlyWithASubscriptionAndCoalesced(): void
+    {
+        self::assertSame(['queued' => false], Http::json($this->call('POST', '/api/push/test')), 'no subscription');
+        $this->subscribe('https://push.example.org/a');
+        $first = $this->call('POST', '/api/push/test');
+        self::assertSame(202, $first->getStatusCode());
+        self::assertSame(['queued' => true], Http::json($first));
+        self::assertSame(['queued' => false], Http::json($this->call('POST', '/api/push/test')), 'one queued job per user');
+        $payload = Database::run(self::$db->pdo(), "SELECT payload FROM job WHERE type = 'push_notify'")->fetchColumn();
+        self::assertSame(['userId' => $this->userId], json_decode((string) $payload, true));
+    }
+
     public function testEnqueueCoalescesPerUser(): void
     {
         $pdo = self::$db->pdo();

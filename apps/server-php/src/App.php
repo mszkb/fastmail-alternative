@@ -84,7 +84,7 @@ final class App
         $jobs = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
         (new AccountRoutes($db, $config, $tester ?? new SocketConnectionTester($config, $logger), $jobs))->register($app, $requireAuth);
         (new IdentityRoutes($db))->register($app, $requireAuth);
-        (new PushRoutes($config, new Subscriptions($db, $config)))->register($app, $requireAuth);
+        (new PushRoutes($config, new Subscriptions($db, $config), new Push\PushNotifyQueue($db)))->register($app, $requireAuth);
         (new Routes\ConfigTransferRoutes($db, $config, $logger))->register($app, $requireAuth);
         (new Routes\SettingsRoutes($db))->register($app, $requireAuth);
         (new Routes\StorageRoutes($db))->register($app, $requireAuth);

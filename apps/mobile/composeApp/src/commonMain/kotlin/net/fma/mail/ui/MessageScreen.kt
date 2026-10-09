@@ -152,10 +152,12 @@ fun MessageScreen(
                                 menuOpen = false
                                 onCompose("forward", messageId)
                             })
-                            DropdownMenuItem(text = { Text("Verschieben …") }, onClick = {
-                                menuOpen = false
-                                moveOpen = true
-                            })
+                            if (folders.isNotEmpty()) {
+                                DropdownMenuItem(text = { Text("Verschieben …") }, onClick = {
+                                    menuOpen = false
+                                    moveOpen = true
+                                })
+                            }
                             val junk = folders.firstOrNull { it.specialUse == "junk" && it.id != folderId }
                             if (junk != null) {
                                 DropdownMenuItem(text = { Text("Als Spam markieren") }, onClick = {

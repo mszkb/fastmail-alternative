@@ -263,6 +263,9 @@ data class OutboxMessage(
 data class FcmSubscriptionRequest(val token: String, val transport: String = "fcm")
 
 @Serializable
+data class PushTestResponse(val queued: Boolean)
+
+@Serializable
 data class PushUnsubscribeRequest(val endpoint: String)
 
 @Serializable

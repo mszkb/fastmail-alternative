@@ -202,6 +202,9 @@ class FmaApi(
         jsonBody(FcmSubscriptionRequest(token))
     })
 
+    /** Queues a content-free test notification for all of the user's devices. */
+    suspend fun testPush(): Boolean = client.post("api/push/test") { auth() }.read<PushTestResponse>().queued
+
     suspend fun unregisterPush(endpoint: String) = check(client.delete("api/push/subscriptions") {
         auth()
         jsonBody(PushUnsubscribeRequest(endpoint))

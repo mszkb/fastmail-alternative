@@ -64,6 +64,22 @@ fun SettingsScreen(vm: AppViewModel, platform: Platform, onBack: () -> Unit) {
             HorizontalDivider()
             Text("Benachrichtigungen", style = MaterialTheme.typography.titleMedium)
             Text(platform.push.status())
+            var testResult by remember { mutableStateOf<String?>(null) }
+            TextButton(onClick = {
+                scope.launch {
+                    val api = vm.api ?: return@launch
+                    testResult = try {
+                        if (api.testPush()) {
+                            "Test angefordert. Schick die App jetzt in den Hintergrund: Die Benachrichtigung kommt nach dem nächsten Lauf des Servers (meist unter einer Minute)."
+                        } else {
+                            "Nicht angefordert: kein aktives Push-Abo oder ein Push wartet bereits."
+                        }
+                    } catch (e: Exception) {
+                        AppViewModel.errorText(e)
+                    }
+                }
+            }) { Text("Test-Benachrichtigung senden") }
+            testResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             HorizontalDivider()
             Text("Geräte", style = MaterialTheme.typography.titleMedium)
             devices.forEach { device ->
