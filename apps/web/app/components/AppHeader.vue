@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // App header (#120): one bar across the full width. Left the product name
 // with our own mark (no logos of other products), in the middle the search
-// - until the global search (#121) it searches the active account like the
-// list's search did -, on the right the offline/queue state, help with the
+// - across all accounts (#121, GlobalSearch) -, on the right the
+// offline/queue state, help with the
 // keyboard shortcuts and the profile menu (settings, logout).
 // Small screens: a menu button opens the side menu with the accounts, and
 // the search icon opens the search as a full-screen layer.
