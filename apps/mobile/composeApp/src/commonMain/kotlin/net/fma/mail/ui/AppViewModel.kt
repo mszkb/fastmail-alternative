@@ -478,6 +478,11 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         }
     }
 
+    /** Fire-and-forget work that must outlive a screen (e.g. deleting a discarded draft). */
+    fun launchQuietly(block: suspend () -> Unit) {
+        viewModelScope.launch { runCatching { block() } }
+    }
+
     fun clearUndo() = _mail.update { it.copy(undo = null) }
 
     private fun applyLocally(messageId: String, action: String) {

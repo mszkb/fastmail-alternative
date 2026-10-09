@@ -246,6 +246,37 @@ data class SendMessageRequest(
     val inReplyTo: String? = null,
     val references: List<String>? = null,
     val clientId: String,
+    /** Server-side draft to delete on send (#150). */
+    val draftId: String? = null,
+)
+
+/** Autosave of a draft (PUT /api/drafts/{id}); attachments stay unchanged (attachmentIds omitted). */
+@Serializable
+data class SaveDraftRequest(
+    val accountId: String,
+    val identityId: String? = null,
+    val to: String = "",
+    val cc: String = "",
+    val subject: String,
+    val text: String,
+    val inReplyTo: String? = null,
+    val references: List<String> = emptyList(),
+    val baseVersion: Int = 0,
+    val force: Boolean = false,
+)
+
+@Serializable
+data class Draft(
+    val id: String,
+    val accountId: String,
+    val identityId: String? = null,
+    val to: String = "",
+    val cc: String = "",
+    val subject: String = "",
+    val text: String = "",
+    val inReplyTo: String? = null,
+    val references: List<String> = emptyList(),
+    val version: Int,
 )
 
 @Serializable

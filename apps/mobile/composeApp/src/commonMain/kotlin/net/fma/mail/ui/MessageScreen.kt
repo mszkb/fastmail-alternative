@@ -20,7 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -123,9 +123,6 @@ fun MessageScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück") }
                 },
                 actions = {
-                    IconButton(onClick = { act("unread", leave = true) }) {
-                        Icon(Icons.Filled.MarkEmailUnread, contentDescription = "Als ungelesen markieren")
-                    }
                     IconButton(onClick = {
                         flagged = !flagged
                         act(if (flagged) "flag" else "unflag", leave = false)
@@ -138,12 +135,21 @@ fun MessageScreen(
                     IconButton(onClick = { act("delete", leave = true) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Löschen")
                     }
+                    if (folders.firstOrNull { it.id == folderId }?.specialUse == "drafts") {
+                        IconButton(onClick = { onCompose("draft", messageId) }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Entwurf bearbeiten")
+                        }
+                    }
                     IconButton(onClick = { onCompose("reply", messageId) }, enabled = message != null) {
                         Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Antworten")
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Mehr") }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Als ungelesen markieren") }, onClick = {
+                                menuOpen = false
+                                act("unread", leave = true)
+                            })
                             DropdownMenuItem(text = { Text("Allen antworten") }, enabled = message != null, onClick = {
                                 menuOpen = false
                                 onCompose("replyAll", messageId)

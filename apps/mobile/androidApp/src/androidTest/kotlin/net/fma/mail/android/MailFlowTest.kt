@@ -104,6 +104,10 @@ class MailFlowTest {
             }
             path == "/api/accounts/a1/identities" -> """{"identities":[{"id":"i1","name":"Me","emailAddress":"me@example.org",
                 "signature":null,"isDefault":true}]}"""
+            path.startsWith("/api/drafts/") && request.method == HttpMethod.Put ->
+                """{"id":"${path.removePrefix("/api/drafts/")}","accountId":"a1","identityId":"i1","to":"","cc":"","bcc":"",
+                "subject":"","text":"","inReplyTo":null,"references":[],"version":1,"createdAt":"2026-10-09T10:00:00Z",
+                "updatedAt":"2026-10-09T10:00:00Z","messageIds":[],"attachments":[]}"""
             path == "/api/outbox" && request.method == HttpMethod.Post ->
                 """{"id":"o1","accountId":"a1","status":"queued","error":null}"""
             else -> return@MockEngine respond("""{"message":"not found"}""", HttpStatusCode.NotFound, jsonHeaders)
@@ -170,7 +174,7 @@ class MailFlowTest {
         compose.waitUntilAtLeastOneExists(hasContentDescription("Senden"), 5_000)
         compose.onNodeWithContentDescription("Senden").performClick()
         compose.waitUntil(10_000) { requests.contains("POST /api/outbox") }
-        val sent = bodies.last { it.contains("bob@example.org") }
+        val sent = bodies.last { it.contains("bob@example.org") && it.contains("clientId") }
         assertTrue(sent, sent.contains("\"identityId\":\"i1\"") && sent.contains("\"subject\":\"Test\""))
         waitFor("Zweite Mail")
     }

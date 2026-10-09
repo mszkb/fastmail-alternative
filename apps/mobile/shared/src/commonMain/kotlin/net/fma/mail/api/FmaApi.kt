@@ -14,6 +14,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
@@ -194,6 +195,17 @@ class FmaApi(
         auth()
         jsonBody(request)
     }.read()
+
+    /** Autosave (#150): 201 creates, 200 updates; 409 = changed elsewhere since baseVersion, 410 = sent/discarded. */
+    suspend fun saveDraft(id: String, request: SaveDraftRequest): Draft = client.put("api/drafts/$id") {
+        auth()
+        jsonBody(request)
+    }.read()
+
+    suspend fun deleteDraft(id: String) = check(client.delete("api/drafts/$id") { auth() })
+
+    /** A message of the IMAP Drafts folder as an editable draft. */
+    suspend fun openDraft(messageId: String): Draft = client.post("api/messages/$messageId/draft") { auth() }.read()
 
     // --- push -------------------------------------------------------------
 

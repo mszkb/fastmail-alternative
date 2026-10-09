@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,7 +40,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import net.fma.mail.api.ApiException
 import net.fma.mail.api.ComposeIdentity
+import net.fma.mail.api.SaveDraftRequest
 import net.fma.mail.api.SendMessageRequest
 import net.fma.mail.domain.isPlausibleAddress
 import net.fma.mail.domain.parseRecipients
@@ -74,10 +78,33 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
     var error by remember { mutableStateOf<String?>(null) }
     // Idempotency key: a retry after a network error does not send twice.
     val clientId = remember { Uuid.random().toString() }
+    // Server-side draft (#150): client-generated id, version 0 = not saved yet.
+    var draftId by remember { mutableStateOf(Uuid.random().toString()) }
+    var draftVersion by remember { mutableStateOf(0) }
+    var draftStatus by remember { mutableStateOf<String?>(null) }
+    var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(messageId) {
         val api = vm.api ?: return@LaunchedEffect
         try {
+            if (mode == "draft" && messageId != null) {
+                // A message of the Drafts folder: continue the server-side draft.
+                val draft = api.openDraft(messageId)
+                accountId = draft.accountId
+                identities = api.identities(draft.accountId)
+                identity = identities.firstOrNull { it.id == draft.identityId }
+                    ?: identities.firstOrNull { it.isDefault } ?: identities.firstOrNull()
+                to = draft.to
+                cc = draft.cc
+                subject = draft.subject
+                body = draft.text
+                inReplyTo = draft.inReplyTo
+                references = draft.references
+                draftId = draft.id
+                draftVersion = draft.version
+                loaded = true
+                return@LaunchedEffect
+            }
             val original = if (messageId != null && mode != "new") api.message(messageId) else null
             val account = original?.accountId ?: vm.mail.value.composeAccountId ?: return@LaunchedEffect
             accountId = account
@@ -100,9 +127,47 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
             identity?.signature?.takeIf { it.isNotBlank() }?.let { signature ->
                 if (!body.contains(signature)) body = "\n\n-- \n$signature$body"
             }
+            loaded = true
         } catch (e: Exception) {
             error = AppViewModel.errorText(e)
         }
+    }
+
+    // Autosave 2 s after the last change (like the PWA). A conflict with another
+    // device is resolved last-write-wins (force) - this device is being edited now.
+    LaunchedEffect(to, cc, subject, body, identity, loaded, sending, sent) {
+        val api = vm.api ?: return@LaunchedEffect
+        val account = accountId ?: return@LaunchedEffect
+        if (!loaded || sending || sent) return@LaunchedEffect
+        if (draftVersion == 0 && to.isBlank() && cc.isBlank() && subject.isBlank() && body.isBlank()) return@LaunchedEffect
+        delay(2_000)
+        if (sending || sent) return@LaunchedEffect
+        fun request(force: Boolean) = SaveDraftRequest(
+            accountId = account, identityId = identity?.id, to = to, cc = cc, subject = subject, text = body,
+            inReplyTo = inReplyTo, references = references.orEmpty(), baseVersion = draftVersion, force = force,
+        )
+        draftStatus = try {
+            draftVersion = try {
+                api.saveDraft(draftId, request(force = false)).version
+            } catch (e: ApiException) {
+                if (e.status != 409) throw e
+                api.saveDraft(draftId, request(force = true)).version
+            }
+            "Entwurf gespeichert"
+        } catch (e: ApiException) {
+            if (e.status == 410) "Entwurf wurde bereits gesendet oder verworfen" else "Entwurf nicht gespeichert"
+        } catch (e: Exception) {
+            "Entwurf nicht gespeichert (offline?)"
+        }
+    }
+
+    fun discard() {
+        val api = vm.api
+        if (api != null && draftVersion > 0) {
+            val id = draftId
+            vm.launchQuietly { api.deleteDraft(id) }
+        }
+        sent = true // leaves the screen through the same LaunchedEffect
     }
 
     fun send() {
@@ -131,6 +196,7 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
                         inReplyTo = inReplyTo,
                         references = references,
                         clientId = clientId,
+                        draftId = draftId.takeIf { draftVersion > 0 },
                     ),
                 )
                 true
@@ -152,14 +218,20 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
                             "reply" -> "Antworten"
                             "replyAll" -> "Allen antworten"
                             "forward" -> "Weiterleiten"
+                            "draft" -> "Entwurf"
                             else -> "Neue E-Mail"
                         },
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Verwerfen") }
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück, Entwurf behalten")
+                    }
                 },
                 actions = {
+                    IconButton(onClick = ::discard, enabled = !sending) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Verwerfen")
+                    }
                     if (sending) {
                         CircularProgressIndicator(Modifier.padding(12.dp))
                     } else {
@@ -193,6 +265,7 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
             OutlinedTextField(subject, { subject = it }, label = { Text("Betreff") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(body, { body = it }, label = { Text("Nachricht") }, modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            draftStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }

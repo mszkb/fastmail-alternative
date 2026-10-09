@@ -148,4 +148,19 @@ class FmaApiTest {
         )
         assertEquals("queued", result.status)
     }
+
+    @Test
+    fun draftAutosaveUsesPutWithBaseVersion() = runTest {
+        val api = api { HttpStatusCode.OK to """{"id":"d1","accountId":"a1","identityId":null,"to":"","cc":"","bcc":"",
+            "subject":"S","text":"T","inReplyTo":null,"references":[],"version":3,"createdAt":"2026-10-09T10:00:00Z",
+            "updatedAt":"2026-10-09T10:00:00Z","messageIds":[],"attachments":[]}""" }
+        val draft = api.saveDraft("d1", net.fma.mail.api.SaveDraftRequest(accountId = "a1", subject = "S", text = "T", baseVersion = 2))
+        assertEquals(3, draft.version)
+        val request = requests.single()
+        assertEquals(HttpMethod.Put, request.method)
+        assertEquals("/api/drafts/d1", request.url.encodedPath)
+        val body = Json.parseToJsonElement(bodyOf(request)).jsonObject
+        assertEquals("2", body["baseVersion"]!!.jsonPrimitive.content)
+        assertTrue("attachmentIds" !in body, "attachments stay unchanged")
+    }
 }
