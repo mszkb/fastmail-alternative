@@ -137,8 +137,12 @@ function onRecipientKeydown(event: KeyboardEvent): void {
 }
 
 function onRecipientBlur(): void {
-  // Let a click on a suggestion land first.
-  setTimeout(() => (activeField.value = ''), 150)
+  // Let a click on a suggestion land first. Only closes the list of the field
+  // that lost focus: a field focused meanwhile keeps its suggestions.
+  const field = activeField.value
+  setTimeout(() => {
+    if (activeField.value === field) activeField.value = ''
+  }, 150)
 }
 
 // Undo send (#116): countdown before the submit; 0 = off.
@@ -739,6 +743,7 @@ onBeforeUnmount(() => {
           <input
             ref="toInput"
             v-model="form.to"
+            aria-label="An"
             type="text"
             inputmode="email"
             autocomplete="off"
@@ -791,6 +796,7 @@ onBeforeUnmount(() => {
             <span>Cc</span>
             <input
               v-model="form.cc"
+              aria-label="Cc"
               type="text"
               inputmode="email"
               autocomplete="off"
@@ -832,6 +838,7 @@ onBeforeUnmount(() => {
             <span>Bcc</span>
             <input
               v-model="form.bcc"
+              aria-label="Bcc"
               type="text"
               inputmode="email"
               autocomplete="off"
@@ -912,7 +919,7 @@ onBeforeUnmount(() => {
 
       <footer class="compose-footer">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <p v-if="countdown > 0" class="countdown" role="status">
+        <p v-if="countdown > 0" class="undo-countdown" role="status">
           Wird in {{ countdown }} s gesendet …
           <button type="button" class="link" @click="undoSend">Rückgängig</button>
         </p>
@@ -982,7 +989,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.countdown {
+.undo-countdown {
   display: flex;
   align-items: center;
   justify-content: flex-end;
