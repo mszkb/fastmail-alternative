@@ -151,6 +151,8 @@ const props = defineProps<{
   accounts: AccountOption[]
   syncStatus?: AccountSyncStatus[]
   syncCancelSupported?: boolean
+  /** False while another view (global search, unified inbox) covers this one. */
+  shortcutsActive?: boolean
 }>()
 const emit = defineEmits<{
   editAccount: [id: string]
@@ -166,6 +168,7 @@ const SPECIAL_USE_LABELS: Record<string, string> = {
   archive: 'Archiv',
   junk: 'Spam',
   trash: 'Papierkorb',
+  all: 'Alle Nachrichten',
 }
 const ACCOUNT_STORAGE_KEY = 'fma.mail.accountId'
 /** Messages of a folder list kept offline (three pages of 50). */
@@ -180,6 +183,8 @@ const accountId = ref('')
 // Message opened from the unified inbox in another account: opened once
 // that account's folders (and its INBOX) are loaded.
 let pendingOpen = ''
+/** Folder to show the pending message in (global search hit); '' = INBOX. */
+let pendingFolder = ''
 
 const folders = ref<FolderSummary[]>([])
 const folderId = ref('')
@@ -432,6 +437,7 @@ watch([accountId, activeInboxUnread], ([id, unread]) => emit('activeAccount', id
 function switchAccount(id: string): boolean {
   if (!id || id === accountId.value) return true
   pendingOpen = ''
+  pendingFolder = ''
   // The open draft belongs to the previous account: save it, then close.
   void composeForm.value?.flush()
   compose.value = null
@@ -595,11 +601,18 @@ async function loadFolders(): Promise<void> {
     }
     if (pendingOpen && requestedAccount === accountId.value) {
       const id = pendingOpen
+      const folder = pendingFolder
       pendingOpen = ''
-      void openMessage(id)
+      pendingFolder = ''
+      if (folder && folder !== folderId.value && res.folders.some((f) => f.id === folder)) {
+        await selectFolder(folder)
+      }
+      // Switched to another account meanwhile: do not open it there.
+      if (requestedAccount === accountId.value) void openMessage(id)
     }
   } catch (err) {
     pendingOpen = ''
+    pendingFolder = ''
     if (isStaleResponse(err) || cached) return
     error.value = err instanceof Error ? err.message : 'Ordner konnten nicht geladen werden.'
   }
@@ -1309,6 +1322,9 @@ async function removeWithKeyboard(action: 'archive' | 'delete', id: string): Pro
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // Hidden behind the global search or the unified inbox: no actions on mail
+  // the user cannot see.
+  if (props.shortcutsActive === false) return
   if (!shortcutsEnabled.value || event.defaultPrevented || isTypingTarget(event.target)) return
   if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"]')) return
   if (compose.value) return
@@ -1402,15 +1418,25 @@ function goBack(): boolean {
  * Opens a message from the unified inbox (3.7) in the view of its own
  * account (INBOX), so actions and replies use that account.
  */
-async function openFromUnified(account: string, messageId: string): Promise<void> {
+/**
+ * Opens a message of any account (unified inbox, global search): switches
+ * to its account and shows it in the given folder (default: INBOX).
+ */
+async function openFromUnified(account: string, messageId: string, folder = ''): Promise<void> {
   if (account !== accountId.value) {
     switchAccount(account)
     pendingOpen = messageId
+    pendingFolder = folder
     return
   }
-  const inbox = defaultFolder(folders.value)
-  if (inbox && inbox.id !== folderId.value) await selectFolder(inbox.id)
+  const target = folders.value.find((f) => f.id === folder) ?? defaultFolder(folders.value)
+  if (target && target.id !== folderId.value) await selectFolder(target.id)
   await openMessage(messageId)
+}
+
+/** Folder shown in the list (scope "Nur dieser Ordner" of the global search). */
+function shownFolderId(): string {
+  return folderId.value
 }
 
 /** Header search (#120): searches the active account like the list's form did. */
@@ -1419,7 +1445,14 @@ function searchFor(query: string): void {
   void runSearch()
 }
 
-defineExpose({ goBack, openFromUnified, switchAccount, searchFor })
+defineExpose({
+  goBack,
+  openFromUnified,
+  switchAccount,
+  searchFor,
+  currentFolder: shownFolderId,
+  setReadingPane,
+})
 
 function closeDetail(): void {
   detailRequest++
@@ -2184,6 +2217,8 @@ button.primary {
 .list-header {
   position: sticky;
   top: 0;
+  /* Above the sticky date groups and rows: the sync panel opens from here. */
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--fma-space-2);
@@ -2360,7 +2395,8 @@ h2 {
 .selection-bar {
   position: sticky;
   top: 0;
-  z-index: 2;
+  /* Over the list header (z-index 5) when both stick. */
+  z-index: 6;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

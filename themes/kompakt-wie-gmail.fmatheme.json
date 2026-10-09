@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "kompakt-wie-gmail",
+  "name": "Kompakt (wie Gmail)",
+  "version": "1.0.0",
+  "author": "fastmail-alternative",
+  "license": "ISC",
+  "minAppVersion": "0.1.0",
+  "description": "Volle Breite ohne Lesebereich, kompakte Liste, Kontoleiste mit Symbolen, runde Formen. Nur Anordnung und Dichte sind angelehnt; eigene Farben, keine Logos oder Markenelemente – keine Verbindung zu den genannten Marken.",
+  "colors": {
+    "light": {
+      "base-200": "#f2f5f9",
+      "base-300": "#e1e6ee",
+      "primary": "#1f5fa8",
+      "primary-content": "#ffffff"
+    },
+    "dark": {
+      "base-100": "#1a1d21",
+      "base-200": "#22262b",
+      "base-300": "#2e333a",
+      "primary": "#8ab4f0",
+      "primary-content": "#0b1a2e"
+    }
+  },
+  "sizes": {
+    "radius": "1rem",
+    "radius-box": "1rem",
+    "text-md": "0.875rem",
+    "text-sm": "0.8rem"
+  },
+  "layout": {
+    "readingPane": "off",
+    "density": "compact",
+    "accountRail": "icons"
+  }
+}

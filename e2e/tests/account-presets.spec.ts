@@ -40,7 +40,7 @@ test('first steps are shown in the settings until hidden', async ({ page }) => {
   await page.goto('/')
   await openSettings(page)
   const steps = page.getByRole('region', { name: 'Erste Schritte' })
-  await expect(steps.getByText('Benachrichtigungen')).toBeVisible()
+  await expect(steps.getByText('Benachrichtigungen', { exact: true })).toBeVisible()
   await steps.getByRole('button', { name: 'Ausblenden' }).click()
   await expect(steps).toBeHidden()
   await page.reload()

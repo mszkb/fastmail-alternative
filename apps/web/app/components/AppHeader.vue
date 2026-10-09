@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // App header (#120): one bar across the full width. Left the product name
 // with our own mark (no logos of other products), in the middle the search
-// - until the global search (#121) it searches the active account like the
-// list's search did -, on the right the offline/queue state, help with the
+// - across all accounts (#121, GlobalSearch) -, on the right the
+// offline/queue state, help with the
 // keyboard shortcuts and the profile menu (settings, logout).
 // Small screens: a menu button opens the side menu with the accounts, and
 // the search icon opens the search as a full-screen layer.
@@ -61,9 +61,23 @@ async function openSearch(): Promise<void> {
   mobileInput.value?.focus()
 }
 
+// Opened with "?" (or from elsewhere): focus goes back where it was, so the
+// next shortcut (e.g. Enter = open) is not taken by the help button.
+let helpReturnFocus: HTMLElement | null = null
+
+function openHelpFromKeyboard(): void {
+  const active = document.activeElement
+  helpReturnFocus = active instanceof HTMLElement ? active : document.body
+  helpOpen.value = true
+}
+
 function closeHelp(): void {
   helpOpen.value = false
-  helpButton.value?.focus()
+  const target = helpReturnFocus
+  helpReturnFocus = null
+  if (target === null) helpButton.value?.focus()
+  else if (target !== document.body && target.isConnected) target.focus()
+  else (document.activeElement as HTMLElement | null)?.blur()
 }
 
 /** "/" focuses the search (outside of input fields). */
@@ -79,7 +93,8 @@ function onKeydown(event: KeyboardEvent): void {
   if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return
   event.preventDefault()
   if (event.key === '?') {
-    helpOpen.value = !helpOpen.value
+    if (helpOpen.value) closeHelp()
+    else openHelpFromKeyboard()
     return
   }
   if (searchInput.value && searchInput.value.offsetParent !== null) searchInput.value.focus()
@@ -88,7 +103,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 /** Opens the keyboard help (e.g. from the first steps). */
 function openHelp(): void {
-  helpOpen.value = true
+  openHelpFromKeyboard()
 }
 
 defineExpose({ openHelp })
@@ -145,7 +160,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         aria-label="Hilfe"
         aria-haspopup="dialog"
         :aria-expanded="helpOpen ? 'true' : 'false'"
-        @click="helpOpen = !helpOpen"
+        @click="helpOpen ? closeHelp() : (helpOpen = true)"
       >
         <IconHelp :size="22" aria-hidden="true" />
       </button>
