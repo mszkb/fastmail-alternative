@@ -89,3 +89,45 @@ test('header search across accounts: more hits while scrolling, open, end', asyn
   await expect(page.getByRole('region', { name: 'Nachrichten' })).toBeVisible()
   await context.close()
 })
+
+test('a new search aborts the one still running', async ({ browser }) => {
+  const context = await browser.newContext({
+    storageState: '.auth/state.json',
+    viewport: { width: 1280, height: 800 },
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  // The first search hangs at the server; its late answer must not show up.
+  const aborted: string[] = []
+  page.on('requestfailed', (request) => {
+    if (request.url().includes('/api/search?'))
+      aborted.push(new URL(request.url()).searchParams.get('q') ?? '')
+  })
+  await page.route('**/api/search?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('q') === 'langsam') {
+      await new Promise((resolve) => setTimeout(resolve, 3_000))
+      await route
+        .fulfill({
+          json: { messages: [], accounts: [], total: 0, nextCursor: null },
+        })
+        .catch(() => {})
+      return
+    }
+    await route.continue()
+  })
+  const field = page.getByRole('banner').getByLabel('Suchbegriff')
+  await field.fill('langsam')
+  await page.keyboard.press('Enter')
+  const results = page.getByRole('region', { name: 'Suche in allen Konten' })
+  await expect(results.getByRole('status')).toHaveText('Suche läuft …')
+  await field.fill('subject:"Hallo 2"')
+  await page.keyboard.press('Enter')
+  await expect(results.getByRole('listitem').filter({ hasText: 'Hallo 2' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect.poll(() => aborted).toEqual(['langsam'])
+  // Even after the slow answer would have arrived, the new hits stay.
+  await page.waitForTimeout(3_500)
+  await expect(results.getByRole('listitem').filter({ hasText: 'Hallo 2' })).toBeVisible()
+  await context.close()
+})
