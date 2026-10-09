@@ -296,13 +296,13 @@ private fun SwipeableRow(message: MessageListItem, onSwipe: (String, String) -> 
             val toArchive = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
             Box(
                 Modifier.fillMaxSize().background(
-                    if (toArchive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                    if (toArchive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
                 ).padding(horizontal = 20.dp),
                 contentAlignment = if (toArchive) Alignment.CenterEnd else Alignment.CenterStart,
             ) {
                 Text(
                     if (toArchive) "Archivieren" else if (message.flags.seen) "Ungelesen" else "Gelesen",
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = if (toArchive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onTertiary,
                 )
             }
         },
@@ -346,7 +346,7 @@ internal fun MessageRow(message: MessageListItem, onClick: () -> Unit) {
                 Icon(Icons.Filled.Star, contentDescription = "Markiert", tint = Color(0xFFF59E0B), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
             }
-            Text(shortDate(message.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            Text(shortDate(message.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
             message.subject.ifBlank { "(kein Betreff)" } + if (message.threadCount > 1) "  (${message.threadCount})" else "",
@@ -358,7 +358,7 @@ internal fun MessageRow(message: MessageListItem, onClick: () -> Unit) {
             Text(
                 message.snippet,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -369,6 +369,6 @@ internal fun MessageRow(message: MessageListItem, onClick: () -> Unit) {
 @Composable
 fun EmptyHint(text: String) {
     Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
-        Text(text, color = MaterialTheme.colorScheme.secondary)
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

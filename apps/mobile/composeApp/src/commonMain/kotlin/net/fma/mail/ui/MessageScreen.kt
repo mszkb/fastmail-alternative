@@ -273,7 +273,7 @@ private fun ThreadSection(messages: List<MessageDetail>) {
                 Text(
                     item.text?.trim().orEmpty().ifEmpty { "(kein Text)" },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = if (expandedId == item.id) 40 else 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -296,9 +296,9 @@ private fun Header(message: MessageDetail) {
             Text(
                 "An: " + message.to.joinToString { it.label },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(shortDate(message.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+        Text(shortDate(message.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

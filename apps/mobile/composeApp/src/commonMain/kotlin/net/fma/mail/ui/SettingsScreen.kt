@@ -60,7 +60,7 @@ fun SettingsScreen(vm: AppViewModel, platform: Platform, onBack: () -> Unit) {
         ) {
             Text("Instanz", style = MaterialTheme.typography.titleMedium)
             Text(session?.baseUrl.orEmpty())
-            Text("Angemeldet als ${session?.email.orEmpty()}", color = MaterialTheme.colorScheme.secondary)
+            Text("Angemeldet als ${session?.email.orEmpty()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider()
             Text("Benachrichtigungen", style = MaterialTheme.typography.titleMedium)
             Text(platform.push.status())

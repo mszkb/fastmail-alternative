@@ -99,7 +99,7 @@ fun SearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpenMessage: (messageId
                     Text(
                         "Nicht alle Treffer werden angezeigt (zu viele oder noch nicht synchronisiert).",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 }

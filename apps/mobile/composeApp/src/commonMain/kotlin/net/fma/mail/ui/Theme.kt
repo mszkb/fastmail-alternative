@@ -2,33 +2,77 @@ package net.fma.mail.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import net.fma.mail.ui.theme.FmaTokens
 
-// Simple light/dark theme. TODO(#141): generate from the shared design tokens.
-private val Accent = Color(0xFF2563EB)
+// Theme from the shared design tokens (#141, packages/design-tokens): the
+// same colors as the PWA's daisyUI themes "fma-light" / "fma-dark".
+// Muted text (onSurfaceVariant) mixes like the PWA's --fma-muted.
 
-private val Light = lightColorScheme(
-    primary = Accent,
-    onPrimary = Color.White,
-    secondary = Color(0xFF475569),
-    background = Color(0xFFF8FAFC),
-    surface = Color.White,
-    error = Color(0xFFDC2626),
-)
+private val Light = with(FmaTokens.Light) {
+    lightColorScheme(
+        primary = primary,
+        onPrimary = primaryContent,
+        primaryContainer = lerp(base100, primary, 0.14f),
+        onPrimaryContainer = baseContent,
+        secondary = secondary,
+        onSecondary = secondaryContent,
+        tertiary = accent,
+        onTertiary = accentContent,
+        background = base200,
+        onBackground = baseContent,
+        surface = base100,
+        onSurface = baseContent,
+        surfaceVariant = base200,
+        onSurfaceVariant = lerp(base100, baseContent, 0.68f),
+        surfaceContainer = base200,
+        outline = lerp(base100, baseContent, 0.30f),
+        outlineVariant = lerp(base100, baseContent, 0.16f),
+        error = error,
+        onError = errorContent,
+        errorContainer = lerp(base100, error, 0.13f),
+        onErrorContainer = baseContent,
+    )
+}
 
-private val Dark = darkColorScheme(
-    primary = Color(0xFF60A5FA),
-    onPrimary = Color(0xFF0B1220),
-    secondary = Color(0xFF94A3B8),
-    background = Color(0xFF0B1220),
-    surface = Color(0xFF111827),
-    error = Color(0xFFF87171),
+private val Dark = with(FmaTokens.Dark) {
+    darkColorScheme(
+        primary = primary,
+        onPrimary = primaryContent,
+        primaryContainer = lerp(base100, primary, 0.14f),
+        onPrimaryContainer = baseContent,
+        secondary = secondary,
+        onSecondary = secondaryContent,
+        tertiary = accent,
+        onTertiary = accentContent,
+        background = base100,
+        onBackground = baseContent,
+        surface = base100,
+        onSurface = baseContent,
+        surfaceVariant = base200,
+        onSurfaceVariant = lerp(base100, baseContent, 0.68f),
+        surfaceContainer = base200,
+        outline = lerp(base100, baseContent, 0.30f),
+        outlineVariant = lerp(base100, baseContent, 0.16f),
+        error = error,
+        onError = errorContent,
+        errorContainer = lerp(base100, error, 0.13f),
+        onErrorContainer = baseContent,
+    )
+}
+
+private val FmaShapes = Shapes(
+    extraSmall = RoundedCornerShape(FmaTokens.Radius.selector),
+    small = RoundedCornerShape(FmaTokens.Radius.field),
+    medium = RoundedCornerShape(FmaTokens.Radius.box),
 )
 
 @Composable
 fun FmaTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
+    MaterialTheme(colorScheme = if (dark) Dark else Light, shapes = FmaShapes, content = content)
 }

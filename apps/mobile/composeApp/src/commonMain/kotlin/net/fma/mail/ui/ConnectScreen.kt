@@ -51,7 +51,7 @@ fun ConnectScreen(vm: AppViewModel) {
             Text(
                 "Verbinde die App mit deiner eigenen Instanz.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
             val connected = baseUrl
