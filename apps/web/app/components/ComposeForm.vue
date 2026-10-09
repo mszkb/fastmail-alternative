@@ -136,13 +136,22 @@ function onRecipientKeydown(event: KeyboardEvent): void {
   }
 }
 
+let blurTimer: ReturnType<typeof setTimeout> | undefined
+
 function onRecipientBlur(): void {
   // Let a click on a suggestion land first. Only closes the list of the field
   // that lost focus: a field focused meanwhile keeps its suggestions.
   const field = activeField.value
-  setTimeout(() => {
+  clearTimeout(blurTimer)
+  blurTimer = setTimeout(() => {
     if (activeField.value === field) activeField.value = ''
   }, 150)
+}
+
+/** A recipient field got the focus: a pending close of an earlier blur no longer applies. */
+function onRecipientFocus(field: RecipientField): void {
+  clearTimeout(blurTimer)
+  activeField.value = field
 }
 
 // Undo send (#116): countdown before the submit; 0 = off.
@@ -172,7 +181,10 @@ function undoSend(): void {
   finishCountdown(false)
 }
 
-onBeforeUnmount(() => finishCountdown(false))
+onBeforeUnmount(() => {
+  finishCountdown(false)
+  clearTimeout(blurTimer)
+})
 
 // Attachments (roadmap 5.3): uploaded right away (encrypted on the server),
 // sent by id. Saved with the draft (attachmentIds), so they survive closing
@@ -758,7 +770,7 @@ onBeforeUnmount(() => {
             "
             :readonly="countdown > 0"
             placeholder="name@example.com, Name <name@example.com>"
-            @focus="activeField = 'to'"
+            @focus="onRecipientFocus('to')"
             @input="activeField = 'to'"
             @keydown="onRecipientKeydown"
             @blur="onRecipientBlur"
@@ -810,7 +822,7 @@ onBeforeUnmount(() => {
                   : undefined
               "
               :readonly="countdown > 0"
-              @focus="activeField = 'cc'"
+              @focus="onRecipientFocus('cc')"
               @input="activeField = 'cc'"
               @keydown="onRecipientKeydown"
               @blur="onRecipientBlur"
@@ -852,7 +864,7 @@ onBeforeUnmount(() => {
                   : undefined
               "
               :readonly="countdown > 0"
-              @focus="activeField = 'bcc'"
+              @focus="onRecipientFocus('bcc')"
               @input="activeField = 'bcc'"
               @keydown="onRecipientKeydown"
               @blur="onRecipientBlur"

@@ -151,6 +151,8 @@ const props = defineProps<{
   accounts: AccountOption[]
   syncStatus?: AccountSyncStatus[]
   syncCancelSupported?: boolean
+  /** False while another view (global search, unified inbox) covers this one. */
+  shortcutsActive?: boolean
 }>()
 const emit = defineEmits<{
   editAccount: [id: string]
@@ -1320,6 +1322,9 @@ async function removeWithKeyboard(action: 'archive' | 'delete', id: string): Pro
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // Hidden behind the global search or the unified inbox: no actions on mail
+  // the user cannot see.
+  if (props.shortcutsActive === false) return
   if (!shortcutsEnabled.value || event.defaultPrevented || isTypingTarget(event.target)) return
   if ((event.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"]')) return
   if (compose.value) return

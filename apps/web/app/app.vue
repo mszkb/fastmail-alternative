@@ -992,6 +992,7 @@ onBeforeUnmount(() => {
             v-if="accounts.length > 0"
             v-show="!(unifiedEnabled && unifiedOpen) && !globalSearchOpen"
             ref="mailView"
+            :shortcuts-active="!(unifiedEnabled && unifiedOpen) && !globalSearchOpen"
             :accounts="accounts"
             :sync-status="syncStatus"
             :sync-cancel-supported="syncStatusSupported === true"
