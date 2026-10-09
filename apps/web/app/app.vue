@@ -54,7 +54,9 @@ import type {
   AccountListResponse,
   AccountSummary,
   AccountSyncStatus,
+  ReadingPane,
   SyncStatusResponse,
+  ThemeLayout,
   UserSettings,
 } from '@fma/shared'
 import {
@@ -133,9 +135,11 @@ let onlyQueuedSince: number | null = null
 // so scrolling is never delayed.
 const mailView = ref<{
   goBack: () => boolean
-  openFromUnified: (accountId: string, messageId: string) => Promise<void>
+  openFromUnified: (accountId: string, messageId: string, folderId?: string) => Promise<void>
   switchAccount: (id: string) => boolean
   searchFor: (query: string) => void
+  currentFolder: () => string
+  setReadingPane: (pane: ReadingPane) => void
 } | null>(null)
 const swipe = new SwipeBack()
 const swipeDistance = ref(0)
@@ -230,6 +234,10 @@ function goBack(): void {
     if (hasUnsavedInput(states)) return
     if (editAccountId.value) editAccountId.value = ''
     else section.value = 'mail'
+    return
+  }
+  if (globalSearchOpen.value) {
+    globalSearchOpen.value = false
     return
   }
   if (unifiedOpen.value) {
@@ -486,10 +494,6 @@ function setRailExpanded(expanded: boolean): void {
   }
 }
 
-const activeAccountName = computed(
-  () => accounts.value.find((a) => a.id === activeAccountId.value)?.displayName ?? '',
-)
-
 /** Accounts for the bar; the active one shows the live INBOX count. */
 const railAccounts = computed(() =>
   accounts.value.map((a) =>
@@ -509,6 +513,7 @@ async function selectAccount(id: string): Promise<void> {
   menuOpen.value = false
   section.value = 'mail'
   unifiedOpen.value = false
+  globalSearchOpen.value = false
   await nextTick()
   mailView.value?.switchAccount(id)
 }
@@ -516,6 +521,7 @@ async function selectAccount(id: string): Promise<void> {
 function openUnifiedInbox(): void {
   menuOpen.value = false
   section.value = 'mail'
+  globalSearchOpen.value = false
   unifiedOpen.value = true
 }
 
@@ -527,6 +533,13 @@ async function openSettings(): Promise<void> {
 }
 
 const appHeader = ref<{ openHelp: () => void } | null>(null)
+
+/** Layout options of an activated theme (#126), taken over once for this device. */
+function applyThemeLayout(layout: ThemeLayout): void {
+  if (layout.density) setAppearance(themeChoice.value, layout.density)
+  if (layout.accountRail) setRailExpanded(layout.accountRail === 'list')
+  if (layout.readingPane) mailView.value?.setReadingPane(layout.readingPane)
+}
 
 /** Settings: theme and density (#112, per device). */
 function onAppearanceChange(event: Event): void {
@@ -573,12 +586,33 @@ async function addAccount(): Promise<void> {
   form?.querySelector<HTMLInputElement>('input')?.focus()
 }
 
-/** Header search: the active account (until the global search, #121). */
+// Global search (#121): the header search looks in all accounts; the hits
+// replace the mail view until "Suche beenden" (or back / an account pick).
+const globalSearchOpen = ref(false)
+const globalSearchText = ref('')
+const globalSearchFolder = ref('')
+const globalSearch = ref<{ search: () => Promise<void> } | null>(null)
+
 async function onHeaderSearch(query: string): Promise<void> {
   section.value = 'mail'
   unifiedOpen.value = false
+  globalSearchFolder.value = mailView.value?.currentFolder() ?? ''
+  const again = globalSearchOpen.value && globalSearchText.value === query
+  globalSearchText.value = query
+  globalSearchOpen.value = true
+  // The same text again: search again (the component reacts to changes only).
+  if (again) await globalSearch.value?.search()
+}
+
+/** A search hit opens in its own account's view, in the folder it was found in. */
+async function openSearchHit(
+  accountId: string,
+  folderId: string,
+  messageId: string,
+): Promise<void> {
+  globalSearchOpen.value = false
   await nextTick()
-  mailView.value?.searchFor(query)
+  await mailView.value?.openFromUnified(accountId, messageId, folderId)
 }
 
 /** Drag and drop in the account bar: show at once, then save the sort order. */
@@ -878,7 +912,7 @@ onBeforeUnmount(() => {
       ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
-        activeAccountName ? `In ${activeAccountName} suchen …` : 'Kein Konto verbunden'
+        accounts.length > 0 ? 'In allen Konten suchen …' : 'Kein Konto verbunden'
       "
       :search-disabled="accounts.length === 0 || isOffline"
       :menu-open="menuOpen"
@@ -939,15 +973,26 @@ onBeforeUnmount(() => {
 
         <template v-if="section === 'mail'">
           <UnifiedInbox
-            v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen"
+            v-if="accounts.length > 0 && unifiedEnabled && unifiedOpen && !globalSearchOpen"
             :accounts="accounts"
             @open="openUnifiedMessage"
             @back="unifiedOpen = false"
           />
+          <GlobalSearch
+            v-if="accounts.length > 0 && globalSearchOpen"
+            ref="globalSearch"
+            :accounts="accounts"
+            :text="globalSearchText"
+            :active-account-id="activeAccountId"
+            :active-folder-id="globalSearchFolder"
+            @open="openSearchHit"
+            @close="globalSearchOpen = false"
+          />
           <MailView
             v-if="accounts.length > 0"
-            v-show="!(unifiedEnabled && unifiedOpen)"
+            v-show="!(unifiedEnabled && unifiedOpen) && !globalSearchOpen"
             ref="mailView"
+            :shortcuts-active="!(unifiedEnabled && unifiedOpen) && !globalSearchOpen"
             :accounts="accounts"
             :sync-status="syncStatus"
             :sync-cancel-supported="syncStatusSupported === true"
@@ -1063,6 +1108,7 @@ onBeforeUnmount(() => {
               Gilt für dieses Gerät. „Kompakt“ zeigt mehr Nachrichten und blendet die Vorschauzeile
               aus.
             </p>
+            <ThemeSettings @layout="applyThemeLayout" />
           </div>
 
           <div class="card">

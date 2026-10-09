@@ -7,7 +7,11 @@ test('select three messages and archive them, online and offline', async ({ brow
   await createFolder(MAILBOX_A, 'Archive')
   const run = Date.now()
   const subjects = [1, 2, 3, 4, 5, 6].map((i) => `Auswahl ${run} ${i}`)
-  for (const subject of subjects) await deliver(MAILBOX_A, textMail(MAILBOX_A, subject, 'x'))
+  // One second apart: the list order (newest first) is 6, 5, 4, ... for sure.
+  const base = Date.now() - 60_000
+  for (const [i, subject] of subjects.entries()) {
+    await deliver(MAILBOX_A, textMail(MAILBOX_A, subject, 'x', new Date(base + i * 1000)))
+  }
   const context = await browser.newContext({
     storageState: '.auth/state.json',
     viewport: { width: 1280, height: 800 },

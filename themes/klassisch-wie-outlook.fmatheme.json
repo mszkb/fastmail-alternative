@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "id": "klassisch-wie-outlook",
+  "name": "Klassisch (wie Outlook)",
+  "version": "1.0.0",
+  "author": "fastmail-alternative",
+  "license": "ISC",
+  "minAppVersion": "0.1.0",
+  "description": "Lesebereich rechts, Kontoleiste mit Namen, kantige Formen, normale Dichte. Nur Anordnung und Dichte sind angelehnt; eigene Farben, keine Logos oder Markenelemente – keine Verbindung zu den genannten Marken.",
+  "colors": {
+    "light": {
+      "base-200": "#f3f4f6",
+      "base-300": "#dfe3e8",
+      "primary": "#2b5b84",
+      "primary-content": "#ffffff",
+      "accent": "#5c4a8a",
+      "accent-content": "#ffffff"
+    },
+    "dark": {
+      "base-100": "#1b1b1d",
+      "base-200": "#252528",
+      "base-300": "#323236",
+      "primary": "#8fbbe0",
+      "primary-content": "#0c1d2c"
+    }
+  },
+  "sizes": {
+    "radius": "0.125rem",
+    "radius-box": "0.25rem",
+    "space-4": "0.875rem"
+  },
+  "layout": {
+    "readingPane": "right",
+    "density": "normal",
+    "accountRail": "list"
+  }
+}

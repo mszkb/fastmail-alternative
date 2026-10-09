@@ -39,6 +39,16 @@ Erlaubte Ports: IMAP 143/993, SMTP 25/465/587/2525; weitere nur mit `MAIL_EXTRA_
 
 **Stand der Prüfung gegen echte Konten:** Die Felder sind per Unit- und Playwright-Test abgedeckt; ein Verbindungstest mit einem echten Fastmail-Konto (App-Passwort) steht noch aus und wird hier mit Datum eingetragen.
 
+## Suche beim Anbieter
+
+Die Suche (pro Konto und global über alle Konten, [ADR-0006](../adr/0006-search-index.md)) nutzt `UID SEARCH` des Anbieters. Was dabei je Anbieter abweichen kann – bei der Prüfung gegen echte Konten mit festhalten:
+
+- **Teilstrings:** RFC 3501 verlangt Teilstring-Suche für `TEXT`, `FROM`, `TO`, `SUBJECT`. Manche Server vergleichen Adressen nur vollständig (z. B. GreenMail bei `FROM`), Server mit Volltextindex finden in `TEXT` je nach Konfiguration nur ganze Wörter (z. B. Dovecot mit FTS-Plugin).
+- **Umlaute:** Nicht-ASCII-Begriffe gehen als Literal mit `CHARSET UTF-8`. Server ohne UTF-8-Unterstützung antworten mit `NO [BADCHARSET]`; der Ordner zählt dann als „nicht durchsuchbar“.
+- **`has:attachment`:** IMAP kennt kein Anhang-Kriterium. Die App sucht `HEADER Content-Type "multipart/mixed"`; das trifft die üblichen Mails mit Anhang, aber nicht z. B. ein einzelnes PDF ohne Text oder `multipart/related` mit eingebetteten Bildern.
+- **`is:unread`:** `UNSEEN` – zuverlässig, solange der Anbieter das `\Seen`-Flag führt.
+- **Geschwindigkeit:** Ohne Index beim Anbieter wird `TEXT` in großen Ordnern langsam; die globale Suche hat je Konto 10 s und insgesamt 25 s Zeit, langsamere Konten erscheinen mit „Zeitüberschreitung“.
+
 ## Prüfen, was ein Server wirklich kann
 
 Beim Anlegen eines Kontos und beim Ändern seiner Verbindung liest das Backend im Verbindungstest die IMAP-Fähigkeiten und speichert sie unverschlüsselt (keine Mailinhalte) in `mail_account.capabilities`. Auf der eigenen Instanz:

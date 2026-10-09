@@ -57,10 +57,11 @@ test('account bar on a wide screen: initials, switch, choice kept after reload',
   await bar.getByRole('button', { name: 'Kontoleiste einklappen' }).click()
   await expect(bar.getByText(ACCOUNT_A, { exact: true })).toBeHidden()
 
-  // Header search starts the search in the active account.
+  // Header search searches all accounts (#121, global-search.spec.ts).
   await page.getByRole('banner').getByLabel('Suchbegriff').fill('Hallo 2')
   await page.keyboard.press('Enter')
-  await expect(list.getByText(/\d+ Treffer/)).toBeVisible({ timeout: 20_000 })
+  const results = page.getByRole('region', { name: 'Suche in allen Konten' })
+  await expect(results.getByText(/\d+ Treffer/)).toBeVisible({ timeout: 20_000 })
   await context.close()
 })
 

@@ -240,6 +240,41 @@ foreach ($endpoints as $name => $path) {
     $out->add("| {$name} | " . $ms($percentile($times, 0.5)) . ' | ' . $ms($percentile($times, 0.95)) . ' | ' . $ms(max($times)) . ' |');
 }
 
+// Global search (#121): all accounts, every message matches (`Lasttest` is in each subject).
+Database::run($pdo, 'DELETE FROM rate_limit');
+$globalPath = '/api/search?subject=Lasttest&limit=50';
+$times = [];
+$first = [];
+// Each page 1 is one provider search per account (limit 10 per account and minute).
+for ($r = 0; $r < min($runs, 3); ++$r) {
+    $request = Http::request('GET', $globalPath, ['Sec-Fetch-Site' => 'same-origin'])->withCookieParams(['fma_session' => $token])
+        ->withQueryParams(['subject' => 'Lasttest', 'limit' => '50']);
+    $start = microtime(true);
+    $first = Http::json($app->handle($request));
+    $times[] = microtime(true) - $start;
+}
+$globalCursor = is_string($first['nextCursor'] ?? null) ? $first['nextCursor'] : '';
+$later = [];
+for ($r = 0; $r < $runs && $globalCursor !== ''; ++$r) {
+    $later[] = $call($globalPath . '&cursor=' . rawurlencode($globalCursor));
+}
+$deep = [];
+$cursor = $globalCursor;
+$pages = 1;
+$deepStart = microtime(true);
+while ($cursor !== '' && $pages < 40) {
+    $page = Http::json($app->handle(Http::request('GET', $globalPath, ['Sec-Fetch-Site' => 'same-origin'])->withCookieParams(['fma_session' => $token])
+        ->withQueryParams(['subject' => 'Lasttest', 'limit' => '50', 'cursor' => $cursor])));
+    $cursor = is_string($page['nextCursor'] ?? null) ? $page['nextCursor'] : '';
+    ++$pages;
+}
+$deepTime = microtime(true) - $deepStart;
+$out->add('');
+$out->add('Globale Suche über ' . $accounts . ' Konten, alle ' . (int) ($first['total'] ?? 0) . ' Mails treffen (`subject=Lasttest`, 50 je Seite): Seite 1 (IMAP `SEARCH` je Konto) p50 '
+    . $ms($percentile($times, 0.5)) . ' ms, max ' . $ms(max($times)) . ' ms; Folgeseite (gespeicherte UID-Listen, keine Provider-Suche) p50 '
+    . ($later === [] ? '–' : $ms($percentile($later, 0.5)) . ' ms, p95 ' . $ms($percentile($later, 0.95)) . ' ms')
+    . "; {$pages} Seiten nacheinander in " . number_format($deepTime, 2, ',', '') . ' s.');
+
 // Full history of one account: "load older" until the whole mailbox is synced.
 if ($fullHistory) {
     $before = locations($pdo, $inbox);

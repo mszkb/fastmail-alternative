@@ -1,5 +1,6 @@
 // Settings, storage, export, sync and push basics (no mail server needed).
 import { createECDH, randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { API_URL, Client } from '../src/client'
 
@@ -14,6 +15,7 @@ describe.skipIf(!API_URL)('settings, storage, export, sync, push', () => {
       '/api/export/config',
       '/api/push/subscriptions',
       '/api/push/vapid-public-key',
+      '/api/themes',
     ]) {
       expect((await anonymous.request('GET', path)).status, path).toBe(401)
     }
@@ -41,6 +43,24 @@ describe.skipIf(!API_URL)('settings, storage, export, sync, push', () => {
     // No credential fields or values (`credentialKind: "password"` is fine).
     expect(exported.text).not.toMatch(/"\w*password"\s*:/i)
     expect(exported.text).not.toContain('contract-pw')
+  })
+
+  it('themes: install, list, reject and delete (#126)', async () => {
+    const file = readFileSync(
+      new URL('../../../themes/klassisch-wie-outlook.fmatheme.json', import.meta.url),
+      'utf8',
+    )
+    const theme = JSON.parse(file) as Record<string, unknown>
+    const installed = await client.request('POST', '/api/themes', { body: theme })
+    expect([200, 201]).toContain(installed.status)
+    const list = await client.request('GET', '/api/themes')
+    expect(list.status).toBe(200)
+    expect((list.body as { themes: { id: string }[] }).themes.map((t) => t.id)).toContain(
+      'klassisch-wie-outlook',
+    )
+    const bad = await client.request('POST', '/api/themes', { body: { ...theme, css: 'x' } })
+    expect(bad.status).toBe(400)
+    expect((await client.request('DELETE', '/api/themes/klassisch-wie-outlook')).status).toBe(204)
   })
 
   it('POST /api/sync answers', async () => {

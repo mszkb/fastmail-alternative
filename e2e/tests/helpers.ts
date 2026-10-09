@@ -107,9 +107,15 @@ export async function deliver(to: string, message: string): Promise<void> {
 /**
  * Stores a message with an old internal date via IMAP APPEND (sync_since
  * filters by internal date, SMTP delivery always uses "now"). The mailbox
- * must exist, i.e. received a message via deliver() before.
+ * must exist, i.e. received a message via deliver() before; so must the
+ * folder (default INBOX, see createFolder()).
  */
-export async function appendOld(mailbox: string, message: string, date: Date): Promise<void> {
+export async function appendOld(
+  mailbox: string,
+  message: string,
+  date: Date,
+  folder = 'INBOX',
+): Promise<void> {
   const socket = net.connect(imapPort, mailHost)
   socket.setEncoding('utf8')
   let buffer = ''
@@ -125,7 +131,9 @@ export async function appendOld(mailbox: string, message: string, date: Date): P
   await waitFor(/^a1 OK/m)
   const [, day, month, year, time] = date.toUTCString().match(/\w+, (\d+) (\w+) (\d+) (\S+)/)!
   const literal = Buffer.from(message)
-  socket.write(`a2 APPEND INBOX "${day}-${month}-${year} ${time} +0000" {${literal.length}}\r\n`)
+  socket.write(
+    `a2 APPEND "${folder}" "${day}-${month}-${year} ${time} +0000" {${literal.length}}\r\n`,
+  )
   await waitFor(/^\+/m)
   socket.write(Buffer.concat([literal, Buffer.from('\r\n')]))
   await waitFor(/^a2 OK/m)
