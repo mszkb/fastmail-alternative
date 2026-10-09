@@ -7,8 +7,9 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.printToString
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.runtime.Composable
@@ -116,8 +117,16 @@ class MailFlowTest {
         try {
             compose.waitUntilAtLeastOneExists(hasText(text, substring = true), 10_000)
         } catch (e: Throwable) {
-            val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("?")
-            throw AssertionError("'$text' not shown.\nRequests: $requests\nScreen:\n$tree", e)
+            // One line: Gradle prints only the first lines of a failure message.
+            val texts = runCatching {
+                compose.onAllNodes(SemanticsMatcher("any") { true }, useUnmergedTree = true).fetchSemanticsNodes()
+                    .flatMap { node ->
+                        node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } +
+                            node.config.getOrNull(SemanticsProperties.ContentDescription).orEmpty()
+                    }
+                    .filter { it.isNotBlank() }
+            }.getOrDefault(emptyList())
+            throw AssertionError("'$text' not shown. Screen: ${texts.joinToString(" | ")} -- Requests: $requests", e)
         }
     }
 
