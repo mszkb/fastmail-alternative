@@ -3,7 +3,11 @@ package net.fma.mail.android
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -51,6 +55,12 @@ class MailFlowTest {
     private val requests: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private val bodies: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var archived = false
+    private val removed: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
+
+    private fun listItem(id: String, subject: String, folder: String? = null) =
+        """{"id":"$id","subject":"$subject","from":{"name":"Ann","address":"ann@example.org"},
+        "date":"2026-10-09T10:00:00Z","snippet":"Vorschau","flags":{"seen":false,"flagged":false,"answered":false},
+        "hasAttachments":false,"threadId":null,"threadCount":1${folder?.let { ",\"folderId\":\"$it\"" } ?: ""}}"""
 
     private val engine = MockEngine { request ->
         val path = request.url.encodedPath
@@ -69,20 +79,24 @@ class MailFlowTest {
             path == "/api/accounts/a1/folders" -> """{"folders":[
                 {"id":"f1","name":"INBOX","path":"INBOX","depth":0,"specialUse":"inbox","selectable":true,"unreadCount":1,"total":1},
                 {"id":"f2","name":"Archive","path":"Archive","depth":0,"specialUse":"archive","selectable":true,"unreadCount":0,"total":0}]}"""
-            path == "/api/folders/f1/messages" -> if (archived) {
-                """{"messages":[],"nextCursor":null}"""
-            } else {
-                """{"messages":[{"id":"m1","subject":"Hallo Welt","from":{"name":"Ann","address":"ann@example.org"},
-                "date":"2026-10-09T10:00:00Z","snippet":"Vorschau","flags":{"seen":false,"flagged":false,"answered":false},
-                "hasAttachments":false,"threadId":null,"threadCount":1}],"nextCursor":null}"""
+            path == "/api/folders/f1/messages" -> {
+                val items = listOf("m1" to "Hallo Welt", "m2" to "Zweite Mail")
+                    .filter { (id, _) -> id !in removed && !(id == "m1" && archived) }
+                    .joinToString(",") { (id, subject) -> listItem(id, subject) }
+                """{"messages":[$items],"nextCursor":null}"""
             }
+            path == "/api/accounts/a1/search" -> """{"messages":[${listItem("m1", "Hallo Welt", "f1")}],"providerMatches":1,
+                "notSynced":0,"truncated":false,"foldersSearched":1,"foldersFailed":[]}"""
             path == "/api/messages/m1" -> """{"id":"m1","accountId":"a1","folderIds":["f1"],"subject":"Hallo Welt",
                 "from":{"name":"Ann","address":"ann@example.org"},"to":[{"name":"","address":"me@example.org"}],"cc":[],
                 "replyTo":[],"date":"2026-10-09T10:00:00Z","flags":{"seen":false,"flagged":false,"answered":false},
                 "hasAttachments":false,"messageId":"<m1@example.org>","references":[],"text":"Text","threadId":null}"""
             path == "/api/messages/m1/html" -> """{"html":"<p>Inhalt der Mail</p>","remoteContentBlocked":false}"""
             path == "/api/messages/actions" -> {
-                if (body.contains("\"archive\"")) archived = true
+                if (body.contains("\"archive\"") && body.contains("\"m1\"")) archived = true
+                Regex("\"messageIds\":\\[\"(m\\d)\"").find(body)?.groupValues?.get(1)?.let { id ->
+                    if (body.contains("\"archive\"") || body.contains("\"move\"")) removed += id
+                }
                 """{"updated":1}"""
             }
             path == "/api/accounts/a1/identities" -> """{"identities":[{"id":"i1","name":"Me","emailAddress":"me@example.org",
@@ -132,14 +146,7 @@ class MailFlowTest {
 
     @Test
     fun loginReadArchiveAndSend() {
-        compose.setContent { App(platform) }
-
-        compose.onNodeWithText("Adresse der Instanz").performTextInput("mail.test")
-        compose.onNodeWithText("Weiter").performClick()
-        waitFor("E-Mail-Adresse")
-        compose.onNodeWithText("E-Mail-Adresse").performTextInput("me@example.org")
-        compose.onNodeWithText("Passwort").performTextInput("secret-password")
-        compose.onNodeWithText("Anmelden").performClick()
+        login()
 
         waitFor("Hallo Welt")
         assertTrue(requests.contains("POST /api/sync"))
@@ -149,7 +156,8 @@ class MailFlowTest {
 
         compose.onNodeWithContentDescription("Archivieren").performClick()
         compose.waitUntil(10_000) { archived }
-        waitFor("Keine Nachrichten")
+        waitFor("Zweite Mail")
+        compose.waitUntilDoesNotExist(hasText("Hallo Welt"), 10_000)
 
         compose.onNodeWithContentDescription("Verfassen").performClick()
         compose.waitUntilAtLeastOneExists(hasText("me@example.org", substring = true), 10_000)
@@ -161,7 +169,41 @@ class MailFlowTest {
         compose.waitUntil(10_000) { requests.contains("POST /api/outbox") }
         val sent = bodies.last { it.contains("bob@example.org") }
         assertTrue(sent, sent.contains("\"identityId\":\"i1\"") && sent.contains("\"subject\":\"Test\""))
-        waitFor("Keine Nachrichten")
+        waitFor("Zweite Mail")
+    }
+
+    private fun login() {
+        compose.setContent { App(platform) }
+        compose.onNodeWithText("Adresse der Instanz").performTextInput("mail.test")
+        compose.onNodeWithText("Weiter").performClick()
+        waitFor("E-Mail-Adresse")
+        compose.onNodeWithText("E-Mail-Adresse").performTextInput("me@example.org")
+        compose.onNodeWithText("Passwort").performTextInput("secret-password")
+        compose.onNodeWithText("Anmelden").performClick()
+    }
+
+    @Test
+    fun swipeSearchAndMove() {
+        login()
+        waitFor("Zweite Mail")
+        compose.onNodeWithText("Zweite Mail").performTouchInput { swipeLeft() }
+        compose.waitUntil(10_000) { bodies.any { it.contains("\"archive\"") && it.contains("\"m2\"") } }
+        compose.waitUntilDoesNotExist(hasText("Zweite Mail"), 10_000)
+
+        compose.onNodeWithContentDescription("Suchen").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("Hallo")
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.waitUntil(10_000) { requests.contains("GET /api/accounts/a1/search") }
+        waitFor("Hallo Welt")
+        compose.onNodeWithText("Hallo Welt").performClick()
+        waitFor("An: me@example.org")
+
+        compose.onNodeWithContentDescription("Mehr").performClick()
+        compose.onNodeWithText("Verschieben …").performClick()
+        compose.onNodeWithText("Archiv").performClick()
+        compose.waitUntil(10_000) {
+            bodies.any { it.contains("\"move\"") && it.contains("\"targetFolderId\":\"f2\"") && it.contains("\"m1\"") }
+        }
     }
 
     private companion object {

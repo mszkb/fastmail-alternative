@@ -31,6 +31,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -127,6 +128,9 @@ fun MailScreen(
                         },
                     )
                     AccountBar(state.accounts, state.selectedAccountId, vm::selectAccount)
+                    if (state.selectedAccount?.syncing == true) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
                 }
             },
             floatingActionButton = {
