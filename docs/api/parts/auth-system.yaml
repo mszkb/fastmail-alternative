@@ -864,6 +864,11 @@ components:
         credentialKind:
           type: string
           enum: [password, oauth2]
+        oauthProvider:
+          description: Provider of an `oauth2` account (the export always sets it). An imported `oauth2` account without a known provider becomes a password account; with one it waits for a new sign-in (`OAUTH_EXPIRED`).
+          oneOf:
+            - $ref: '#/components/schemas/OAuthProvider'
+            - type: 'null'
         syncSince:
           type: [string, 'null']
           format: date-time

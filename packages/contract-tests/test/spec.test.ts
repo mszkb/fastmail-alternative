@@ -20,7 +20,8 @@ describe('OpenAPI spec', () => {
     for (const { path, method, op } of operations) {
       const codes = Object.keys((op.responses ?? {}) as object)
       expect(
-        codes.some((c) => c.startsWith('2')),
+        // 303: redirect-only routes (OAuth callback back to the PWA).
+        codes.some((c) => c.startsWith('2') || c === '303'),
         `${method} ${path} success`,
       ).toBe(true)
       const isPublic = Array.isArray(op.security) && op.security.length === 0

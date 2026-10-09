@@ -660,6 +660,8 @@ components:
         - JOB_TIMEOUT
         - CREDENTIALS_REQUIRED
         - RATE_LIMITED
+        - OAUTH_EXPIRED
+        - OAUTH_NOT_CONFIGURED
     HostPort:
       type: object
       required: [host, port]
@@ -684,6 +686,8 @@ components:
         - syncSince
         - unreadCount
         - syncing
+        - credentialKind
+        - oauthProvider
       properties:
         id: { type: string, format: uuid }
         displayName: { type: string }
@@ -717,6 +721,15 @@ components:
         syncing:
           type: boolean
           description: A sync is queued or running (false in create/update responses).
+        credentialKind:
+          type: string
+          enum: [password, oauth2]
+          description: '`oauth2`: sign-in with Google/Microsoft; new sign-in via POST /api/oauth/{provider}/start with `accountId`.'
+        oauthProvider:
+          description: Provider of an `oauth2` account; null for password accounts.
+          oneOf:
+            - $ref: '#/components/schemas/OAuthProvider'
+            - type: 'null'
     AccountListResponse:
       type: object
       required: [accounts]
