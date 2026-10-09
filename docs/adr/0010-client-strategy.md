@@ -1,6 +1,6 @@
 # ADR-0010: Client-Strategie
 
-- **Status:** Accepted
+- **Status:** Accepted, teilweise ersetzt durch [ADR-0015](0015-mobile-kotlin-multiplatform.md) (Technologie der Mobile-Clients)
 - **Datum:** 2026-10-02
 - **Roadmap:** Phase 4, Ausblick
 

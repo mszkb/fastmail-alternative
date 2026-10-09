@@ -58,6 +58,7 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - Suche: IMAP `SEARCH` beim Provider (ADR-0006)
 - Auth: Single-User, Passwort, serverseitige Sessions (ADR-0004); Mailanbieter per Passwort oder OAuth2 (ADR-0011)
 - Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
+- Mobile: Kotlin Multiplatform + Compose Multiplatform in `apps/mobile`, Bearer-Geräte-Token, Push über FCM (ADR-0015)
 - Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007); alternativ Shared Hosting mit PHP + MySQL und Cron (ADR-0013)
 
 Das frühere Node-Backend (Fastify, PostgreSQL) ist mit #110 entfernt; eine Datenübernahme daraus gibt es nicht.

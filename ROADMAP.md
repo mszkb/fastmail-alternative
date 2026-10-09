@@ -35,7 +35,7 @@ Epic #111 (vertraute Oberfläche), seit PR #125 in `main`:
 | **M2 – Beta**             | Phasen 5–6 | Suche, Anhänge, Cache-Modi, OAuth, Backup/Restore, Security Review.                               |
 | **M3 – Stable**           | Phase 7    | Release-Images, vollständige Doku, Demo-Deployment, Support-Prozess.                              |
 | **M4 – Managed Services** | Phase 8    | Hosted Push Relay, Managed Hosting, Business-Funktionen.                                          |
-| _Später_                  | –          | Native iOS-App (siehe [Ausblick](#ausblick)).                                                     |
+| _Später_                  | Phase 9    | Native Apps für iOS und Android ([Phase 9](#phase-9--native-apps-), ADR-0015).                    |
 
 ## Phasenübersicht
 
@@ -186,9 +186,9 @@ Ziel: Self-Hosting auf jedem Webhoster mit PHP und MySQL; Docker Compose bleibt 
 
 ## Phase 9 – Native Apps 🟨
 
-| #   | Epic / Aufgabe                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Prio | Aufwand | Abhängigkeiten | Akzeptanz                                  |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------- | -------------- | ------------------------------------------ |
-| 9.1 | 🟨 **#136** Native Apps für iOS und Android (Kotlin Multiplatform + Compose Multiplatform) – Stand: Android-Preview (Sideload-APK aus CI, `apps/mobile`) mit Login per Geräte-Token (#138), Kontowechsel, Ordnern, Nachrichtenliste, Lesen im gesperrten WebView, Aktionen, Verfassen/Antworten und FCM-Push (#139) bzw. Abfrage alle 15 min als Notlösung; offen: Offline-Cache (#145), iOS, Design-Tokens, Store-Releases ([Anleitung](docs/operations/android-preview.md)) | P2   | XL      | ADR-0010       | Apps in App Store und Google Play mit Push |
+| #   | Epic / Aufgabe                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Prio | Aufwand | Abhängigkeiten | Akzeptanz                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------- | -------------- | ------------------------------------------ |
+| 9.1 | 🟨 **#136** Native Apps für iOS und Android (Kotlin Multiplatform + Compose Multiplatform, [ADR-0015](docs/adr/0015-mobile-kotlin-multiplatform.md), Sub-Issues #137–#160) – Stand: Android-Preview (Sideload-APK aus CI, `apps/mobile`) mit Login per Geräte-Token (#138), Kontowechsel, Ordnern, Nachrichtenliste, Lesen im gesperrten WebView, Aktionen, Verfassen/Antworten und FCM-Push (#139) bzw. Abfrage alle 15 min als Notlösung; offen: Offline-Cache (#145), iOS, Design-Tokens, Store-Releases ([Anleitung](docs/operations/android-preview.md)) | P2   | XL      | ADR-0010       | Apps in App Store und Google Play mit Push |
 
 ---
 
@@ -207,6 +207,5 @@ Aktueller Stand mit Belegen und offenen Punkten: [`docs/process/mvp-status.md`](
 
 ## Ausblick
 
-- **Native Clients pro Plattform** (ADR-0010): iOS zuerst, dann Android und Desktop. Logik auf dem Server, gemeinsamer API-Vertrag (OpenAPI) und gemeinsame Design-Tokens.
-- **Native iOS-App** mit APNs-Push – das eigentliche Langfristziel (siehe README). Die PWA ist der Startpunkt; API und Push-Architektur sollen von Anfang an so gebaut werden, dass ein nativer Client ohne Backend-Umbau andocken kann.
+- **Native Apps** für iOS und Android: siehe [Phase 9](#phase-9--native-apps-) und [ADR-0015](docs/adr/0015-mobile-kotlin-multiplatform.md) (Kotlin Multiplatform + Compose Multiplatform). Desktop-Client später.
 - Erweiterte Regeln/Filter (Sieve-ähnlich), Kalender/Kontakte, KI-Funktionen – bewusst nach dem MVP.
