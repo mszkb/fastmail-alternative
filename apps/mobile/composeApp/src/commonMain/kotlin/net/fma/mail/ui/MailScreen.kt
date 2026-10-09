@@ -41,7 +41,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,6 +85,11 @@ fun MailScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
+    LaunchedEffect(state.undo) {
+        val undo = state.undo ?: return@LaunchedEffect
+        val result = snackbar.showSnackbar(undo.label, actionLabel = "Rückgängig", duration = SnackbarDuration.Short)
+        if (result == SnackbarResult.ActionPerformed) vm.undo() else vm.clearUndo()
+    }
     LaunchedEffect(state.error, state.notice) {
         (state.error ?: state.notice)?.let {
             snackbar.showSnackbar(it)

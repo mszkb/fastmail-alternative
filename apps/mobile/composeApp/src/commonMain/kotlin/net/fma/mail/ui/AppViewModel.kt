@@ -20,6 +20,9 @@ import net.fma.mail.domain.SyncThrottle
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
+/** A message moved [fromFolderId] -> [toFolderId]; undo moves it back. */
+data class UndoInfo(val label: String, val messageId: String, val fromFolderId: String, val toFolderId: String)
+
 data class MailState(
     val accounts: List<AccountSummary> = emptyList(),
     val selectedAccountId: String? = null,
@@ -36,6 +39,8 @@ data class MailState(
     val unifiedEnabled: Boolean = false,
     /** Unified inbox: message id -> INBOX folder of its account. */
     val folderOf: Map<String, String> = emptyMap(),
+    /** The last archive/delete/move, offered for undo in the snackbar. */
+    val undo: UndoInfo? = null,
 ) {
     val unified: Boolean get() = selectedAccountId == UNIFIED
     val selectedAccount: AccountSummary? get() = accounts.firstOrNull { it.id == selectedAccountId }
@@ -428,6 +433,7 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         viewModelScope.launch {
             try {
                 api.messageAction(folder, listOf(messageId), action, targetFolderId)
+                undoFor(messageId, action, folder, targetFolderId)?.let { info -> _mail.update { it.copy(undo = info) } }
                 onDone(null)
                 refreshAccounts()
             } catch (e: Exception) {
@@ -438,6 +444,41 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
             }
         }
     }
+
+    /** Where the message went; null when unknown (unified view) or deleted for good (from trash). */
+    private fun undoFor(messageId: String, action: String, from: String, target: String?): UndoInfo? {
+        val folders = _mail.value.folders
+        if (folders.none { it.id == from }) return null
+        val (label, to) = when (action) {
+            "archive" -> "Archiviert" to folders.firstOrNull { it.specialUse == "archive" }?.id
+            "delete" -> if (folders.firstOrNull { it.id == from }?.specialUse == "trash") {
+                return null
+            } else {
+                "In den Papierkorb verschoben" to folders.firstOrNull { it.specialUse == "trash" }?.id
+            }
+            "move" -> (if (folders.firstOrNull { it.id == target }?.specialUse == "junk") "Als Spam markiert" else "Verschoben") to target
+            else -> return null
+        }
+        return to?.let { UndoInfo(label, messageId, from, it) }
+    }
+
+    /** Moves the last archived/deleted/moved message back. */
+    fun undo() {
+        val info = _mail.value.undo ?: return
+        val api = api ?: return
+        _mail.update { it.copy(undo = null) }
+        viewModelScope.launch {
+            try {
+                api.messageAction(info.toFolderId, listOf(info.messageId), "move", info.fromFolderId)
+                reloadFirstPage()
+                refreshAccounts()
+            } catch (e: Exception) {
+                showError(e)
+            }
+        }
+    }
+
+    fun clearUndo() = _mail.update { it.copy(undo = null) }
 
     private fun applyLocally(messageId: String, action: String) {
         _mail.update { state ->

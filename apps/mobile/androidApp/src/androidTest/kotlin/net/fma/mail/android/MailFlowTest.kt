@@ -95,7 +95,10 @@ class MailFlowTest {
             path == "/api/messages/actions" -> {
                 if (body.contains("\"archive\"") && body.contains("\"m1\"")) archived = true
                 Regex("\"messageIds\":\\[\"(m\\d)\"").find(body)?.groupValues?.get(1)?.let { id ->
-                    if (body.contains("\"archive\"") || body.contains("\"move\"")) removed += id
+                    when {
+                        body.contains("\"move\"") && body.contains("\"targetFolderId\":\"f1\"") -> removed -= id
+                        body.contains("\"archive\"") || body.contains("\"move\"") -> removed += id
+                    }
                 }
                 """{"updated":1}"""
             }
@@ -189,6 +192,14 @@ class MailFlowTest {
         compose.onNodeWithText("Zweite Mail").performTouchInput { swipeLeft() }
         compose.waitUntil(10_000) { bodies.any { it.contains("\"archive\"") && it.contains("\"m2\"") } }
         compose.waitUntilDoesNotExist(hasText("Zweite Mail"), 10_000)
+
+        // Undo moves it back from the archive.
+        waitFor("Rückgängig")
+        compose.onNodeWithText("Rückgängig").performClick()
+        compose.waitUntil(10_000) {
+            bodies.any { it.contains("\"move\"") && it.contains("\"folderId\":\"f2\"") && it.contains("\"targetFolderId\":\"f1\"") }
+        }
+        waitFor("Zweite Mail")
 
         compose.onNodeWithContentDescription("Suchen").performClick()
         compose.onNode(hasSetTextAction()).performTextInput("Hallo")
