@@ -62,17 +62,19 @@ final class ImapActions
 
     /**
      * Search criteria of a validated query (see SearchRoutes::parseQuery):
-     * TEXT/FROM/SUBJECT as quoted strings, or as literals with CHARSET UTF-8
-     * when not 7-bit; SINCE/BEFORE as IMAP dates.
+     * TEXT/FROM/TO/SUBJECT as quoted strings, or as literals with CHARSET
+     * UTF-8 when not 7-bit; SINCE/BEFORE as IMAP dates; `unread` as UNSEEN;
+     * `attachment` as a multipart/mixed Content-Type (IMAP has no attachment
+     * criterion, this is what most clients send with attachments).
      *
-     * @param array{q?: string, from?: string, subject?: string, since?: string, before?: string} $query
+     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true} $query
      *
      * @return array{parts: list<string>, utf8: bool}
      */
     public static function searchCriteria(array $query): array
     {
         $text = [];
-        foreach (['q' => 'TEXT', 'from' => 'FROM', 'subject' => 'SUBJECT'] as $key => $keyword) {
+        foreach (['q' => 'TEXT', 'from' => 'FROM', 'to' => 'TO', 'subject' => 'SUBJECT'] as $key => $keyword) {
             if (isset($query[$key]) && $query[$key] !== '') {
                 $text[$keyword] = $query[$key];
             }
@@ -101,6 +103,12 @@ final class ImapActions
             if (isset($query[$key])) {
                 $append($keyword . ' ' . self::imapDate($query[$key]));
             }
+        }
+        if (isset($query['unread'])) {
+            $append('UNSEEN');
+        }
+        if (isset($query['attachment'])) {
+            $append('HEADER Content-Type "multipart/mixed"');
         }
         if ($parts === ['']) {
             $parts = ['ALL'];

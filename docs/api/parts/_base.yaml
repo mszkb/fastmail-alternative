@@ -46,6 +46,38 @@ components:
           type: string
           description: Human-readable text; never contains mail contents or credentials.
   parameters:
+    SearchTo:
+      name: to
+      in: query
+      required: false
+      description: Recipient (IMAP TO); trimmed, max 200 characters.
+      schema:
+        type: string
+        maxLength: 200
+    SearchUnread:
+      name: unread
+      in: query
+      required: false
+      description: Only unread messages (IMAP UNSEEN).
+      schema:
+        type: string
+        enum:
+          - '1'
+          - 'true'
+          - '0'
+          - 'false'
+    SearchAttachment:
+      name: attachment
+      in: query
+      required: false
+      description: Only messages with attachments (Content-Type multipart/mixed; IMAP has no attachment criterion).
+      schema:
+        type: string
+        enum:
+          - '1'
+          - 'true'
+          - '0'
+          - 'false'
     Id:
       name: id
       in: path

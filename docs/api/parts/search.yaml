@@ -1,0 +1,265 @@
+# Global search across accounts (#121, ADR-0006 addendum).
+paths:
+  /api/search:
+    get:
+      operationId: searchGlobal
+      tags:
+        - messages
+      summary: Search all accounts at their providers (IMAP SEARCH)
+      description: "Searches the given accounts (default: all accounts that are not
+
+        disabled) one after the other, each with its own deadline, and merges
+
+        the matches by date. An account that fails, times out, has an
+
+        authentication error or is rate limited gets that status in
+
+        `accounts`; the others still deliver. Criteria as for
+
+        `GET /api/accounts/{id}/search`; `folderId` needs exactly one account
+
+        in `accounts`.
+
+
+        Paging: `nextCursor` continues the same search. The matching UIDs are
+
+        kept for 5 minutes (ids only, never the terms), so later pages need no
+
+        new provider search; after that the cursor searches again and
+
+        continues where it was. A cursor only fits its own query (otherwise
+
+        400). Each provider search counts against the account's limit of 10
+
+        per minute. The query is never logged or stored.
+
+        "
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: subject
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: '#/components/parameters/SearchTo'
+        - $ref: '#/components/parameters/SearchUnread'
+        - $ref: '#/components/parameters/SearchAttachment'
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: before
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: folderId
+          in: query
+          required: false
+          description: Only this folder (requires exactly one account in `accounts`).
+          schema:
+            type: string
+            format: uuid
+        - name: accounts
+          in: query
+          required: false
+          description: Comma-separated account ids (at most 50); default all accounts that are not disabled.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          description: '`nextCursor` of the previous page (same criteria).'
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One page of search results
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalSearchResponse'
+        '400':
+          description: Invalid or missing criteria, parameters or cursor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: An account in `accounts` was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+components:
+  schemas:
+    GlobalSearchItem:
+      type: object
+      description: 'One hit of the global search. With a local copy (`synced: true`) a
+
+        message list item; without one (`synced: false`, `id: null`) the
+
+        list headers fetched from the provider for this page (not stored).
+
+        '
+      required:
+        - id
+        - accountId
+        - folderId
+        - uid
+        - synced
+        - subject
+        - from
+        - date
+        - snippet
+        - flags
+        - hasAttachments
+        - threadId
+        - threadCount
+      properties:
+        id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        folderId:
+          type: string
+          format: uuid
+          description: Folder the message was found in; actions run there.
+        uid:
+          type: integer
+          minimum: 1
+        synced:
+          type: boolean
+        subject:
+          type: string
+        from:
+          oneOf:
+            - $ref: '#/components/schemas/MailPerson'
+            - type: 'null'
+        date:
+          type: string
+          format: date-time
+        snippet:
+          type: string
+          description: Empty for hits without a local copy.
+        flags:
+          $ref: '#/components/schemas/MessageFlags'
+        hasAttachments:
+          type: boolean
+        threadId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        threadCount:
+          type: integer
+          minimum: 1
+    GlobalSearchAccount:
+      type: object
+      required:
+        - accountId
+        - status
+        - matches
+        - foldersSearched
+        - foldersFailed
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - ok
+            - timeout
+            - error
+            - auth_error
+            - rate_limited
+          description: '`auth_error`: the account has an authentication error (provider not
+
+            contacted) or the provider rejected the credentials;
+
+            `rate_limited`: more than 10 provider searches of this account in
+
+            the last minute; `error`: provider unreachable, blocked or the
+
+            account is disabled (see `code`).
+
+            '
+        code:
+          type: string
+          description: Stable error code when `status` is not `ok`.
+        matches:
+          type: integer
+          minimum: 0
+          description: Matches reported by the provider (a message in several folders counts per folder).
+        foldersSearched:
+          type: integer
+          minimum: 0
+        foldersFailed:
+          type: integer
+          minimum: 0
+    GlobalSearchResponse:
+      type: object
+      required:
+        - messages
+        - accounts
+        - total
+        - nextCursor
+      properties:
+        messages:
+          type: array
+          maxItems: 100
+          description: Hits of this page, newest first across accounts and folders.
+          items:
+            $ref: '#/components/schemas/GlobalSearchItem'
+        accounts:
+          type: array
+          description: One entry per searched account, in account order.
+          items:
+            $ref: '#/components/schemas/GlobalSearchAccount'
+        total:
+          type: integer
+          minimum: 0
+          description: Sum of `matches` (approximate total).
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: Opaque cursor of the next page; null on the last page.

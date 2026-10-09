@@ -13,8 +13,7 @@ use Fma\Http\Middleware\RequireAuth;
 use Fma\Log\Logger;
 use Fma\Mail\AccountContext;
 use Fma\Mail\ImapActions;
-use Fma\Mail\ImapClient;
-use Fma\Mail\MailException;
+use Fma\Mail\ProviderSearch;
 use Fma\Mail\TransportPolicy;
 use Fma\Security\RateLimiter;
 use Fma\Security\RateLimitRule;
@@ -47,17 +46,11 @@ final class SearchRoutes
     public const RATE_LIMIT = 10;
     public const MAX_TERM_LENGTH = 200;
     public const MAX_RESULTS = 100;
-    private const MAX_FOLDERS = 20;
     /** UIDs per folder that are mapped to local messages (newest first). */
     private const MAX_MAPPED_UIDS = 5000;
     private const CONNECT_TIMEOUT_SECONDS = 15.0;
     /** Overall deadline of one search. */
     private const SEARCH_DEADLINE_SECONDS = 30.0;
-    /** Folder order of the default scope (lower first). */
-    private const FOLDER_RANK = ['inbox' => 0, 'sent' => 1, 'archive' => 2, 'drafts' => 3];
-
-    private const UNREACHABLE = ['UNREACHABLE', 502, 'Der Mailanbieter ist nicht erreichbar.'];
-    private const TIMEOUT = ['TIMEOUT', 504, 'Die Suche beim Anbieter dauert zu lange.'];
 
     private readonly RateLimiter $rateLimiter;
 
@@ -94,21 +87,10 @@ final class SearchRoutes
         }
 
         $folderId = $query['folderId'] ?? null;
-        /** @var list<array{id: string, path: string, special_use: ?string}> $folders */
-        $folders = $folderId !== null
-            ? Database::run($pdo, 'SELECT id, path, special_use FROM folder WHERE account_id = ? AND id = ? AND selectable', [$accountId, $folderId])->fetchAll()
-            : Database::run(
-                $pdo,
-                "SELECT id, path, special_use FROM folder
-                 WHERE account_id = ? AND selectable AND COALESCE(special_use, '') NOT IN ('junk', 'trash')",
-                [$accountId],
-            )->fetchAll();
+        $folders = ProviderSearch::folders($pdo, $accountId, $folderId);
         if ($folderId !== null && $folders === []) {
             return Json::write($response, ['message' => 'Ordner nicht gefunden.'], 404);
         }
-        $rank = static fn(array $f): int => strtoupper($f['path']) === 'INBOX' ? -1 : (self::FOLDER_RANK[$f['special_use'] ?? ''] ?? 10);
-        usort($folders, static fn(array $a, array $b): int => $rank($a) <=> $rank($b) ?: strcmp($a['path'], $b['path']));
-        $folders = \array_slice($folders, 0, self::MAX_FOLDERS);
 
         if ($account['status'] === 'auth_error' || $account['status'] === 'disabled') {
             return Json::write($response, ['message' => 'Die Suche ist nicht möglich: Das Konto hat einen Anmeldefehler.'], 409);
@@ -126,9 +108,9 @@ final class SearchRoutes
 
             return Json::write($response, ['message' => $e->getMessage(), 'code' => $e->errorCode], $e->status);
         } catch (\Throwable $e) {
-            $this->logger->warn('search failed', ['accountId' => $accountId, 'code' => self::UNREACHABLE[0], 'errName' => $e::class]);
+            $this->logger->warn('search failed', ['accountId' => $accountId, 'code' => ProviderSearch::UNREACHABLE[0], 'errName' => $e::class]);
 
-            return Json::write($response, ['message' => self::UNREACHABLE[2], 'code' => self::UNREACHABLE[0]], self::UNREACHABLE[1]);
+            return Json::write($response, ['message' => ProviderSearch::UNREACHABLE[2], 'code' => ProviderSearch::UNREACHABLE[0]], ProviderSearch::UNREACHABLE[1]);
         }
 
         return Json::write($response, $this->mapResults($context, $provider))->withHeader('Cache-Control', 'no-store');
@@ -142,12 +124,15 @@ final class SearchRoutes
      *
      * @param array<mixed> $input
      *
-     * @return array{q?: string, from?: string, subject?: string, since?: string, before?: string, folderId?: string}|string
+     * Text criteria: q, from, to, subject; dates: since, before; flags
+     * (`1`/`true`): unread, attachment.
+     *
+     * @return array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, folderId?: string}|string
      */
     public static function parseQuery(array $input): array|string
     {
         $query = [];
-        foreach (['q', 'from', 'subject'] as $key) {
+        foreach (['q', 'from', 'to', 'subject'] as $key) {
             if (!\array_key_exists($key, $input)) {
                 continue;
             }
@@ -177,6 +162,16 @@ final class SearchRoutes
         if (isset($query['since'], $query['before']) && $query['since'] >= $query['before']) {
             return 'Der Zeitraum ist leer.';
         }
+        foreach (['unread', 'attachment'] as $key) {
+            $raw = $input[$key] ?? null;
+            if ($raw === null || $raw === '' || $raw === '0' || $raw === 'false') {
+                continue;
+            }
+            if ($raw !== '1' && $raw !== 'true') {
+                return 'Ungültiger Filter.';
+            }
+            $query[$key] = true;
+        }
         $folderId = $input['folderId'] ?? null;
         if ($folderId !== null && $folderId !== '') {
             if (!\is_string($folderId) || !Uuid::isValid(strtolower($folderId))) {
@@ -184,7 +179,7 @@ final class SearchRoutes
             }
             $query['folderId'] = strtolower($folderId);
         }
-        if (!isset($query['q']) && !isset($query['from']) && !isset($query['subject']) && !isset($query['since']) && !isset($query['before'])) {
+        if (array_diff_key($query, ['folderId' => true]) === []) {
             return 'Bitte einen Suchbegriff oder Zeitraum angeben.';
         }
 
@@ -203,54 +198,19 @@ final class SearchRoutes
 
     /**
      * @param list<array{id: string, path: string, special_use: ?string}> $folders
-     * @param array{q?: string, from?: string, subject?: string, since?: string, before?: string, folderId?: string} $query
+     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, folderId?: string} $query
      *
      * @return array{folders: list<array{folderId: string, uidvalidity: string, uids: list<int>}>, foldersFailed: int}
      */
     private function searchProvider(AccountContext $context, array $folders, array $query): array
     {
         $deadline = microtime(true) + self::SEARCH_DEADLINE_SECONDS;
+        $client = ProviderSearch::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $context, self::CONNECT_TIMEOUT_SECONDS);
         try {
-            $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $context->imap, self::CONNECT_TIMEOUT_SECONDS);
-        } catch (MailException $e) {
-            throw match ($e->errorCode) {
-                'PRIVATE_HOST_BLOCKED' => new SearchFailure('BLOCKED_HOST', 502, 'Interner IMAP-Host ist blockiert (SSRF-Schutz).'),
-                'PORT_NOT_ALLOWED' => new SearchFailure('BLOCKED_PORT', 502, 'Dieser IMAP-Port ist nicht erlaubt.'),
-                'TLS_REQUIRED' => new SearchFailure('TLS_REQUIRED', 502, 'Der Mailserver bietet keine verschlüsselte Verbindung (STARTTLS) an.'),
-                'AUTH_FAILED' => new SearchFailure('AUTH_FAILED', 502, 'Der Anbieter hat die Zugangsdaten abgelehnt.'),
-                default => new SearchFailure(...self::UNREACHABLE),
-            };
-        }
-        $criteria = ImapActions::searchCriteria($query);
-        $actions = new ImapActions($client);
-        $result = ['folders' => [], 'foldersFailed' => 0];
-        try {
-            foreach ($folders as $folder) {
-                if (microtime(true) >= $deadline) {
-                    throw new SearchFailure(...self::TIMEOUT);
-                }
-                try {
-                    $selected = $actions->select($folder['path'], true);
-                    $uids = $actions->search($criteria['parts'], $criteria['utf8']);
-                } catch (MailException $e) {
-                    if ($e->errorCode !== 'PROTOCOL') {
-                        // Connection lost or timed out: no further folders.
-                        throw $e->errorCode === 'ETIMEDOUT' ? new SearchFailure(...self::TIMEOUT) : new SearchFailure(...self::UNREACHABLE);
-                    }
-                    // e.g. folder removed at the provider: the other folders still count.
-                    ++$result['foldersFailed'];
-                    continue;
-                }
-                $result['folders'][] = ['folderId' => $folder['id'], 'uidvalidity' => $selected['uidValidity'] ?? '', 'uids' => $uids];
-            }
-            if (microtime(true) >= $deadline) {
-                throw new SearchFailure(...self::TIMEOUT);
-            }
+            return ProviderSearch::search($client, $folders, ImapActions::searchCriteria($query), $deadline);
         } finally {
             $client->logout();
         }
-
-        return $result;
     }
 
     /**

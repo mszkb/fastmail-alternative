@@ -24,7 +24,7 @@ use Fma\Security\RateLimiter;
  *    UPLOAD_RETENTION_HOURS; uploads of settled (sent, content cleared) messages.
  * 3. Outbox entries sent and settled or failed, after OUTBOX_RETENTION_DAYS.
  * 4. Expired sessions; push subscriptions disabled for 30 days; the PHP
- *    runtime tables rate_limit and login_lockout.
+ *    runtime tables rate_limit, login_lockout and expired search_result rows.
  * 5. Finished (done/cancelled) jobs after JOB_RETENTION_DAYS, failed ones after
  *    FAILED_JOB_RETENTION_DAYS; queued and running jobs are never touched.
  * 6. Volume scan: message directories without a message_body row pointing
@@ -130,6 +130,7 @@ final class CleanupJob implements JobHandler
         $pushSubscriptions = $this->deleteInBatches('push_subscription', "SELECT id FROM push_subscription WHERE {$pushCondition}", $pushCondition, [self::DISABLED_PUSH_RETENTION_SECONDS], $deadline);
         (new RateLimiter($this->db, []))->prune();
         (new LoginLockout($this->db))->prune();
+        Database::run($this->db->pdo(), 'DELETE FROM search_result WHERE expires_at < ?', [time()]);
 
         // 5. Old jobs; queued/running stay.
         $jobCondition = "(state IN ('done', 'cancelled') AND run_at < UTC_TIMESTAMP(6) - INTERVAL ? SECOND)
