@@ -91,6 +91,35 @@ describe.skipIf(!API_URL)('auth', () => {
     expect(response.status).toBe(403)
   })
 
+  it('native login returns a Bearer device token instead of a cookie (#138)', async () => {
+    const app = new Client()
+    // Native apps send no Sec-Fetch-Site/Origin.
+    const native = { 'sec-fetch-site': '' }
+    const login = await app.request('POST', '/api/auth/login', {
+      body: { ...USER, client: 'native', deviceName: 'Contract phone', platform: 'android' },
+      headers: native,
+    })
+    expect(login.status).toBe(200)
+    expect(app.hasSession).toBe(false)
+    const { token } = login.body as { token: string }
+    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const bearer = { ...native, authorization: `Bearer ${token}` }
+
+    const devices = await app.request('GET', '/api/auth/devices', { headers: bearer })
+    expect(devices.status).toBe(200)
+    const current = (
+      devices.body as { devices: { name: string; platform: string; isCurrent: boolean }[] }
+    ).devices.find((d) => d.isCurrent)
+    expect(current).toMatchObject({ name: 'Contract phone', platform: 'android' })
+
+    // Cross-site headers do not matter for Bearer requests; logout ends the token.
+    const logout = await app.request('DELETE', '/api/auth/session', {
+      headers: { ...bearer, 'sec-fetch-site': 'cross-site' },
+    })
+    expect(logout.status).toBe(204)
+    expect((await app.request('GET', '/api/auth/devices', { headers: bearer })).status).toBe(401)
+  })
+
   it('DELETE /api/auth/session logs out', async () => {
     const response = await client.request('DELETE', '/api/auth/session')
     expect(response.status).toBe(204)

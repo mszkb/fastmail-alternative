@@ -10,7 +10,9 @@ use Fma\Db\Uuid;
 use Fma\Http\Body;
 use Fma\Http\Json;
 use Fma\Http\Middleware\RequireAuth;
+use Fma\Push\Fcm;
 use Fma\Push\InvalidSubscriptionException;
+use Fma\Push\PushNotifyQueue;
 use Fma\Push\Subscriptions;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,6 +27,10 @@ use Slim\App;
  *   DELETE /api/push/subscriptions/{id} for the device management view;
  * - GET /api/push/subscriptions: without endpoints or keys.
  * Endpoints are capability URLs and are never logged.
+ * POST /api/push/test queues a test notification (content-free, coalesced).
+ * Native Android app (#139): POST `{transport: "fcm", token}`; 422 when
+ * the instance has no FCM configured (FCM_PROJECT_ID). DELETE by
+ * `endpoint` takes the FCM token as well.
  */
 final class PushRoutes
 {
@@ -33,6 +39,7 @@ final class PushRoutes
     public function __construct(
         private readonly Config $config,
         private readonly Subscriptions $subscriptions,
+        private readonly PushNotifyQueue $queue,
     ) {}
 
     /** @param App<\Psr\Container\ContainerInterface|null> $app */
@@ -43,6 +50,7 @@ final class PushRoutes
         $app->post('/api/push/subscriptions', $this->create(...))->add($requireAuth);
         $app->delete('/api/push/subscriptions', $this->deleteByEndpoint(...))->add($requireAuth);
         $app->delete('/api/push/subscriptions/{id}', $this->deleteById(...))->add($requireAuth);
+        $app->post('/api/push/test', $this->test(...))->add($requireAuth);
     }
 
     private function vapidPublicKey(Request $request, Response $response): Response
@@ -65,6 +73,9 @@ final class PushRoutes
             $subscription = $this->subscriptions->validate(Body::json($request));
         } catch (InvalidSubscriptionException $e) {
             return Json::write($response, ['message' => $e->getMessage()], 400);
+        }
+        if ($subscription['transport'] === 'fcm' && !Fcm::enabled($this->config)) {
+            return Json::write($response, ['message' => 'FCM ist auf dieser Instanz nicht eingerichtet.'], 422);
         }
         $session = self::session($request);
         $id = $this->subscriptions->save($session->userId, $session->deviceId, $subscription);
@@ -94,6 +105,14 @@ final class PushRoutes
         }
 
         return $response->withStatus(204);
+    }
+
+    /** Test notification: queues the content-free push_notify job (same coalescing as new mail). */
+    private function test(Request $request, Response $response): Response
+    {
+        $queued = $this->queue->enqueueForUser(self::session($request)->userId);
+
+        return Json::write($response, ['queued' => $queued], 202);
     }
 
     private static function session(Request $request): Session

@@ -30,7 +30,7 @@ use Slim\App;
 final class AuthRoutes
 {
     private const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+$/u';
-    private const PLATFORMS = ['ios_pwa', 'android_pwa', 'desktop'];
+    private const PLATFORMS = ['ios_pwa', 'android_pwa', 'desktop', 'android', 'ios'];
     private const SETUP_LOCK = 'fma-setup';
 
     public function __construct(
@@ -103,7 +103,8 @@ final class AuthRoutes
         if (($locked = $this->lockout->isLockedOut($ip)) > 0) {
             return self::lockedOut($response, $locked);
         }
-        $credentials = self::readCredentials(Body::json($request));
+        $body = Body::json($request);
+        $credentials = self::readCredentials($body);
         if ($credentials === null) {
             return $this->authFailure($response, $ip, 'auth.login_failed', 401, 'Invalid email or password');
         }
@@ -118,6 +119,12 @@ final class AuthRoutes
             return $this->authFailure($response, $ip, 'auth.login_failed', 401, 'Invalid email or password');
         }
         $this->lockout->recordSuccess($ip);
+        if (Body::string($body, 'client') === Sessions::CLIENT_NATIVE) {
+            // Native app (#138): the token goes into the body, never into a cookie.
+            $token = $this->sessions->createDeviceWithSession($user['id'], $credentials['deviceName'], $credentials['platform'], Sessions::CLIENT_NATIVE);
+
+            return Json::write($response, ['email' => $credentials['email'], 'token' => $token]);
+        }
         // A login on a browser that still holds a valid session replaces it.
         $previous = ($old = SessionCookie::token($request)) !== null ? $this->sessions->resolve($old) : null;
         if ($previous !== null) {
@@ -149,14 +156,15 @@ final class AuthRoutes
         }
         $token = $this->sessions->changePasswordAndEndOtherSessions($session, Password::hash($new));
 
-        return $this->cookie->set($response->withStatus(204), $token);
+        return $token === null ? $response->withStatus(204) : $this->cookie->set($response->withStatus(204), $token);
     }
 
     private function logout(Request $request, Response $response): Response
     {
-        $this->sessions->delete(self::session($request)->sessionId);
+        $session = self::session($request);
+        $this->sessions->delete($session->sessionId);
 
-        return $this->cookie->clear($response->withStatus(204));
+        return $session->native ? $response->withStatus(204) : $this->cookie->clear($response->withStatus(204));
     }
 
     private function devices(Request $request, Response $response): Response

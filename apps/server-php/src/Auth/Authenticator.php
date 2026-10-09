@@ -7,7 +7,11 @@ namespace Fma\Auth;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
-/** Resolves the session cookie and rotates tokens older than 24 hours. */
+/**
+ * Resolves the session: a Bearer token (native clients, #138) if the
+ * request carries one - then the cookie is ignored -, otherwise the
+ * session cookie, whose token is rotated after 24 hours.
+ */
 final class Authenticator
 {
     public function __construct(
@@ -18,6 +22,15 @@ final class Authenticator
     /** @return array{?Session, ?string} the session and a new token if it was rotated */
     public function resolve(ServerRequestInterface $request): array
     {
+        if (BearerToken::present($request)) {
+            $bearer = BearerToken::token($request);
+            $session = $bearer === null ? null : $this->sessions->resolve($bearer, Sessions::CLIENT_NATIVE);
+            if ($session !== null) {
+                $this->sessions->touchDevice($session->deviceId);
+            }
+
+            return [$session, null];
+        }
         $token = SessionCookie::token($request);
         $session = $token === null ? null : $this->sessions->resolve($token);
         if ($session === null) {

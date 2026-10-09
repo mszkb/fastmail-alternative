@@ -1,0 +1,16 @@
+{
+  "name": "@fma/feature-matrix",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Feature directory web PWA <-> native apps (docs/product/features.yaml), #154",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9",
+    "vitest": "^5.0.3",
+    "yaml": "^2.8.1"
+  }
+}

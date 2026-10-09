@@ -1,0 +1,14 @@
+{
+  "name": "@fma/design-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Design tokens for the PWA and the native apps (#141)",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  }
+}

@@ -6,15 +6,19 @@ info:
     HTTP API of the self-hosted multi-account mail client (ADR-0010,
     ADR-0013). Contract between the PWA (`apps/web`) and the backend
     (`apps/server-php`). All routes live under `/api`. Authentication is a server-side session in the HttpOnly,
-    SameSite=Strict cookie `fma_session` (ADR-0004). State-changing
-    requests from browsers must be same-origin (`Sec-Fetch-Site` or
-    `Origin`), otherwise 403. Rate limits answer 429 with `Retry-After`.
+    SameSite=Strict cookie `fma_session` (ADR-0004). Native apps log in
+    with `client: "native"` and send the returned device token as
+    `Authorization: Bearer <token>` instead (#138); a request with that
+    header is authenticated by it alone and needs no same-origin check.
+    State-changing cookie requests from browsers must be same-origin
+    (`Sec-Fetch-Site` or `Origin`), otherwise 403. Rate limits answer 429 with `Retry-After`.
   license:
     name: ISC
 servers:
   - url: /
 security:
   - session: []
+  - deviceToken: []
 tags:
   - name: system
   - name: auth
@@ -33,6 +37,10 @@ components:
       type: apiKey
       in: cookie
       name: fma_session
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: 'Device-bound token of a native app (`POST /api/auth/login` with `client: native`). Never rotated, valid 365 days, revoked by logout, device revocation or password change.'
     metricsToken:
       type: http
       scheme: bearer

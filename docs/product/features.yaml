@@ -1,0 +1,570 @@
+# Feature directory web PWA <-> native apps (#154).
+#
+# One entry per user-facing feature. For each client: status
+# (yes | partial | no | na = not planned), the files or folders that
+# implement it, and an optional note. `logic` lists the rules that must
+# behave the same in both clients (TypeScript in packages/shared, Kotlin in
+# apps/mobile/shared) - change one, change the other. `server` names the
+# API routes both use.
+#
+# After a change: `pnpm features` renders docs/product/feature-matrix.md;
+# CI fails when a listed path no longer exists or the matrix is stale.
+# Notes in German (documentation), ids in English.
+
+features:
+  # --- Anmeldung und Geräte -------------------------------------------------
+  - id: auth.connect
+    area: Anmeldung und Geräte
+    name: Instanz wählen (HTTPS, /api/health)
+    issues: [146]
+    web: { status: na, note: PWA läuft auf der Instanz selbst }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ConnectScreen.kt
+        - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/api/InstanceUrl.kt
+
+  - id: auth.setup
+    area: Anmeldung und Geräte
+    name: Ersteinrichtung mit Setup-Code
+    web: { status: yes, files: [apps/web/app/app.vue, apps/web/app/components/GettingStarted.vue] }
+    app: { status: no, note: nur in der Web-App }
+    server: [apps/server-php/src/Routes/AuthRoutes.php]
+
+  - id: auth.login
+    area: Anmeldung und Geräte
+    name: Anmelden, Abmelden
+    issues: [138, 146]
+    note: Web per Session-Cookie, App per Geräte-Token (Bearer, ADR-0004)
+    web: { status: yes, files: [apps/web/app/app.vue, apps/web/app/components/ProfileMenu.vue] }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ConnectScreen.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/SecureSessionStore.kt
+    server: [apps/server-php/src/Routes/AuthRoutes.php, apps/server-php/src/Auth/BearerToken.php]
+
+  - id: auth.password
+    area: Anmeldung und Geräte
+    name: Passwort ändern
+    web: { status: yes, files: [apps/web/app/components/PasswordChange.vue] }
+    app: { status: no }
+    server: [apps/server-php/src/Routes/AuthRoutes.php]
+
+  - id: auth.devices
+    area: Anmeldung und Geräte
+    name: Geräteliste, Gerät abmelden
+    web: { status: yes, files: [apps/web/app/app.vue] }
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/SettingsScreen.kt]
+    server: [apps/server-php/src/Routes/AuthRoutes.php]
+
+  # --- Konten -----------------------------------------------------------------
+  - id: accounts.manage
+    area: Konten
+    name: Konto anlegen, bearbeiten, löschen, Verbindungstest, Anbieter-Vorlagen
+    web:
+      status: yes
+      files:
+        - apps/web/app/components/AccountForm.vue
+        - apps/web/app/components/AccountList.vue
+        - packages/shared/src/provider-presets.ts
+    app: { status: no, note: Konten werden in der Web-App eingerichtet (#153) }
+    server: [apps/server-php/src/Routes/AccountRoutes.php]
+
+  - id: accounts.oauth
+    area: Konten
+    name: Anmeldung beim Mailanbieter per OAuth2
+    note: ADR-0011
+    web: { status: no, note: OAuth-Vorlagen werden nur als nicht unterstützt angezeigt }
+    app: { status: no }
+
+  - id: accounts.errors
+    area: Konten
+    name: Fehler je Konto anzeigen (auth_error, nicht erreichbar)
+    note: Fehlerisolierung pro Konto (Prinzip 7)
+    web:
+      status: yes
+      files:
+        [
+          apps/web/app/components/AccountRail.vue,
+          apps/web/app/components/MailView.vue,
+          packages/shared/src/mail.ts,
+        ]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+      note: Hinweistexte eigen formuliert, nicht mit der PWA abgeglichen
+
+  - id: accounts.identities
+    area: Konten
+    name: Identitäten und Signaturen verwalten
+    web: { status: yes, files: [apps/web/app/components/IdentitySettings.vue] }
+    app: { status: no, note: nur Auswahl beim Verfassen (#153) }
+    server: [apps/server-php/src/Routes/IdentityRoutes.php]
+
+  - id: accounts.switch
+    area: Konten
+    name: Kontowechsel mit Ungelesen-Zahl und Fehleranzeige
+    issues: [147]
+    note: Konten bleiben getrennt (Prinzip 8)
+    web:
+      status: yes
+      files: [apps/web/app/components/AccountRail.vue, packages/shared/src/account-avatar.ts]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+      note: Chips statt Kontoleiste, ohne Kontofarben und Drag & Drop
+    server: [apps/server-php/src/Routes/AccountRoutes.php]
+
+  - id: accounts.unified
+    area: Konten
+    name: Gemeinsamer Posteingang (optional, standardmäßig aus)
+    web:
+      status: yes
+      files: [apps/web/app/components/UnifiedInbox.vue]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt]
+      note: nur Anzeige; Einstellung nur in der Web-App
+    server:
+      [apps/server-php/src/Routes/SettingsRoutes.php, apps/server-php/src/Routes/MessageRoutes.php]
+
+  # --- Sync -------------------------------------------------------------------
+  - id: sync.foreground
+    area: Sync
+    name: Sync bei Start und Fokuswechsel, Polling während des Syncs
+    note: Drossel 15 s, Polling alle 3 s für 2 min (docs/architecture/push.md)
+    web: { status: yes, files: [apps/web/app/app.vue] }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/App.kt
+    logic:
+      - packages/shared/src/foreground-sync.ts
+      - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/domain/SyncRules.kt
+    server: [apps/server-php/src/Routes/SyncRoutes.php]
+
+  - id: sync.manual
+    area: Sync
+    name: Manuell synchronisieren, Pull-to-Refresh
+    web:
+      status: yes
+      files: [apps/web/app/components/MailView.vue, packages/shared/src/pull-to-refresh.ts]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+
+  - id: sync.panel
+    area: Sync
+    name: Sync-Fortschritt je Konto, Sync stoppen
+    issues: [119]
+    web:
+      status: yes
+      files: [apps/web/app/components/SyncPanel.vue, packages/shared/src/sync-status.ts]
+    app:
+      status: partial
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+      note: nur Fortschrittsbalken, kein Stoppen
+    server: [apps/server-php/src/Routes/SyncRoutes.php]
+
+  # --- Ordner und Liste ---------------------------------------------------------
+  - id: folders.list
+    area: Ordner und Nachrichtenliste
+    name: Ordnerliste mit Rollen und Zählern
+    issues: [148]
+    web:
+      status: yes
+      files: [apps/web/app/components/MailView.vue, packages/shared/src/folders.ts]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+    logic:
+      - packages/shared/src/folders.ts
+      - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/domain/SyncRules.kt
+    server: [apps/server-php/src/Routes/FolderRoutes.php]
+
+  - id: folders.roles
+    area: Ordner und Nachrichtenliste
+    name: Ordnerrollen manuell zuordnen
+    web: { status: yes, files: [apps/web/app/components/FolderRoles.vue] }
+    app: { status: no }
+    server: [apps/server-php/src/Routes/FolderRoutes.php]
+
+  - id: list.paging
+    area: Ordner und Nachrichtenliste
+    name: Nachrichtenliste mit Paginierung, Ältere vom Server laden
+    issues: [148]
+    web:
+      status: yes
+      files: [apps/web/app/components/MailView.vue, packages/shared/src/message-list.ts]
+      note: mit Datumsgruppen
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+      note: ohne Datumsgruppen; Zusammenführen der ersten Seite eigen umgesetzt (vgl. mergeFirstPage)
+    logic:
+      - packages/shared/src/message-list.ts
+      - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+    server:
+      [apps/server-php/src/Routes/MessageRoutes.php, apps/server-php/src/Routes/FolderRoutes.php]
+
+  - id: list.multiselect
+    area: Ordner und Nachrichtenliste
+    name: Mehrfachauswahl und Sammelaktionen
+    issues: [114, 151]
+    web: { status: yes, files: [apps/web/app/components/MailView.vue] }
+    app: { status: no }
+
+  - id: list.swipe
+    area: Ordner und Nachrichtenliste
+    name: Wischgesten
+    issues: [75, 151]
+    note: Web wischt zur Navigation, die App wischt Aktionen (links archivieren, rechts gelesen)
+    web: { status: yes, files: [packages/shared/src/swipe-back.ts] }
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt]
+
+  # --- Lesen ----------------------------------------------------------------------
+  - id: read.html
+    area: Lesen
+    name: Bereinigtes HTML, externe Bilder erst auf Wunsch, Links extern
+    issues: [149]
+    web: { status: yes, files: [apps/web/app/components/MessageBody.vue] }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MessageScreen.kt
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/AndroidPlatform.kt
+      note: gesperrte WebView ohne JavaScript, Dunkelmodus per Farbumkehr
+    server:
+      [
+        apps/server-php/src/Routes/MessageContentRoutes.php,
+        apps/server-php/src/Mail/HtmlSanitizer.php,
+      ]
+
+  - id: read.attachments
+    area: Lesen
+    name: Anhänge anzeigen und öffnen
+    web:
+      status: yes
+      files: [apps/web/app/components/MessageAttachments.vue, packages/shared/src/attachments.ts]
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MessageScreen.kt
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/AttachmentProvider.kt
+      note: gestreamt, ohne Speichern auf dem Gerät
+    server: [apps/server-php/src/Routes/MessageContentRoutes.php]
+
+  - id: read.thread
+    area: Lesen
+    name: Verlauf (Thread)
+    web:
+      {
+        status: yes,
+        files: [apps/web/app/components/MailView.vue, packages/shared/src/threading.ts],
+      }
+    app:
+      status: partial
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MessageScreen.kt]
+      note: aufklappbare Liste unter der Nachricht, nur Text
+    server: [apps/server-php/src/Routes/MessageRoutes.php]
+
+  # --- Aktionen --------------------------------------------------------------------
+  - id: actions.basic
+    area: Aktionen
+    name: Gelesen/ungelesen, markieren, archivieren, löschen
+    issues: [151]
+    web: { status: yes, files: [apps/web/app/components/MailView.vue, packages/shared/src/mail.ts] }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MessageScreen.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+    server: [apps/server-php/src/Routes/MessageActionRoutes.php]
+
+  - id: actions.move
+    area: Aktionen
+    name: Verschieben, als Spam markieren
+    web:
+      status: partial
+      files: [apps/web/app/components/MailView.vue, packages/shared/src/folders.ts]
+      note: Spam nur als Verschieben in den Junk-Ordner
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MessageScreen.kt]
+    server: [apps/server-php/src/Routes/MessageActionRoutes.php]
+
+  - id: actions.undo
+    area: Aktionen
+    name: Rückgängig nach Archivieren, Löschen, Verschieben
+    web: { status: no, note: im Web nur Rückgängig-Senden }
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/MailScreen.kt
+
+  - id: actions.offline
+    area: Aktionen
+    name: Aktionen offline vormerken (Offline-Queue)
+    issues: [145]
+    web:
+      status: yes
+      files: [apps/web/app/utils/offline-queue.ts, packages/shared/src/offline.ts]
+    app: { status: no, note: braucht den verschlüsselten Cache (#145) }
+
+  # --- Verfassen ----------------------------------------------------------------------
+  - id: compose.basic
+    area: Verfassen
+    name: Neue Mail, Antworten, Allen antworten, Weiterleiten, Absender wählen
+    issues: [150]
+    web:
+      status: yes
+      files: [apps/web/app/components/ComposeForm.vue, packages/shared/src/compose.ts]
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ComposeScreen.kt
+        - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/domain/Compose.kt
+      note: nur Text; Zitat- und Empfängerregeln einfacher als in compose.ts
+    logic:
+      - packages/shared/src/compose.ts
+      - packages/shared/src/compose-helpers.ts
+      - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/domain/Compose.kt
+    server: [apps/server-php/src/Routes/OutboxRoutes.php]
+
+  - id: compose.suggestions
+    area: Verfassen
+    name: Empfängervorschläge aus bekannten Adressen
+    web:
+      status: yes
+      files: [apps/web/app/components/ComposeForm.vue, packages/shared/src/compose-helpers.ts]
+    app: { status: no }
+
+  - id: compose.drafts
+    area: Verfassen
+    name: Entwürfe mit Autosave, Konflikte, aus Entwürfe-Ordner bearbeiten
+    issues: [150]
+    web:
+      status: yes
+      files: [apps/web/app/components/DraftList.vue, packages/shared/src/drafts.ts]
+    app:
+      status: partial
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ComposeScreen.kt]
+      note: Autosave nach 2 s; Konflikte gewinnt das Gerät, das gerade schreibt; keine Entwurfsliste
+    logic:
+      - packages/shared/src/drafts.ts
+      - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ComposeScreen.kt
+    server: [apps/server-php/src/Routes/DraftRoutes.php]
+
+  - id: compose.attachments
+    area: Verfassen
+    name: Anhänge hinzufügen
+    web: { status: yes, files: [apps/web/app/components/ComposeForm.vue] }
+    app: { status: no }
+    server: [apps/server-php/src/Routes/UploadRoutes.php]
+
+  - id: compose.outbox
+    area: Verfassen
+    name: Outbox, Erneut versuchen, Rückgängig-Senden
+    web:
+      status: yes
+      files: [apps/web/app/components/OutboxPanel.vue, apps/web/app/utils/undo-send.ts]
+    app: { status: no, note: Senden geht direkt in die Outbox, ohne Ansicht }
+    server: [apps/server-php/src/Routes/OutboxRoutes.php]
+
+  # --- Suche ----------------------------------------------------------------------------
+  - id: search.account
+    area: Suche
+    name: Suche im aktiven Konto (IMAP SEARCH)
+    issues: [152]
+    web:
+      status: yes
+      files: [apps/web/app/components/AppHeader.vue, packages/shared/src/search.ts]
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/SearchScreen.kt]
+      note: nur Freitext, keine Filter
+    server: [apps/server-php/src/Routes/SearchRoutes.php]
+
+  - id: search.global
+    area: Suche
+    name: Globale Suche über alle Konten (Bereich, Operatoren, Status je Konto)
+    issues: [121]
+    note: IMAP SEARCH je Konto, kein eigener Index; Suchbegriffe werden nie gespeichert (ADR-0006, Nachtrag)
+    web:
+      status: partial
+      files:
+        [
+          apps/web/app/components/GlobalSearch.vue,
+          apps/web/app/components/AppHeader.vue,
+          packages/shared/src/search.ts,
+        ]
+      note: 'funktioniert; offen: Messung auf dem Pi und mit echten Anbietern'
+    app:
+      status: no
+      note: App sucht nur im aktiven Konto
+    server:
+      [
+        apps/server-php/src/Routes/GlobalSearchRoutes.php,
+        apps/server-php/src/Mail/ProviderSearch.php,
+      ]
+
+  - id: search.offline
+    area: Suche
+    name: Offline-Suche in den gespeicherten Nachrichten
+    issues: [162]
+    web: { status: no, note: geplant }
+    app: { status: no, note: geplant, App hat noch keinen Offline-Cache (#145) }
+
+  # --- Push -------------------------------------------------------------------------------
+  - id: push.notify
+    area: Push und Badge
+    name: Benachrichtigung bei neuer Mail (ohne Inhalte)
+    issues: [139, 158]
+    note: Web Push (VAPID) bzw. FCM; Payload nur event/type, installationId, badge
+    web:
+      status: yes
+      files:
+        [
+          apps/web/app/components/PushSettings.vue,
+          apps/web/service-worker/sw.js,
+          packages/shared/src/push.ts,
+        ]
+    app:
+      status: yes
+      files:
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/AndroidPush.kt
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/FcmService.kt
+        - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/Notifications.kt
+      note: ohne Firebase Notlösung per Abfrage alle 15 min (PollWorker.kt)
+    server:
+      - apps/server-php/src/Push/PushNotifyHandler.php
+      - apps/server-php/src/Push/Fcm.php
+      - apps/server-php/src/Routes/PushRoutes.php
+
+  - id: push.test
+    area: Push und Badge
+    name: Test-Benachrichtigung senden
+    web: { status: no }
+    app:
+      status: yes
+      files: [apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/SettingsScreen.kt]
+    server: [apps/server-php/src/Routes/PushRoutes.php]
+
+  - id: push.badge
+    area: Push und Badge
+    name: App-Badge (Summe ungelesener Posteingänge)
+    web:
+      status: yes
+      files: [apps/web/app/utils/app-badge.ts, packages/shared/src/badge.ts]
+    app:
+      status: partial
+      files: [apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/Notifications.kt]
+      note: Zahl an der Benachrichtigung; Launcher-Badge hängt vom Launcher ab
+    logic:
+      - packages/shared/src/badge.ts
+      - apps/mobile/shared/src/commonMain/kotlin/net/fma/mail/domain/SyncRules.kt
+
+  # --- Darstellung und Einstellungen -------------------------------------------------------
+  - id: ui.theme
+    area: Darstellung und Einstellungen
+    name: Hell/Dunkel, Design-Tokens
+    issues: [141]
+    web:
+      status: yes
+      files:
+        [
+          apps/web/app/assets/css/main.css,
+          apps/web/app/utils/appearance.ts,
+          packages/shared/src/appearance.ts,
+        ]
+      note: Hell/Dunkel/System und Dichte pro Gerät
+    app:
+      status: yes
+      files:
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/Theme.kt
+        - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/theme/FmaTokens.kt
+      note: folgt dem System; keine eigene Auswahl, keine Dichte
+    logic: [packages/design-tokens/tokens.json]
+
+  - id: ui.layout
+    area: Darstellung und Einstellungen
+    name: Layout (Lesebereich, Spaltenbreiten)
+    issues: [113]
+    web: { status: yes, files: [packages/shared/src/layout.ts] }
+    app: { status: no, note: Tablet-Layout offen (#148) }
+
+  - id: ui.user-themes
+    area: Darstellung und Einstellungen
+    name: Installierbare Themes (*.fmatheme.json)
+    issues: [126]
+    note: nur Farben, Größen und Layout-Optionen, kein Code; Format in docs/themes/README.md
+    web:
+      status: yes
+      files:
+        [
+          apps/web/app/components/ThemeSettings.vue,
+          apps/web/app/utils/user-theme.ts,
+          packages/shared/src/themes.ts,
+        ]
+      note: aktives Theme pro Gerät, Notausgang ?theme=default
+    app:
+      status: no
+      note: App nutzt nur das Standard-Theme aus den Design-Tokens
+    logic: [packages/shared/src/themes.ts, apps/server-php/src/Themes/ThemeValidator.php]
+    server: [apps/server-php/src/Routes/ThemeRoutes.php]
+
+  - id: ui.shortcuts
+    area: Darstellung und Einstellungen
+    name: Tastenkürzel
+    issues: [115]
+    web:
+      status: yes
+      files: [packages/shared/src/shortcuts.ts, apps/web/app/utils/shortcuts-setting.ts]
+    app: { status: na }
+
+  - id: settings.storage
+    area: Darstellung und Einstellungen
+    name: Speicherverbrauch je Konto
+    web: { status: yes, files: [packages/shared/src/storage.ts] }
+    app: { status: no }
+    server: [apps/server-php/src/Routes/StorageRoutes.php]
+
+  - id: settings.config-transfer
+    area: Darstellung und Einstellungen
+    name: Konfiguration exportieren/importieren
+    web:
+      status: yes
+      files: [apps/web/app/components/ConfigTransfer.vue, packages/shared/src/config-export.ts]
+    app: { status: na, note: Verwaltungsfunktion der Web-App }
+    server: [apps/server-php/src/Routes/ConfigTransferRoutes.php]
+
+  # --- Offline und Installation -------------------------------------------------------------
+  - id: offline.cache
+    area: Offline und Installation
+    name: Verschlüsselter Offline-Cache
+    issues: [145]
+    web:
+      status: yes
+      files: [apps/web/app/utils/offline-store.ts, packages/shared/src/offline.ts]
+    app: { status: no, note: Mails nur im Speicher (Prinzip 5) }
+
+  - id: install.hints
+    area: Offline und Installation
+    name: Installationshinweise, Update-Hinweis
+    web:
+      status: yes
+      files:
+        - apps/web/app/components/InstallBanner.vue
+        - apps/web/app/components/InstallGuide.vue
+        - apps/web/app/components/UpdatePrompt.vue
+    app: { status: na, note: APK bzw. Store }

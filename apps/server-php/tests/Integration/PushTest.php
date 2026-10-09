@@ -13,12 +13,14 @@ use Fma\Db\Uuid;
 use Fma\Jobs\Deadline;
 use Fma\Jobs\Job;
 use Fma\Log\Logger;
+use Fma\Push\Fcm;
 use Fma\Push\PushNotifyHandler;
 use Fma\Push\PushNotifyQueue;
 use Fma\Push\PushSender;
 use Fma\Push\StreamPushSender;
 use Fma\Push\Vapid;
 use Fma\Push\WebPushCrypto;
+use Fma\Tests\Support\FakeHttpClient;
 use Fma\Tests\Support\Http;
 use Psr\Http\Message\ResponseInterface;
 
@@ -307,6 +309,79 @@ final class PushTest extends DatabaseTestCase
         self::assertSame(['sent' => 0, 'removed' => 0, 'failed' => 1], $handler->notify(['userId' => $this->userId]));
         self::assertSame([], $sender->calls);
         self::assertSame(1, (int) Database::run(self::$db->pdo(), 'SELECT failure_count FROM push_subscription WHERE id = ?', [$id])->fetchColumn());
+    }
+
+    public function testFcmRegistrationNeedsConfiguredFcm(): void
+    {
+        $body = ['transport' => 'fcm', 'token' => 'fcm-registration-token:APA91b-xyz_123'];
+        self::assertSame(422, $this->call('POST', '/api/push/subscriptions', $body)->getStatusCode());
+
+        $app = App::create($this->config(['FCM_PROJECT_ID' => 'test-project']), self::$db, new Logger('api', 'error', Http::memoryStream()), []);
+        self::assertSame(400, $this->call('POST', '/api/push/subscriptions', ['transport' => 'fcm', 'token' => 'x y'], app: $app)->getStatusCode());
+        self::assertSame(400, $this->call('POST', '/api/push/subscriptions', ['transport' => 'apns', 'token' => 'abc'], app: $app)->getStatusCode());
+        $created = $this->call('POST', '/api/push/subscriptions', $body, app: $app);
+        self::assertSame(201, $created->getStatusCode());
+        // Re-registering the same token keeps the subscription.
+        self::assertSame(Http::json($created)['id'], Http::json($this->call('POST', '/api/push/subscriptions', $body, app: $app))['id']);
+        $list = (array) Http::json($this->call('GET', '/api/push/subscriptions', app: $app))['subscriptions'];
+        self::assertCount(1, $list);
+        self::assertSame('fcm.googleapis.com', $list[0]['pushService']);
+        self::assertSame('fcm', Database::run(self::$db->pdo(), 'SELECT transport FROM push_subscription')->fetchColumn());
+
+        self::assertSame(204, $this->call('DELETE', '/api/push/subscriptions', ['endpoint' => $body['token']], app: $app)->getStatusCode());
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM push_subscription')->fetchColumn());
+    }
+
+    public function testFcmSendsOnlyEventInstallationAndBadge(): void
+    {
+        $pdo = self::$db->pdo();
+        Database::run($pdo, "INSERT INTO push_subscription (id, device_id, transport, endpoint, keys_enc) VALUES (?, ?, 'fcm', 'fcm-token-ok', ''), (?, ?, 'fcm', 'fcm-token-gone', '')", [Uuid::v4(), $this->deviceId, Uuid::v4(), $this->deviceId]);
+        $http = new FakeHttpClient();
+        // Answer UNREGISTERED for the gone token, whichever comes first.
+        $unregistered = new class ($http) implements \Fma\Push\HttpClient {
+            public function __construct(private readonly FakeHttpClient $inner) {}
+
+            public function post(string $url, array $headers, string $body): array
+            {
+                $response = $this->inner->post($url, $headers, $body);
+
+                return str_contains($body, 'fcm-token-gone') ? ['status' => 404, 'body' => '{"error":{"details":[{"errorCode":"UNREGISTERED"}]}}'] : $response;
+            }
+        };
+        $fcm = Fcm::fromConfig($this->config(['FCM_PROJECT_ID' => 'test-project', 'FCM_SERVICE_ACCOUNT_JSON' => FakeHttpClient::serviceAccount()]), $unregistered);
+        // Web Push not configured: FCM still goes out.
+        $handler = new PushNotifyHandler(self::$db, $this->cfg, new Logger('worker', 'info', $this->log), new StreamPushSender(true), null, $fcm);
+        self::assertSame(['sent' => 1, 'removed' => 1, 'failed' => 0], $handler->notify(['userId' => $this->userId]));
+
+        $sends = $http->sends();
+        self::assertCount(2, $sends);
+        $installationId = Database::run($pdo, 'SELECT installation_id FROM device WHERE id = ?', [$this->deviceId])->fetchColumn();
+        foreach ($sends as $send) {
+            $message = json_decode($send['body'], true);
+            self::assertIsArray($message);
+            self::assertSame(['event' => 'new_mail', 'installationId' => $installationId, 'badge' => '0'], $message['message']['data']);
+            self::assertSame(['token', 'data', 'android'], array_keys($message['message']), 'data-only, no notification block');
+            foreach (['me@example.org', 'subject', 'from'] as $content) {
+                self::assertStringNotContainsString($content, $send['body']);
+            }
+        }
+        self::assertSame(['fcm-token-ok'], Database::run($pdo, 'SELECT endpoint FROM push_subscription')->fetchAll(\PDO::FETCH_COLUMN));
+        $log = Http::contents($this->log);
+        self::assertStringNotContainsString('fcm-token-ok', $log);
+        self::assertStringNotContainsString('BEGIN PRIVATE KEY', $log);
+        self::assertStringNotContainsString('ya29.test', $log);
+    }
+
+    public function testTestNotificationIsQueuedOnlyWithASubscriptionAndCoalesced(): void
+    {
+        self::assertSame(['queued' => false], Http::json($this->call('POST', '/api/push/test')), 'no subscription');
+        $this->subscribe('https://push.example.org/a');
+        $first = $this->call('POST', '/api/push/test');
+        self::assertSame(202, $first->getStatusCode());
+        self::assertSame(['queued' => true], Http::json($first));
+        self::assertSame(['queued' => false], Http::json($this->call('POST', '/api/push/test')), 'one queued job per user');
+        $payload = Database::run(self::$db->pdo(), "SELECT payload FROM job WHERE type = 'push_notify'")->fetchColumn();
+        self::assertSame(['userId' => $this->userId], json_decode((string) $payload, true));
     }
 
     public function testEnqueueCoalescesPerUser(): void

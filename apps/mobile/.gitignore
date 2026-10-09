@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Firebase config is injected by CI from a secret, never committed.
+androidApp/google-services.json
+androidApp/debug.keystore
