@@ -260,7 +260,7 @@ final class GlobalSearchRoutes
      * One page of the merged result after the given positions.
      *
      * @param array{accounts: list<array{accountId: string, status: string, code?: string, matches: int, foldersSearched: int, foldersFailed: int}>, streams: list<array{a: string, f: string, v: string, u: list<int>}>} $result
-     * @param array<string, int> $positions folder id prefix => last UID shown
+     * @param array<string, int> $positions positionKey() => last UID shown
      * @param list<array{id: string, status: string}> $accounts
      *
      * @return array{messages: list<array<string, mixed>>, accounts: list<array<string, mixed>>, positions: array<string, int>, more: bool}
@@ -440,10 +440,16 @@ final class GlobalSearchRoutes
         return $window;
     }
 
-    /** @param array{f: string} $stream */
+    /**
+     * Cursor key of a stream: folder id prefix and UIDVALIDITY. After a new
+     * UIDVALIDITY (search repeated after expiry) the old position no longer
+     * matches, the folder starts from the top instead of skipping hits.
+     *
+     * @param array{f: string, v: string} $stream
+     */
     private static function positionKey(array $stream): string
     {
-        return substr($stream['f'], 0, self::POSITION_KEY_LENGTH);
+        return substr($stream['f'], 0, self::POSITION_KEY_LENGTH) . '.' . $stream['v'];
     }
 
     /**
