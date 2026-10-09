@@ -10,6 +10,7 @@ use Fma\Db\Uuid;
 use Fma\Http\Body;
 use Fma\Http\Json;
 use Fma\Http\Middleware\RequireAuth;
+use Fma\Push\Fcm;
 use Fma\Push\InvalidSubscriptionException;
 use Fma\Push\Subscriptions;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -25,6 +26,9 @@ use Slim\App;
  *   DELETE /api/push/subscriptions/{id} for the device management view;
  * - GET /api/push/subscriptions: without endpoints or keys.
  * Endpoints are capability URLs and are never logged.
+ * Native Android app (#139): POST `{transport: "fcm", token}`; 422 when
+ * the instance has no FCM configured (FCM_PROJECT_ID). DELETE by
+ * `endpoint` takes the FCM token as well.
  */
 final class PushRoutes
 {
@@ -65,6 +69,9 @@ final class PushRoutes
             $subscription = $this->subscriptions->validate(Body::json($request));
         } catch (InvalidSubscriptionException $e) {
             return Json::write($response, ['message' => $e->getMessage()], 400);
+        }
+        if ($subscription['transport'] === 'fcm' && !Fcm::enabled($this->config)) {
+            return Json::write($response, ['message' => 'FCM ist auf dieser Instanz nicht eingerichtet.'], 422);
         }
         $session = self::session($request);
         $id = $this->subscriptions->save($session->userId, $session->deviceId, $subscription);

@@ -13,13 +13,21 @@ use Fma\Db\Uuid;
  * - absolute timeout 30 days after login (expires_at never moves);
  * - rotation after 24 h; a session not rotated for 14 days is idle and
  *   rejected (rotated_at doubles as "last activity");
- * - every session belongs to a device; revoking a device ends its sessions.
+ * - every session belongs to a device; revoking a device ends its sessions;
+ * - native clients (#138) get a token of their own kind (client 'native',
+ *   sent as Authorization: Bearer): valid NATIVE_TTL_SECONDS, never rotated
+ *   and without idle timeout - the app cannot take part in rotation
+ *   reliably; it ends by logout, device revocation or password change.
+ *   A web token is never accepted as Bearer and vice versa.
  */
 final class Sessions
 {
     public const TTL_SECONDS = 30 * 24 * 3600;
     public const IDLE_SECONDS = 14 * 24 * 3600;
     public const ROTATION_SECONDS = 24 * 3600;
+    public const NATIVE_TTL_SECONDS = 365 * 24 * 3600;
+    public const CLIENT_WEB = 'web';
+    public const CLIENT_NATIVE = 'native';
     private const TOUCH_SECONDS = 60;
 
     public function __construct(private readonly Database $db) {}
@@ -41,8 +49,9 @@ final class Sessions
     }
 
     /** Creates a device and its first session; returns the token. */
-    public function createDeviceWithSession(string $userId, string $deviceName, string $platform): string
+    public function createDeviceWithSession(string $userId, string $deviceName, string $platform, string $client = self::CLIENT_WEB): string
     {
+        $native = $client === self::CLIENT_NATIVE;
         $deviceId = Uuid::v4();
         $token = self::generateToken();
         $this->run(
@@ -51,26 +60,29 @@ final class Sessions
             [$deviceId, $userId, $deviceName, $platform, Uuid::v4()],
         );
         $this->run(
-            'INSERT INTO session (id, device_id, token_hash, expires_at, rotated_at)
-             VALUES (?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL ? SECOND, UTC_TIMESTAMP(6))',
-            [Uuid::v4(), $deviceId, self::hashToken($token), self::TTL_SECONDS],
+            'INSERT INTO session (id, device_id, token_hash, expires_at, rotated_at, client)
+             VALUES (?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL ? SECOND, UTC_TIMESTAMP(6), ?)',
+            [Uuid::v4(), $deviceId, self::hashToken($token), $native ? self::NATIVE_TTL_SECONDS : self::TTL_SECONDS, $native ? self::CLIENT_NATIVE : self::CLIENT_WEB],
         );
 
         return $token;
     }
 
-    /** Resolves a token; rejects expired, idle and revoked sessions. */
-    public function resolve(string $token): ?Session
+    /**
+     * Resolves a token of the given client kind; rejects expired, idle
+     * (web only) and revoked sessions.
+     */
+    public function resolve(string $token, string $client = self::CLIENT_WEB): ?Session
     {
         /** @var array{session_id: string, rotated_at: string, device_id: string, user_id: string, email: string}|false $row */
         $row = $this->run(
-            'SELECT s.id AS session_id, s.rotated_at, d.id AS device_id, u.id AS user_id, u.email
+            "SELECT s.id AS session_id, s.rotated_at, d.id AS device_id, u.id AS user_id, u.email
              FROM session s
              JOIN device d ON d.id = s.device_id
              JOIN `user` u ON u.id = d.user_id
-             WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6) AND d.revoked_at IS NULL
-               AND s.rotated_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND',
-            [self::hashToken($token), self::IDLE_SECONDS],
+             WHERE s.token_hash = ? AND s.client = ? AND s.expires_at > UTC_TIMESTAMP(6) AND d.revoked_at IS NULL
+               AND (s.client = 'native' OR s.rotated_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND)",
+            [self::hashToken($token), $client, self::IDLE_SECONDS],
         )->fetch();
         if ($row === false) {
             return null;
@@ -82,12 +94,14 @@ final class Sessions
             $row['user_id'],
             $row['email'],
             new \DateTimeImmutable($row['rotated_at'], new \DateTimeZone('UTC')),
+            $client === self::CLIENT_NATIVE,
         );
     }
 
     public function needsRotation(Session $session, ?int $now = null): bool
     {
-        return ($now ?? time()) - $session->tokenIssuedAt->getTimestamp() > self::ROTATION_SECONDS;
+        return !$session->native
+            && ($now ?? time()) - $session->tokenIssuedAt->getTimestamp() > self::ROTATION_SECONDS;
     }
 
     /** Issues a new token for the session and invalidates the old one. */
@@ -170,8 +184,10 @@ final class Sessions
     /**
      * Password change: new hash, every other device revoked (with sessions
      * and push subscriptions), current token rotated - in one transaction.
+     * A native token is kept (null): the app holds no cookie to receive a
+     * new one, and every other token is gone anyway.
      */
-    public function changePasswordAndEndOtherSessions(Session $session, string $passwordHash): string
+    public function changePasswordAndEndOtherSessions(Session $session, string $passwordHash): ?string
     {
         $token = self::generateToken();
         $pdo = $this->db->pdo();
@@ -194,14 +210,16 @@ final class Sessions
                 $placeholders = implode(', ', array_fill(0, \count($others), '?'));
                 $this->run("DELETE FROM push_subscription WHERE device_id IN ({$placeholders})", array_values($others));
             }
-            $this->run('UPDATE session SET token_hash = ?, rotated_at = UTC_TIMESTAMP(6) WHERE id = ?', [self::hashToken($token), $session->sessionId]);
+            if (!$session->native) {
+                $this->run('UPDATE session SET token_hash = ?, rotated_at = UTC_TIMESTAMP(6) WHERE id = ?', [self::hashToken($token), $session->sessionId]);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
 
-        return $token;
+        return $session->native ? null : $token;
     }
 
     /** DATETIME(6) in UTC -> ISO 8601 with milliseconds, like Date.toISOString(). */

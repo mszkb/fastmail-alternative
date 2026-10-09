@@ -36,10 +36,13 @@ final class AuthTest extends DatabaseTestCase
         $this->app = App::create($config, self::$db, new Logger('api', 'info', $this->log), []);
     }
 
-    /** @param array<mixed>|null $body */
-    private function call(string $method, string $path, ?array $body = null, ?string $token = null, string $ip = '198.51.100.20'): ResponseInterface
+    /**
+     * @param array<mixed>|null $body
+     * @param array<string, string> $headers
+     */
+    private function call(string $method, string $path, ?array $body = null, ?string $token = null, string $ip = '198.51.100.20', array $headers = ['Sec-Fetch-Site' => 'same-origin']): ResponseInterface
     {
-        $request = Http::request($method, $path, ['Sec-Fetch-Site' => 'same-origin', 'X-Forwarded-For' => $ip], ['REMOTE_ADDR' => '127.0.0.1']);
+        $request = Http::request($method, $path, $headers + ['X-Forwarded-For' => $ip], ['REMOTE_ADDR' => '127.0.0.1']);
         if ($body !== null) {
             $request->getBody()->write(json_encode($body, JSON_THROW_ON_ERROR));
             $request = $request->withHeader('Content-Type', 'application/json');
@@ -208,6 +211,109 @@ final class AuthTest extends DatabaseTestCase
         self::assertSame('', self::token($logout));
         self::assertStringContainsString('Max-Age=0', $logout->getHeaderLine('Set-Cookie'));
         self::assertSame(['needsSetup' => false, 'authenticated' => false], Http::json($this->call('GET', '/api/auth/status', token: $current)));
+    }
+
+    /** Native client (#138): login without Origin headers, as an app sends it. */
+    private function nativeLogin(): string
+    {
+        $response = $this->call('POST', '/api/auth/login', [
+            'email' => 'ref@example.org', 'password' => self::FOREIGN_PASSWORD,
+            'client' => 'native', 'deviceName' => 'Pixel 8', 'platform' => 'android',
+        ], headers: []);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], $response->getHeader('Set-Cookie'), 'no cookie for native clients');
+        $body = Http::json($response);
+        self::assertSame('ref@example.org', $body['email']);
+        self::assertIsString($body['token']);
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9_-]{43}$/', $body['token']);
+
+        return $body['token'];
+    }
+
+    /**
+     * @param array<mixed>|null $body
+     * @param array<string, string> $headers
+     */
+    private function bearer(string $method, string $path, string $token, ?array $body = null, array $headers = []): ResponseInterface
+    {
+        return $this->call($method, $path, $body, headers: $headers + ['Authorization' => "Bearer {$token}"]);
+    }
+
+    public function testNativeLoginReturnsABearerTokenStoredOnlyAsHash(): void
+    {
+        $this->createUserWithForeignHash();
+        $token = $this->nativeLogin();
+        $row = Database::run(self::$db->pdo(), 'SELECT token_hash, client FROM session')->fetch();
+        self::assertIsArray($row);
+        self::assertSame('native', $row['client']);
+        self::assertSame(hash('sha256', $token, true), $row['token_hash']);
+        self::assertStringNotContainsString($token, Http::contents($this->log));
+
+        $status = Http::json($this->bearer('GET', '/api/auth/status', $token));
+        self::assertSame(['needsSetup' => false, 'authenticated' => true, 'email' => 'ref@example.org'], $status);
+        $devices = (array) Http::json($this->bearer('GET', '/api/auth/devices', $token))['devices'];
+        self::assertCount(1, $devices);
+        self::assertSame('Pixel 8', $devices[0]['name']);
+        self::assertSame('android', $devices[0]['platform']);
+        self::assertTrue($devices[0]['isCurrent']);
+
+        // Never rotated, no idle timeout; the absolute lifetime still applies.
+        Database::run(self::$db->pdo(), 'UPDATE session SET rotated_at = UTC_TIMESTAMP(6) - INTERVAL 60 DAY');
+        $response = $this->bearer('GET', '/api/auth/devices', $token);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], $response->getHeader('Set-Cookie'));
+        Database::run(self::$db->pdo(), 'UPDATE session SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND');
+        self::assertSame(401, $this->bearer('GET', '/api/auth/devices', $token)->getStatusCode());
+    }
+
+    public function testBearerAndCookieTokensAreNotInterchangeable(): void
+    {
+        $this->createUserWithForeignHash();
+        $native = $this->nativeLogin();
+        $web = $this->login();
+        self::assertSame(401, $this->call('GET', '/api/auth/devices', token: $native)->getStatusCode(), 'native token as cookie');
+        self::assertSame(401, $this->bearer('GET', '/api/auth/devices', $web)->getStatusCode(), 'web token as bearer');
+        self::assertSame(401, $this->bearer('GET', '/api/auth/devices', 'not a token')->getStatusCode());
+        // With a Bearer header the cookie is never used, even if valid.
+        $request = Http::request('GET', '/api/auth/devices', ['Authorization' => 'Bearer ' . str_repeat('a', 43)])->withCookieParams(['fma_session' => $web]);
+        self::assertSame(401, $this->app->handle($request)->getStatusCode());
+    }
+
+    public function testBearerRequestsSkipTheCsrfCheck(): void
+    {
+        $this->createUserWithForeignHash();
+        $token = $this->nativeLogin();
+        $crossSite = ['Sec-Fetch-Site' => 'cross-site', 'Origin' => 'https://evil.example'];
+        // A cookie request from another origin is rejected, a Bearer request is not.
+        self::assertSame(403, $this->call('DELETE', '/api/auth/session', token: $this->login(), headers: $crossSite)->getStatusCode());
+        self::assertSame(204, $this->bearer('DELETE', '/api/auth/session', $token, headers: $crossSite)->getStatusCode());
+        self::assertSame(401, $this->bearer('GET', '/api/auth/devices', $token)->getStatusCode(), 'logged out');
+    }
+
+    public function testNativeTokenIsRevokableAndEndsWithPasswordChange(): void
+    {
+        $this->createUserWithForeignHash();
+        $native = $this->nativeLogin();
+        $web = $this->login();
+        $devices = (array) Http::json($this->call('GET', '/api/auth/devices', token: $web))['devices'];
+        self::assertCount(2, $devices);
+        $nativeId = $devices[1]['id'];
+        Database::run(
+            self::$db->pdo(),
+            "INSERT INTO push_subscription (id, device_id, transport, endpoint, keys_enc) VALUES (?, ?, 'fcm', 'fcm-token', '')",
+            [Uuid::v4(), $nativeId],
+        );
+        self::assertSame(204, $this->call('DELETE', "/api/auth/devices/{$nativeId}", token: $web)->getStatusCode());
+        self::assertSame(401, $this->bearer('GET', '/api/auth/devices', $native)->getStatusCode());
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM push_subscription')->fetchColumn());
+
+        // Password change from the app keeps its own token and ends all others.
+        $native = $this->nativeLogin();
+        $changed = $this->bearer('POST', '/api/auth/password', $native, ['currentPassword' => self::FOREIGN_PASSWORD, 'newPassword' => 'new-password-1']);
+        self::assertSame(204, $changed->getStatusCode());
+        self::assertSame([], $changed->getHeader('Set-Cookie'));
+        self::assertSame(200, $this->bearer('GET', '/api/auth/devices', $native)->getStatusCode());
+        self::assertSame(401, $this->call('GET', '/api/auth/devices', token: $web)->getStatusCode());
     }
 
     public function testTokenFormat(): void

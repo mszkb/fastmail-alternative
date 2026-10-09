@@ -113,6 +113,9 @@ paths:
         Creates a new device and session. A still valid session of this
         browser is ended. After 5 failed attempts within 15 minutes the
         client IP is locked out for 15 minutes (429).
+        With `client: native` (apps, #138) no cookie is set; the response
+        carries a device token for `Authorization: Bearer`. The server
+        stores only its SHA-256.
       security: []
       requestBody:
         required: true
@@ -124,11 +127,11 @@ paths:
           description: Logged in
           headers:
             Set-Cookie:
-              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP)'
+              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP); not for `client: native`'
               schema: { type: string }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+              schema: { $ref: '#/components/schemas/LoginResponse' }
         '401':
           description: Invalid email or password (also for malformed input)
           content:
@@ -330,6 +333,11 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: The endpoint belongs to another user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '422':
+          description: '`transport: fcm`, but FCM is not configured on this instance'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorMessage' }
@@ -574,9 +582,14 @@ components:
           description: Longer values are truncated; empty becomes `Browser`.
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, android, ios]
           default: desktop
           description: Unknown values are treated as `desktop`.
+        client:
+          type: string
+          enum: [web, native]
+          default: web
+          description: Login only. `native` returns a Bearer device token instead of setting the cookie.
 
     SetupRequest:
       allOf:
@@ -596,6 +609,18 @@ components:
         email:
           type: string
           format: email
+
+    LoginResponse:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        token:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: 'Only for `client: native` - the device token for `Authorization: Bearer`.'
 
     PasswordChangeRequest:
       type: object
@@ -621,7 +646,7 @@ components:
           type: string
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, android, ios]
         lastSeenAt:
           type: [string, 'null']
           format: date-time
@@ -654,10 +679,31 @@ components:
           description: Base64url VAPID public key; null when not configured.
 
     PushSubscriptionRequest:
+      oneOf:
+        - $ref: '#/components/schemas/WebPushSubscriptionRequest'
+        - $ref: '#/components/schemas/FcmSubscriptionRequest'
+
+    FcmSubscriptionRequest:
+      type: object
+      description: Android app (#139). Needs FCM on the instance (`FCM_PROJECT_ID`), otherwise 422.
+      required: [transport, token]
+      properties:
+        transport:
+          type: string
+          const: fcm
+        token:
+          type: string
+          pattern: '^[A-Za-z0-9_:\-]{20,1024}$'
+          description: FCM registration token; to unsubscribe, send it as `endpoint` to DELETE.
+
+    WebPushSubscriptionRequest:
       type: object
       description: The browser's PushSubscription JSON.
       required: [endpoint, keys]
       properties:
+        transport:
+          type: string
+          const: webpush
         endpoint:
           type: string
           format: uri
@@ -690,7 +736,7 @@ components:
       properties:
         endpoint:
           type: string
-          description: Endpoint of the subscription to remove.
+          description: Endpoint of the subscription to remove (for `fcm` the registration token).
 
     PushSubscriptionInfo:
       type: object
@@ -707,7 +753,7 @@ components:
           type: string
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, android, ios]
         isCurrentDevice:
           type: boolean
         pushService:
