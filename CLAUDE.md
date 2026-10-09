@@ -73,19 +73,21 @@ Issues mit dem Label `ready` arbeitet ein lokaler Runner autonom ab (Ablauf, Lab
 
 Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (PWA, Tests; `npm i -g pnpm` oder Corepack), PHP ≥ 8.2 mit `pdo_mysql` und Composer (Backend).
 
-| Befehl                                    | Wirkung                                                         |
-| ----------------------------------------- | --------------------------------------------------------------- |
-| `pnpm install`                            | JS-Abhängigkeiten installieren                                  |
-| `pnpm lint` / `pnpm format`               | ESLint / Prettier (nur prüfen: `pnpm format:check`)             |
-| `pnpm typecheck`                          | TypeScript-Check über alle Pakete (web via vue-tsc)             |
-| `pnpm test`                               | Tests (Vitest) über alle Pakete                                 |
-| `pnpm build`                              | PWA bauen (statische Dateien)                                   |
-| `pnpm dev:web` / `dev:api` / `dev:worker` | Dev-Server der PWA / PHP-API (`php -S`, Port 3001) / PHP-Worker |
-| `composer install` (in `apps/server-php`) | PHP-Abhängigkeiten installieren                                 |
-| `composer cs` / `analyse` / `test`        | PHP-CS-Fixer / PHPStan / PHPUnit (Unit-Tests)                   |
-| `composer test:integration`               | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail      |
-| `make check`                              | alles wie in CI, plus PHP-Integrationstests                     |
+| Befehl                                                   | Wirkung                                                         |
+| -------------------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm install`                                           | JS-Abhängigkeiten installieren                                  |
+| `pnpm lint` / `pnpm format`                              | ESLint / Prettier (nur prüfen: `pnpm format:check`)             |
+| `pnpm typecheck`                                         | TypeScript-Check über alle Pakete (web via vue-tsc)             |
+| `pnpm test`                                              | Tests (Vitest) über alle Pakete                                 |
+| `pnpm build`                                             | PWA bauen (statische Dateien)                                   |
+| `pnpm dev:web` / `dev:api` / `dev:worker`                | Dev-Server der PWA / PHP-API (`php -S`, Port 3001) / PHP-Worker |
+| `composer install` (in `apps/server-php`)                | PHP-Abhängigkeiten installieren                                 |
+| `composer cs` / `analyse` / `test`                       | PHP-CS-Fixer / PHPStan / PHPUnit (Unit-Tests)                   |
+| `composer test:integration`                              | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail      |
+| `make check`                                             | alles wie in CI, plus PHP-Integrationstests                     |
+| `./gradlew :shared:jvmTest` (in `apps/mobile`)           | Tests der geteilten KMP-Logik (JDK 17+)                         |
+| `./gradlew :androidApp:assembleDebug` (in `apps/mobile`) | Android-Debug-APK (braucht Android-SDK; CI: `mobile-android`)   |
 
-Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
+Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright), `apps/mobile` (Kotlin Multiplatform: `shared`, `composeApp`, `androidApp`; Epic #136) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 
 Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `./scripts/setup-env.sh` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Installationen mit dem früheren Node-Backend werden neu aufgesetzt (`docs/operations/upgrade.md`). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.
