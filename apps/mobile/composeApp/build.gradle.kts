@@ -31,6 +31,7 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.materialIconsExtended)
             implementation(libs.navigation.compose)
+            implementation(libs.kotlinx.datetime)
             implementation(libs.lifecycle.viewmodel.compose)
             implementation(libs.lifecycle.runtime.compose)
         }
