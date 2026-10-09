@@ -32,6 +32,9 @@ fun App(platform: Platform) {
             onPauseOrDispose {}
         }
         LaunchedEffect(Unit) {
+            platform.syncRequests.collect { vm.onPush() }
+        }
+        LaunchedEffect(Unit) {
             platform.openInboxRequests.collect {
                 nav.popBackStack("mail", inclusive = false)
                 vm.showInbox()

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import net.fma.mail.api.AttachmentInfo
 import net.fma.mail.api.FmaApi
 import net.fma.mail.domain.SessionStore
@@ -40,6 +41,9 @@ interface Platform {
 
     /** Emits when a notification was tapped: show the inbox and sync. */
     val openInboxRequests: Flow<Unit>
+
+    /** Emits when a push arrives while the app is visible: sync only, stay on the current screen. */
+    val syncRequests: Flow<Unit> get() = emptyFlow()
 
     /** HTTP engine override for UI tests against a fake server; null = platform default. */
     val httpEngine: HttpClientEngine? get() = null

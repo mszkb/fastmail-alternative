@@ -174,6 +174,11 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
         }
     }
 
+    /** Push while visible: the server has already synced, reload the account list (and the list if it changed). */
+    fun onPush() {
+        viewModelScope.launch { refreshAccounts() }
+    }
+
     private fun startPolling() {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {

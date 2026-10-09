@@ -33,6 +33,8 @@ class AndroidPlatform(private val context: Context, private val app: FmaApplicat
 
     override val openInboxRequests: Flow<Unit> get() = app.openInbox
 
+    override val syncRequests: Flow<Unit> get() = app.syncNow
+
     override fun openExternal(url: String) {
         val uri = Uri.parse(url)
         if (uri.scheme?.lowercase() !in setOf("http", "https", "mailto")) return

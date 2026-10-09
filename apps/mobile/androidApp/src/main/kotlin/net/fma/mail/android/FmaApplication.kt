@@ -13,8 +13,11 @@ import kotlinx.coroutines.channels.BufferOverflow
 class FmaApplication : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Notification tapped or push while the app is visible: show the inbox and sync. */
+    /** Notification tapped: show the inbox and sync. */
     val openInbox = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Push while the app is visible: sync without changing the screen. */
+    val syncNow = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     val push by lazy { AndroidPush(this) }
 

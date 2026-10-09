@@ -14,7 +14,7 @@ class FcmService : FirebaseMessagingService() {
         if (message.data["event"] != "new_mail") return
         val app = application as FmaApplication
         if (app.isInForeground) {
-            app.openInbox.tryEmit(Unit)
+            app.syncNow.tryEmit(Unit)
             return
         }
         Notifications.showNewMail(this, message.data["badge"]?.toIntOrNull())
