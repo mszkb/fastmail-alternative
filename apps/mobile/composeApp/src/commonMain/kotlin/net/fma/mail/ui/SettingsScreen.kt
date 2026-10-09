@@ -2,6 +2,7 @@ package net.fma.mail.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,9 +25,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import net.fma.mail.api.DeviceInfo
 
 /** Instance, push status, devices (read-only) and logout (#146). */
@@ -34,6 +39,8 @@ import net.fma.mail.api.DeviceInfo
 fun SettingsScreen(vm: AppViewModel, platform: Platform, onBack: () -> Unit) {
     val session by vm.session.collectAsState()
     var devices by remember { mutableStateOf<List<DeviceInfo>>(emptyList()) }
+    var deviceError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         devices = runCatching { vm.api?.devices() }.getOrNull().orEmpty()
     }
@@ -60,16 +67,24 @@ fun SettingsScreen(vm: AppViewModel, platform: Platform, onBack: () -> Unit) {
             HorizontalDivider()
             Text("Geräte", style = MaterialTheme.typography.titleMedium)
             devices.forEach { device ->
-                Text(
-                    device.name + " (" + device.platform + ")" + if (device.isCurrent) " – dieses Gerät" else "",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        device.name + " (" + device.platform + ")" + if (device.isCurrent) " – dieses Gerät" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!device.isCurrent) {
+                        TextButton(onClick = {
+                            scope.launch {
+                                val api = vm.api ?: return@launch
+                                deviceError = runCatching { api.revokeDevice(device.id) }.exceptionOrNull()?.let { "Abmelden fehlgeschlagen." }
+                                devices = runCatching { api.devices() }.getOrDefault(devices)
+                            }
+                        }) { Text("Abmelden") }
+                    }
+                }
             }
-            Text(
-                "Geräte abmelden kannst du in der Web-App.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
-            )
+            deviceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             HorizontalDivider()
             Button(onClick = vm::logout) { Text("Abmelden") }
         }

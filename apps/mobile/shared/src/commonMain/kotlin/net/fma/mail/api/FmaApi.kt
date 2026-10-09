@@ -102,6 +102,8 @@ class FmaApi(
 
     suspend fun devices(): List<DeviceInfo> = client.get("api/auth/devices") { auth() }.read<DeviceListResponse>().devices
 
+    suspend fun revokeDevice(id: String) = check(client.delete("api/auth/devices/$id") { auth() })
+
     // --- accounts / sync ---------------------------------------------------
 
     suspend fun accounts(): List<AccountSummary> = client.get("api/accounts") { auth() }.read<AccountListResponse>().accounts
