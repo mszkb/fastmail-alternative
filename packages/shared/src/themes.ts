@@ -258,7 +258,9 @@ export function validateTheme(input: unknown): ThemeValidation {
     if (!isRecord(input.sizes)) errors.push('„sizes“ muss ein Objekt sein.')
     else {
       for (const [name, value] of Object.entries(input.sizes)) {
-        const range = (THEME_SIZES as Record<string, readonly [number, number]>)[name]
+        const range = Object.hasOwn(THEME_SIZES, name)
+          ? (THEME_SIZES as Record<string, readonly [number, number]>)[name]
+          : undefined
         const match = typeof value === 'string' ? REM_RE.exec(value) : null
         if (!range) errors.push(`Unbekannte Größe „sizes.${safeKey(name)}“.`)
         else if (!match || Number(match[1]) < range[0] || Number(match[1]) > range[1])
@@ -270,7 +272,7 @@ export function validateTheme(input: unknown): ThemeValidation {
     if (!isRecord(input.layout)) errors.push('„layout“ muss ein Objekt sein.')
     else {
       for (const [name, value] of Object.entries(input.layout)) {
-        const allowed = LAYOUT_VALUES[name]
+        const allowed = Object.hasOwn(LAYOUT_VALUES, name) ? LAYOUT_VALUES[name] : undefined
         if (!allowed) errors.push(`Unbekannte Layout-Option „layout.${safeKey(name)}“.`)
         else if (typeof value !== 'string' || !allowed.includes(value))
           errors.push(`„layout.${name}“: erlaubt sind ${allowed.join(', ')}.`)
@@ -328,7 +330,7 @@ export function themeStyleSheet(theme: Theme): string {
       )
       .map(([name, value]): [string, string] => [`--color-${name}`, String(value)])
   const sizes = Object.entries(theme.sizes ?? {})
-    .filter(([name, value]) => name in THEME_SIZES && REM_RE.test(String(value)))
+    .filter(([name, value]) => Object.hasOwn(THEME_SIZES, name) && REM_RE.test(String(value)))
     .map(([name, value]): [string, string] => [`--fma-${name}`, String(value)])
   const light = declarations([...colors('light'), ...sizes])
   const dark = declarations(colors('dark'))

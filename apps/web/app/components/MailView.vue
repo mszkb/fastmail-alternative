@@ -604,7 +604,8 @@ async function loadFolders(): Promise<void> {
       if (folder && folder !== folderId.value && res.folders.some((f) => f.id === folder)) {
         await selectFolder(folder)
       }
-      void openMessage(id)
+      // Switched to another account meanwhile: do not open it there.
+      if (requestedAccount === accountId.value) void openMessage(id)
     }
   } catch (err) {
     pendingOpen = ''

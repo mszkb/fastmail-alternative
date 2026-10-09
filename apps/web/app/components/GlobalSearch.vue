@@ -159,6 +159,8 @@ async function search(): Promise<void> {
     return
   }
   query.value = parsed
+  // The aborted request no longer clears `loading` (its number is stale).
+  loading.value = false
   await load(current, null)
 }
 
@@ -198,6 +200,11 @@ async function load(current: number, cursor: string | null): Promise<void> {
     total.value = body.total
     nextCursor.value = body.nextCursor
     for (const id of new Set(body.messages.map((m) => m.accountId))) loadFolders(id)
+    // The end of the list may still be in view: the observer only reports changes.
+    void nextTick(() => {
+      const el = sentinel.value
+      if (el && el.getBoundingClientRect().top < window.innerHeight + 400) void more()
+    })
   } catch (err) {
     if (current !== request || signal.aborted) return
     error.value = isOffline.value

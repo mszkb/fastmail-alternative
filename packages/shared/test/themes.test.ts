@@ -54,6 +54,10 @@ describe('validateTheme (#126)', () => {
       '„layout.readingPane“: erlaubt sind right, bottom, off.',
     ])
     expect(errors({ ...valid, layout: { toolbar: 'x' } })).toHaveLength(1)
+    // Inherited object keys are no allowed names.
+    expect(errors({ ...valid, sizes: { constructor: '1rem' } })).toHaveLength(1)
+    expect(errors({ ...valid, layout: { constructor: 'right' } })).toHaveLength(1)
+    expect(errors({ ...valid, colors: { light: { primary: '#0b4f9c\n' } } })).toHaveLength(1)
     expect(errors({ ...valid, id: '../etc' })).toHaveLength(1)
     expect(errors({ ...valid, format: 2 })).toHaveLength(1)
     expect(errors({ ...valid, version: '1' })).toHaveLength(1)

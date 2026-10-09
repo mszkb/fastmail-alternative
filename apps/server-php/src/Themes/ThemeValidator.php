@@ -81,14 +81,14 @@ final class ThemeValidator
                 $errors[] = 'Unbekanntes Feld „' . self::safeKey((string) $key) . '“.';
             }
         }
-        if (($input['format'] ?? null) !== self::FORMAT) {
+        if (!\in_array($input['format'] ?? null, [self::FORMAT, (float) self::FORMAT], true)) {
             $errors[] = '„format“ muss ' . self::FORMAT . ' sein.';
         }
-        if (!\is_string($input['id'] ?? null) || preg_match('/^[a-z0-9][a-z0-9-]{0,47}$/', $input['id']) !== 1) {
+        if (!\is_string($input['id'] ?? null) || preg_match('/^[a-z0-9][a-z0-9-]{0,47}$/D', $input['id']) !== 1) {
             $errors[] = '„id“: nur Kleinbuchstaben, Ziffern und Bindestriche (max. 48).';
         }
         foreach (['version', 'minAppVersion'] as $key) {
-            if (!\is_string($input[$key] ?? null) || preg_match('/^\d{1,4}\.\d{1,4}\.\d{1,4}$/', $input[$key]) !== 1) {
+            if (!\is_string($input[$key] ?? null) || preg_match('/^\d{1,4}\.\d{1,4}\.\d{1,4}$/D', $input[$key]) !== 1) {
                 $errors[] = "„{$key}“ muss eine Version wie 1.0.0 sein.";
             }
         }
@@ -97,7 +97,7 @@ final class ThemeValidator
                 continue;
             }
             $value = $input[$key] ?? null;
-            if (!\is_string($value) || trim($value) === '' || self::length($value) > $max || preg_match('/[\x00-\x1f\x7f<>{}\\\\]/', $value) === 1) {
+            if (!\is_string($value) || preg_match('/^[\s\p{Z}\x{FEFF}]*$/Du', $value) === 1 || self::length($value) > $max || preg_match('/[\x00-\x1f\x7f<>{}\\\\]/', $value) === 1) {
                 $errors[] = "„{$key}“: Text mit 1–{$max} Zeichen ohne Sonderzeichen wie < > { } erwartet.";
             }
         }
@@ -117,7 +117,7 @@ final class ThemeValidator
                     foreach ($palette as $name => $value) {
                         if (!\in_array($name, self::COLORS, true)) {
                             $errors[] = "Unbekannte Farbe „colors.{$mode}." . self::safeKey((string) $name) . '“.';
-                        } elseif (!\is_string($value) || preg_match('/^#[0-9a-f]{6}$/', $value) !== 1) {
+                        } elseif (!\is_string($value) || preg_match('/^#[0-9a-f]{6}$/D', $value) !== 1) {
                             $errors[] = "„colors.{$mode}.{$name}“ muss eine Farbe wie #1a2b3c sein.";
                         }
                     }
@@ -132,7 +132,7 @@ final class ThemeValidator
                     $range = self::SIZES[$name] ?? null;
                     if ($range === null) {
                         $errors[] = 'Unbekannte Größe „sizes.' . self::safeKey((string) $name) . '“.';
-                    } elseif (!\is_string($value) || preg_match('/^(\d{1,2}(?:\.\d{1,4})?)rem$/', $value, $m) !== 1
+                    } elseif (!\is_string($value) || preg_match('/^(\d{1,2}(?:\.\d{1,4})?)rem$/D', $value, $m) !== 1
                         || (float) $m[1] < $range[0] || (float) $m[1] > $range[1]) {
                         $errors[] = "„sizes.{$name}“ muss zwischen {$range[0]}rem und {$range[1]}rem liegen.";
                     }

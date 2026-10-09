@@ -64,12 +64,18 @@ final class GlobalSearchRoutes
     private const ACCOUNT_DEADLINE_SECONDS = 10.0;
     /** Deadline of the fan-out over all accounts (below PHP's usual 30 s). */
     private const SEARCH_DEADLINE_SECONDS = 25.0;
+    /** Deadline of a whole request incl. the header fetch of the page. */
+    private const REQUEST_DEADLINE_SECONDS = 27.0;
+    /** Below this many seconds left, no further provider is contacted. */
+    private const MIN_PROVIDER_SECONDS = 2.0;
     /** Characters of a folder id that key its position in the cursor. */
     private const POSITION_KEY_LENGTH = 12;
 
     private readonly RateLimiter $rateLimiter;
     /** @var array<string, ImapClient> open connections of this request, by account */
     private array $clients = [];
+    /** End of this request's time budget (unix time). */
+    private float $requestDeadline = 0.0;
 
     public function __construct(
         private readonly Database $db,
@@ -89,6 +95,7 @@ final class GlobalSearchRoutes
 
     private function search(Request $request, Response $response): Response
     {
+        $this->requestDeadline = microtime(true) + self::REQUEST_DEADLINE_SECONDS;
         $userId = self::session($request)->userId;
         $params = $request->getQueryParams();
         $query = SearchRoutes::parseQuery($params);
@@ -314,6 +321,9 @@ final class GlobalSearchRoutes
                 continue;
             }
             try {
+                if ($this->requestDeadline - microtime(true) < self::MIN_PROVIDER_SECONDS) {
+                    throw new SearchFailure(...ProviderSearch::TIMEOUT);
+                }
                 $path = Database::run($pdo, 'SELECT path FROM folder WHERE id = ?', [$stream['f']])->fetchColumn();
                 $headers = \is_string($path) ? ProviderSearch::headers($this->client($stream['a']), $path, $stream['v'], $missing) : [];
             } catch (\Throwable $e) {
@@ -332,7 +342,17 @@ final class GlobalSearchRoutes
         /** @var array<int, list<int>> $queues */
         $queues = [];
         foreach ($windows as $index => $window) {
-            $queues[$index] = array_values(array_filter($window, static fn(int $uid): bool => isset($items[$index][$uid])));
+            $shown = array_values(array_filter($window, static fn(int $uid): bool => isset($items[$index][$uid])));
+            if (isset($failed[$streams[$index]['a']])) {
+                // Provider failed: stop before its first unshown hit, so the
+                // position stays above it and the next page retries it.
+                $missing = array_diff($window, $shown);
+                if ($missing !== []) {
+                    $limitUid = max($missing);
+                    $shown = array_values(array_filter($shown, static fn(int $uid): bool => $uid > $limitUid));
+                }
+            }
+            $queues[$index] = $shown;
         }
         $messages = [];
         $seen = [];
@@ -384,7 +404,12 @@ final class GlobalSearchRoutes
         foreach ($accounts as $account) {
             $entry = $statuses[$account['id']] ?? ['accountId' => $account['id'], 'status' => 'ok', 'matches' => 0, 'foldersSearched' => 0, 'foldersFailed' => 0];
             if (isset($failed[$account['id']]) && $entry['status'] === 'ok') {
-                $entry['status'] = $failed[$account['id']] === 'TIMEOUT' ? 'timeout' : 'error';
+                $entry['status'] = match ($failed[$account['id']]) {
+                    'TIMEOUT' => 'timeout',
+                    'RATE_LIMITED' => 'rate_limited',
+                    'AUTH_FAILED' => 'auth_error',
+                    default => 'error',
+                };
                 $entry['code'] = $failed[$account['id']];
             }
             $out[] = $entry;
@@ -443,8 +468,14 @@ final class GlobalSearchRoutes
     private function client(string $accountId): ImapClient
     {
         if (!isset($this->clients[$accountId])) {
+            // A new login at the provider counts like a search (later pages
+            // of a stored result may not hammer the provider either).
+            if ($this->rateLimiter->hit('GET', 'search', $accountId) > 0) {
+                throw new SearchFailure('RATE_LIMITED', 429, 'Zu viele Suchanfragen.');
+            }
             $context = AccountContext::load($this->db->pdo(), $accountId, $this->config->get('MASTER_KEY'));
-            $this->clients[$accountId] = ProviderSearch::connect($this->policy(), $context, self::CONNECT_TIMEOUT_SECONDS);
+            $timeout = min(self::CONNECT_TIMEOUT_SECONDS, $this->requestDeadline - microtime(true) - 1.0);
+            $this->clients[$accountId] = ProviderSearch::connect($this->policy(), $context, max(1.0, $timeout));
         }
 
         return $this->clients[$accountId];

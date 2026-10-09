@@ -54,6 +54,12 @@ final class ThemeValidatorTest extends TestCase
         self::assertCount(1, ThemeValidator::validate(['colors' => ['#000000']] + $v));
         self::assertSame(['Die Datei ist kein Theme (JSON-Objekt erwartet).'], ThemeValidator::validate([1, 2]));
         self::assertStringNotContainsString('<', ThemeValidator::validate($v + ['<img src=x>' => 1])[0]);
+        // A trailing newline is no way around the patterns ($ without D would allow it).
+        self::assertCount(1, ThemeValidator::validate(['colors' => ['light' => ['primary' => "#0b4f9c\n"]]] + $v));
+        self::assertCount(1, ThemeValidator::validate(['sizes' => ['radius' => "1rem\n"]] + $v));
+        self::assertCount(1, ThemeValidator::validate(['id' => "x\n"] + $v));
+        self::assertCount(1, ThemeValidator::validate(['name' => "\u{00a0}"] + $v));
+        self::assertSame([], ThemeValidator::validate(['format' => 1.0] + $v));
     }
 
     public function testRejectsTooLittleContrast(): void
