@@ -169,6 +169,9 @@ data class MessageDetail(
 )
 
 @Serializable
+data class ThreadDetail(val id: String, val accountId: String, val subject: String = "", val messages: List<MessageDetail>)
+
+@Serializable
 data class MessageHtml(val html: String? = null, val remoteContentBlocked: Boolean = false)
 
 @Serializable

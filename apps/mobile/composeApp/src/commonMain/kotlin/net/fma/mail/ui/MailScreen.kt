@@ -37,6 +37,9 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -50,6 +53,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -152,6 +156,7 @@ fun MailScreen(
                         loadingMore = state.loadingMore,
                         onLoadMore = vm::loadMore,
                         onLoadOlder = vm::loadOlder,
+                        onSwipe = { id, action -> vm.messageAction(id, action) },
                         onOpen = { id -> state.selectedFolderId?.let { onOpenMessage(id, it) } },
                     )
                 }
@@ -211,6 +216,7 @@ private fun MessageList(
     loadingMore: Boolean,
     onLoadMore: () -> Unit,
     onLoadOlder: () -> Unit,
+    onSwipe: (messageId: String, action: String) -> Unit,
     onOpen: (String) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -231,7 +237,7 @@ private fun MessageList(
             item(key = "empty") { EmptyHint(if (account?.syncing == true) "Wird synchronisiert …" else "Keine Nachrichten in diesem Ordner.") }
         }
         items(messages, key = { it.id }) { message ->
-            MessageRow(message) { onOpen(message.id) }
+            SwipeableRow(message, onSwipe) { MessageRow(message) { onOpen(message.id) } }
             HorizontalDivider()
         }
         if (loadingMore) {
@@ -245,6 +251,48 @@ private fun MessageList(
                 }
             }
         }
+    }
+}
+
+/** Swipe left = archive, swipe right = toggle read (#151). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableRow(message: MessageListItem, onSwipe: (String, String) -> Unit, content: @Composable () -> Unit) {
+    // The state outlives recompositions: read the current flags, not the ones of the first composition.
+    val current by rememberUpdatedState(message)
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.EndToStart -> {
+                    onSwipe(current.id, "archive")
+                    true
+                }
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    onSwipe(current.id, if (current.flags.seen) "unread" else "read")
+                    false
+                }
+                SwipeToDismissBoxValue.Settled -> false
+            }
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            val toArchive = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            Box(
+                Modifier.fillMaxSize().background(
+                    if (toArchive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                ).padding(horizontal = 20.dp),
+                contentAlignment = if (toArchive) Alignment.CenterEnd else Alignment.CenterStart,
+            ) {
+                Text(
+                    if (toArchive) "Archivieren" else if (message.flags.seen) "Ungelesen" else "Gelesen",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        },
+    ) {
+        Box(Modifier.background(MaterialTheme.colorScheme.surface)) { content() }
     }
 }
 

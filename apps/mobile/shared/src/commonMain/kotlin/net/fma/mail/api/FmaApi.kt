@@ -131,6 +131,9 @@ class FmaApi(
 
     suspend fun message(id: String): MessageDetail = client.get("api/messages/$id") { auth() }.read()
 
+    /** Messages of a thread across folders, oldest first (at most 200). */
+    suspend fun thread(id: String): ThreadDetail = client.get("api/threads/$id") { auth() }.read()
+
     /** Sanitized HTML; remote images stay blocked unless [remote]. */
     suspend fun messageHtml(id: String, remote: Boolean = false): MessageHtml =
         client.get("api/messages/$id/html") {

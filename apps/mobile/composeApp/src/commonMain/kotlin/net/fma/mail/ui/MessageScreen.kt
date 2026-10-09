@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -45,6 +46,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import net.fma.mail.api.MessageDetail
@@ -70,6 +72,7 @@ fun MessageScreen(
     val snackbar = remember { SnackbarHostState() }
     var message by remember { mutableStateOf<MessageDetail?>(null) }
     var html by remember { mutableStateOf<MessageHtml?>(null) }
+    var thread by remember { mutableStateOf<List<MessageDetail>>(emptyList()) }
     var remote by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var flagged by remember { mutableStateOf(false) }
@@ -84,6 +87,9 @@ fun MessageScreen(
             message = detail
             flagged = detail.flags.flagged
             if (!detail.flags.seen) vm.messageAction(messageId, "read", folderId)
+            detail.threadId?.let { threadId ->
+                thread = runCatching { api.thread(threadId).messages.filter { it.id != messageId } }.getOrDefault(emptyList())
+            }
         } catch (e: Exception) {
             error = AppViewModel.errorText(e)
         }
@@ -182,6 +188,7 @@ fun MessageScreen(
                 detail == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
                 else -> Column(Modifier.fillMaxSize()) {
                     Header(detail)
+                    if (thread.isNotEmpty()) ThreadSection(thread)
                     HorizontalDivider()
                     val body = html
                     if (body?.remoteContentBlocked == true && !remote) {
@@ -204,6 +211,38 @@ fun MessageScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/** The other messages of the thread, collapsed; tap one to show its text (#148). */
+@Composable
+private fun ThreadSection(messages: List<MessageDetail>) {
+    var open by remember { mutableStateOf(false) }
+    var expandedId by remember { mutableStateOf<String?>(null) }
+    TextButton(onClick = { open = !open }, modifier = Modifier.padding(horizontal = 8.dp)) {
+        Text(if (open) "Verlauf ausblenden" else "Verlauf: ${messages.size} weitere Nachricht${if (messages.size == 1) "" else "en"}")
+    }
+    if (!open) return
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+        items(messages, key = { it.id }) { item ->
+            Column(
+                Modifier.fillMaxWidth().clickable { expandedId = if (expandedId == item.id) null else item.id }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    "${item.from?.label ?: "(kein Absender)"} · ${shortDate(item.date)}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    item.text?.trim().orEmpty().ifEmpty { "(kein Text)" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = if (expandedId == item.id) 40 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            HorizontalDivider()
         }
     }
 }
