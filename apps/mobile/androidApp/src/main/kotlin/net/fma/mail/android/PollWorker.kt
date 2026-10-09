@@ -2,6 +2,7 @@ package net.fma.mail.android
 
 import android.content.Context
 import androidx.work.CoroutineWorker
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import net.fma.mail.api.ApiException
 import net.fma.mail.api.FmaApi
@@ -29,7 +30,13 @@ class PollWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             editor.apply()
             Result.success()
         } catch (e: ApiException) {
-            if (e.isUnauthorized) Result.success() else Result.retry()
+            if (e.isUnauthorized) {
+                // Token revoked: stop polling until the next login.
+                WorkManager.getInstance(applicationContext).cancelUniqueWork(NAME)
+                Result.success()
+            } else {
+                Result.retry()
+            }
         } catch (e: Exception) {
             Result.retry()
         } finally {
