@@ -335,6 +335,8 @@ Das Backend `apps/server-php` ([ADR-0013](../adr/0013-php-backend.md)) speichert
 
 Weil PHP zwischen Requests keinen Prozessspeicher behält, liegt auch Laufzeitzustand in Tabellen (`0002_runtime_state.sql`): `rate_limit`, `login_lockout`, `metric_counter`.
 
+Laufende OAuth-Anmeldungen (#36, ADR-0011) stehen in `oauth_state` (`0006_oauth_state.sql`): SHA-256 des `state` als Schlüssel, Benutzer, Anbieter, optional das Konto bei „Neu anmelden“, Erstellzeit. Ein Eintrag gilt 10 Minuten und wird beim Rücksprung gelöscht; er ist nicht im Backup. Tokens eines OAuth-Kontos liegen wie Passwörter in `credential_enc` (`{imapUser, oauth: {provider, refreshToken, accessToken, expiresAt}}`).
+
 Ordnerpfade (`folder.path`) sind `VARCHAR(700)` `utf8mb4_bin` (Unique mit `account_id` passt in den Index-Schlüssel). Sortierungen nach Ids, Zeitstempeln und UIDs ändern sich nicht (ASCII bzw. Zahlen).
 
 ## Entscheidungen (2026-10-02)

@@ -1,3 +1,5 @@
+import type { OAuthProviderId } from './oauth'
+
 /**
  * Provider presets for the account form (#117): server, ports and TLS of
  * common providers, taken from docs/product/mail-providers.md, plus a short
@@ -19,6 +21,8 @@ export interface ProviderPreset {
   hint: string
   /** Address domains that select this preset automatically. */
   domains: string[]
+  /** Sign-in with this OAuth provider when the server has it configured (#36). */
+  oauth?: OAuthProviderId
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -70,6 +74,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'Google verlangt ein App-Passwort (nur mit aktivierter Bestätigung in zwei Schritten): im ' +
       'Google-Konto unter „Sicherheit“ → „App-Passwörter“ anlegen. Labels erscheinen als Ordner.',
     domains: ['gmail.com', 'googlemail.com'],
+    oauth: 'google',
   },
   {
     id: 'icloud',
@@ -116,8 +121,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     smtp: { host: 'smtp.office365.com', port: 587 },
     auth: 'oauth-only',
     hint:
-      'Microsoft erlaubt nur noch OAuth2-Anmeldung; mit Passwort ist das Konto derzeit nicht ' +
-      'nutzbar (OAuth2 folgt mit #36).',
+      'Microsoft erlaubt nur noch die Anmeldung über Microsoft (OAuth2), nicht mit Passwort. ' +
+      'Dafür muss der Betreiber dieses Servers die Anmeldung einrichten ' +
+      '(docs/operations/oauth.md).',
     domains: [
       'outlook.com',
       'outlook.de',
@@ -127,6 +133,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'live.de',
       'msn.com',
     ],
+    oauth: 'microsoft',
   },
 ]
 

@@ -5,7 +5,11 @@
 // Provider presets (#117): picking a provider (or typing an address of a
 // known domain) fills server, ports and user name and shows how to get the
 // password the provider expects (e.g. an app password at Fastmail).
+// Sign-in with Google/Microsoft (#36): offered for the Gmail and Microsoft
+// presets when the server has the provider configured; OAuth accounts sign
+// in again instead of editing credentials.
 import {
+  OAUTH_PROVIDER_LABELS,
   PROVIDER_PRESETS,
   SYNC_SINCE_CHOICES,
   presetById,
@@ -13,7 +17,7 @@ import {
   presetForAddress,
   syncSinceFromDays,
 } from '@fma/shared'
-import type { ProviderPreset } from '@fma/shared'
+import type { OAuthProviderId, OAuthProvidersResponse, ProviderPreset } from '@fma/shared'
 
 interface EditableAccount {
   id: string
@@ -23,6 +27,8 @@ interface EditableAccount {
   smtp: { host: string; port: number }
   sortOrder?: number
   syncSince?: string | null
+  credentialKind?: 'password' | 'oauth2'
+  oauthProvider?: OAuthProviderId | null
 }
 
 const props = defineProps<{ account?: EditableAccount }>()
@@ -120,6 +126,61 @@ function onAddressChange(): void {
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
+
+// OAuth providers configured on the server; unknown (offline) = none.
+const oauthConfigured = ref<Partial<Record<OAuthProviderId, boolean>>>({})
+const isOAuthAccount = computed(() => props.account?.credentialKind === 'oauth2')
+/** Provider of the sign-in button: the OAuth account's, or the chosen preset's. */
+const oauthProvider = computed<OAuthProviderId | null>(() =>
+  props.account
+    ? isOAuthAccount.value
+      ? (props.account.oauthProvider ?? null)
+      : null
+    : (preset.value?.oauth ?? null),
+)
+const canSignIn = computed(
+  () => !!oauthProvider.value && oauthConfigured.value[oauthProvider.value] === true,
+)
+const oauthLabel = computed(() =>
+  oauthProvider.value ? OAUTH_PROVIDER_LABELS[oauthProvider.value] : '',
+)
+// Microsoft has no password login: only the button, no server fields.
+const signInOnly = computed(
+  () => isOAuthAccount.value || (canSignIn.value && preset.value?.auth === 'oauth-only'),
+)
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/oauth/providers')
+    if (res.ok) oauthConfigured.value = ((await res.json()) as OAuthProvidersResponse).providers
+  } catch {
+    // Offline: no sign-in button.
+  }
+})
+
+/** Leaves the app for the provider's sign-in page; it returns to /?oauth=... */
+async function signIn(): Promise<void> {
+  if (busy.value || !oauthProvider.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    const res = await fetch(`/api/oauth/${oauthProvider.value}/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(props.account ? { accountId: props.account.id } : {}),
+    })
+    const body = (await res.json().catch(() => null)) as { url?: string; message?: string } | null
+    if (!res.ok || !body?.url) {
+      error.value = body?.message ?? `Fehler ${res.status}`
+      busy.value = false
+      return
+    }
+    window.location.assign(body.url)
+  } catch {
+    error.value = 'API nicht erreichbar.'
+    busy.value = false
+  }
+}
 
 const ERROR_TEXT: Record<string, string> = {
   AUTH_FAILED: 'Zugangsdaten wurden vom Server abgelehnt.',
@@ -219,6 +280,12 @@ async function submit(): Promise<void> {
       await save(props.account)
       return
     }
+    if (signInOnly.value) {
+      // Enter in the address field: the only way on is the provider's sign-in.
+      busy.value = false
+      await signIn()
+      return
+    }
     const res = await fetch('/api/accounts', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -278,7 +345,11 @@ async function submit(): Promise<void> {
   <form class="form" :class="{ embedded: editing }" @submit.prevent="submit">
     <h2>{{ editing ? 'Konto bearbeiten' : 'Konto hinzufügen' }}</h2>
     <p class="hint">
-      <template v-if="editing">
+      <template v-if="isOAuthAccount">
+        Angemeldet über {{ oauthLabel || 'den Anbieter' }}. Die Zugangsdaten verwaltet der Anbieter;
+        bei abgelaufener Anmeldung hier neu anmelden.
+      </template>
+      <template v-else-if="editing">
         Geänderte Verbindungsdaten werden vor dem Speichern getestet. Leere Benutzer-/Passwortfelder
         behalten die gespeicherten Zugangsdaten.
       </template>
@@ -305,14 +376,34 @@ async function submit(): Promise<void> {
       </select>
     </label>
     <p
-      v-if="!editing && preset"
+      v-if="!editing && preset && !signInOnly"
       class="preset-hint"
       :class="{ blocked: preset.auth === 'oauth-only' }"
       role="note"
     >
       {{ preset.hint }}
     </p>
-    <label
+    <div v-if="canSignIn" class="oauth">
+      <button type="button" :disabled="busy" @click="signIn">
+        {{ isOAuthAccount ? `Neu anmelden bei ${oauthLabel}` : `Mit ${oauthLabel} anmelden` }}
+      </button>
+      <span class="hint">
+        <template v-if="isOAuthAccount"
+          >Die Anmeldung muss mit {{ account?.emailAddress }} erfolgen.</template
+        >
+        <template v-else
+          >Weiter zur Anmeldeseite von {{ oauthLabel }}; danach geht es hierher zurück. Es werden
+          alle Mails synchronisiert – der Zeitraum lässt sich danach unter „Bearbeiten“
+          einschränken.</template
+        >
+      </span>
+      <p v-if="!signInOnly" class="or">oder mit App-Passwort:</p>
+    </div>
+    <p v-else-if="isOAuthAccount" class="preset-hint blocked" role="note">
+      Die Anmeldung über {{ oauthLabel || 'diesen Anbieter' }} ist auf dem Server nicht (mehr)
+      eingerichtet; ohne sie kann das Konto nicht abgeglichen werden.
+    </p>
+    <label v-if="!signInOnly || editing"
       >{{ editing ? 'Anzeigename' : 'Anzeigename (optional)' }}
       <input v-model="displayName" type="text" placeholder="z. B. Privat" :required="editing" />
     </label>
@@ -320,7 +411,7 @@ async function submit(): Promise<void> {
       >Reihenfolge (kleinere Zahl zuerst)
       <input v-model.number="sortOrder" type="number" step="1" />
     </label>
-    <label
+    <label v-if="!signInOnly || editing"
       >Mails synchronisieren
       <select v-model="syncChoice">
         <option v-for="choice in syncChoices" :key="choice.value" :value="choice.value">
@@ -333,7 +424,7 @@ async function submit(): Promise<void> {
       >
     </label>
 
-    <fieldset>
+    <fieldset v-if="!signInOnly">
       <legend>IMAP</legend>
       <div class="row">
         <label class="grow"
@@ -361,7 +452,7 @@ async function submit(): Promise<void> {
       /></label>
     </fieldset>
 
-    <fieldset>
+    <fieldset v-if="!signInOnly">
       <legend>SMTP</legend>
       <div class="row">
         <label class="grow"
@@ -393,7 +484,7 @@ async function submit(): Promise<void> {
       </template>
     </fieldset>
 
-    <span class="buttons">
+    <span v-if="!signInOnly || editing" class="buttons">
       <button type="submit" :disabled="busy">
         {{ busy ? 'Teste Verbindung …' : editing ? 'Speichern' : 'Verbinden' }}
       </button>
@@ -415,6 +506,21 @@ async function submit(): Promise<void> {
   border-radius: 0.25rem;
   background: var(--fma-primary-soft);
   font-size: var(--fma-text-sm);
+}
+
+.oauth {
+  margin: 0 0 var(--fma-space-3);
+}
+
+.oauth .hint {
+  display: block;
+  margin: var(--fma-space-1) 0 0;
+}
+
+.oauth .or {
+  margin: var(--fma-space-3) 0 0;
+  font-size: var(--fma-text-sm);
+  font-weight: 600;
 }
 
 .preset-hint.blocked {

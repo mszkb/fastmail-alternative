@@ -137,7 +137,13 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
   Partial<
     Pick<
       AccountSummary,
-      'unreadCount' | 'status' | 'lastErrorCode' | 'nextRetryAt' | 'lastSyncAt' | 'syncing'
+      | 'unreadCount'
+      | 'status'
+      | 'lastErrorCode'
+      | 'nextRetryAt'
+      | 'lastSyncAt'
+      | 'syncing'
+      | 'credentialKind'
     >
   >
 
@@ -295,6 +301,7 @@ function statusInfo(account: AccountOption) {
   return accountStatusInfo({
     status: account.status ?? 'ok',
     lastErrorCode: account.lastErrorCode ?? null,
+    credentialKind: account.credentialKind,
   })
 }
 

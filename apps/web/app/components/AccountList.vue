@@ -13,7 +13,15 @@ import {
 
 type Account = Pick<
   AccountSummary,
-  'id' | 'displayName' | 'emailAddress' | 'imap' | 'smtp' | 'status' | 'lastErrorCode'
+  | 'id'
+  | 'displayName'
+  | 'emailAddress'
+  | 'imap'
+  | 'smtp'
+  | 'status'
+  | 'lastErrorCode'
+  | 'credentialKind'
+  | 'oauthProvider'
 > & { sortOrder?: number }
 
 const props = defineProps<{ accounts: Account[] }>()

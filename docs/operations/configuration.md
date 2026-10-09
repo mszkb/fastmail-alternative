@@ -5,7 +5,7 @@ Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-
 - Nach einer Änderung: `docker compose up -d` – Compose erstellt die betroffenen Container neu.
 - Nur Variablen aus den Tabellen unten wirken. Die `docker-compose.yml` reicht ausschließlich diese an die Container weiter; andere Einträge in der `.env` werden ignoriert.
 - **Pflicht** heißt: ohne Wert startet `docker compose` nicht (Fehlermeldung `set … in .env`) bzw. die Funktion ist aus.
-- Die `.env` enthält Secrets (`MASTER_KEY`, `VAPID_PRIVATE_KEY`, `MARIADB_PASSWORD`, `METRICS_TOKEN`, ggf. `SETUP_TOKEN`): Rechte `0600`, nie committen, nie in Support-Anfragen kopieren.
+- Die `.env` enthält Secrets (`MASTER_KEY`, `VAPID_PRIVATE_KEY`, `MARIADB_PASSWORD`, `METRICS_TOKEN`, ggf. `SETUP_TOKEN` und `OAUTH_*_CLIENT_SECRET`): Rechte `0600`, nie committen, nie in Support-Anfragen kopieren.
 - Auf Webspace ohne Docker stehen dieselben Namen in `config.php` statt in der `.env` ([Installation auf Shared Hosting](installation-php.md)); was nur dort gilt, steht [unten](#nur-webspace-configphp).
 
 Dienst `php` ist php-fpm (`/api/*`), `worker` der Dauer-Worker mit demselben Image; beide lesen dieselben Variablen.
@@ -86,6 +86,21 @@ Die Aufbewahrungsfristen sind fest eingestellt: erledigte Jobs 7 Tage, fehlgesch
 | `VAPID_SUBJECT`     | `mailto:admin@example.com` | nein (empfohlen ändern) | worker      | Kontakt für die Push-Dienste (`mailto:` oder `https:`-URL)                              |
 
 Leere Schlüssel = Push aus; die App zeigt dann „Auf dem Server sind keine VAPID-Schlüssel eingerichtet“. **Neue Schlüssel machen alle bestehenden Push-Abos ungültig** – Benachrichtigungen müssen dann auf jedem Gerät neu aktiviert werden. Die Schlüssel also nur einmal erzeugen (das erledigt `setup-env.sh`) und mit der `.env` sichern.
+
+## Anmeldung mit Google/Microsoft (OAuth2)
+
+Einrichtung der eigenen OAuth-App und Bedienung: [Anmeldung mit Google und Microsoft](oauth.md). Ein Anbieter ist aktiv, sobald Client-ID **und** Secret gesetzt sind; ohne beide fehlt der Button „Mit … anmelden“.
+
+| Variable                        | Standard           | Pflicht | Dienst      | Zweck                                                                                                                                                                   |
+| ------------------------------- | ------------------ | ------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_URL`                    | `https://<DOMAIN>` | nein    | php, worker | Öffentliche Adresse der Instanz; daraus wird die Redirect-URI `<PUBLIC_URL>/api/oauth/callback`. Nötig bei `DOMAIN=:80` hinter eigenem TLS-Proxy oder unter einem Pfad. |
+| `OAUTH_GOOGLE_CLIENT_ID`        | leer               | nein    | php, worker | Client-ID der eigenen Google-App (Webanwendung)                                                                                                                         |
+| `OAUTH_GOOGLE_CLIENT_SECRET`    | leer               | nein    | php, worker | Clientschlüssel dazu (Secret)                                                                                                                                           |
+| `OAUTH_MICROSOFT_CLIENT_ID`     | leer               | nein    | php, worker | Anwendungs-ID (Client) der Entra-App-Registrierung                                                                                                                      |
+| `OAUTH_MICROSOFT_CLIENT_SECRET` | leer               | nein    | php, worker | Wert des geheimen Clientschlüssels (läuft nach höchstens 24 Monaten ab)                                                                                                 |
+| `OAUTH_MICROSOFT_TENANT`        | `common`           | nein    | php, worker | `common` (persönliche und Organisationskonten), `consumers`, `organizations` oder eine Mandanten-ID                                                                     |
+
+Die beiden Secrets gehören wie der `MASTER_KEY` nicht ins Repo und nicht in Support-Anfragen.
 
 ## Backup-Skript
 
