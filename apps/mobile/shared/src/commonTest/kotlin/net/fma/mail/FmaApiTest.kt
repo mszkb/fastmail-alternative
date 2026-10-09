@@ -136,4 +136,16 @@ class FmaApiTest {
         assertEquals("/api/messages/m1/attachments/2", requests.single().url.encodedPath)
         assertEquals(payload.toList(), out)
     }
+
+    @Test
+    fun sendParsesTheOutboxMessage() = runTest {
+        val api = api { HttpStatusCode.Created to """{"id":"o1","accountId":"a1","status":"queued","error":null}""" }
+        val result = api.send(
+            net.fma.mail.api.SendMessageRequest(
+                accountId = "a1", identityId = "i1", to = listOf("bob@example.org"), subject = "Test",
+                text = "Hallo", clientId = "c1",
+            ),
+        )
+        assertEquals("queued", result.status)
+    }
 }

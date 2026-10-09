@@ -413,7 +413,8 @@ class AppViewModel(private val platform: Platform) : ViewModel() {
                     "Server nicht gefunden. Adresse prüfen."
                 text.contains("timeout", ignoreCase = true) || text.contains("timed out", ignoreCase = true) ->
                     "Zeitüberschreitung beim Verbinden."
-                else -> "Verbindung fehlgeschlagen. Bist du online?"
+                // The class name helps with support, it never contains mail content.
+                else -> "Verbindung fehlgeschlagen. Bist du online? (${e::class.simpleName})"
             }
         }
     }

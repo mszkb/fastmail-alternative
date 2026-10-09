@@ -113,7 +113,7 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
         if (error != null) return
         sending = true
         scope.launch {
-            try {
+            val sent = try {
                 api.send(
                     SendMessageRequest(
                         accountId = account,
@@ -127,12 +127,14 @@ fun ComposeScreen(vm: AppViewModel, mode: String, messageId: String?, onClose: (
                         clientId = clientId,
                     ),
                 )
-                onClose()
+                true
             } catch (e: Exception) {
                 error = AppViewModel.errorText(e)
+                false
             } finally {
                 sending = false
             }
+            if (sent) onClose()
         }
     }
 
