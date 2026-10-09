@@ -104,7 +104,7 @@ final class MessageSyncJob implements JobHandler
         if ($progress->cancelled()) {
             throw new JobCancelledException();
         }
-        $ctx = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+        $ctx = AccountContext::load($pdo, $accountId, $this->config);
         try {
             $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $ctx->imap);
         } catch (MailException $e) {

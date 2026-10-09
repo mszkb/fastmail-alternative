@@ -111,7 +111,7 @@ final class SendMessageJob implements JobHandler
         if ($row['content_enc'] === null) {
             throw new \RuntimeException('outbox message without content');
         }
-        $ctx = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+        $ctx = AccountContext::load($pdo, $accountId, $this->config);
         $content = json_decode(Envelope::decryptField($ctx->dek, $row['content_enc'], Envelope::outboxContentAad($row['id'])), true, 64, JSON_THROW_ON_ERROR);
         if (!\is_array($content)) {
             throw new \RuntimeException('invalid outbox content');

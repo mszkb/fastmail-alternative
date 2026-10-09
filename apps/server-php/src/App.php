@@ -20,6 +20,7 @@ use Fma\Jobs\JobQueue;
 use Fma\Log\Logger;
 use Fma\Mail\ConnectionTester;
 use Fma\Mail\SocketConnectionTester;
+use Fma\OAuth\TokenClient;
 use Fma\Push\Subscriptions;
 use Fma\Routes\AccountRoutes;
 use Fma\Routes\AuthRoutes;
@@ -48,6 +49,7 @@ final class App
     /**
      * @param list<RateLimitRule>|null $rateLimits defaults to RateLimitRule::defaults()
      * @param ConnectionTester|null $tester IMAP/SMTP connection test; tests inject a fake
+     * @param TokenClient|null $tokens OAuth token endpoint client; tests inject a fake
      *
      * @return SlimApp<\Psr\Container\ContainerInterface|null>
      */
@@ -57,6 +59,7 @@ final class App
         ?Logger $logger = null,
         ?array $rateLimits = null,
         ?ConnectionTester $tester = null,
+        ?TokenClient $tokens = null,
     ): SlimApp {
         $db ??= new Database($config);
         $logger ??= new Logger('api', $config->get('LOG_LEVEL', 'info'));
@@ -82,7 +85,9 @@ final class App
         (new AuthRoutes($db, $sessions, $authenticator, $cookie, new SetupCode($config, $db, $logger), new LoginLockout($db), $logger))
             ->register($app, $requireAuth);
         $jobs = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
-        (new AccountRoutes($db, $config, $tester ?? new SocketConnectionTester($config, $logger), $jobs))->register($app, $requireAuth);
+        $tester ??= new SocketConnectionTester($config, $logger);
+        (new AccountRoutes($db, $config, $tester, $jobs))->register($app, $requireAuth);
+        (new Routes\OAuthRoutes($db, $config, $tester, $jobs, $logger, $tokens))->register($app, $requireAuth);
         (new IdentityRoutes($db))->register($app, $requireAuth);
         (new PushRoutes($config, new Subscriptions($db, $config)))->register($app, $requireAuth);
         (new Routes\ConfigTransferRoutes($db, $config, $logger))->register($app, $requireAuth);

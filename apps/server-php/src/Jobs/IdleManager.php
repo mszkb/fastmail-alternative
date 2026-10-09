@@ -242,7 +242,7 @@ final class IdleManager
     {
         $client = null;
         try {
-            $account = AccountContext::load($this->db->pdo(), $connection->accountId, $this->config->get('MASTER_KEY'));
+            $account = AccountContext::load($this->db->pdo(), $connection->accountId, $this->config);
             // SSRF check and mandatory STARTTLS happen inside connect().
             $client = ImapClient::connect($this->policy, $account->imap, self::CONNECT_TIMEOUT_SECONDS);
             if (!\in_array('IDLE', $client->capabilities(), true)) {

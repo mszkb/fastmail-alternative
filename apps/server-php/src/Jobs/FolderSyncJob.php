@@ -45,7 +45,7 @@ final class FolderSyncJob implements JobHandler
         if ($progress->cancelled()) {
             throw new JobCancelledException();
         }
-        $account = AccountContext::load($pdo, $job->accountId, $this->config->get('MASTER_KEY'));
+        $account = AccountContext::load($pdo, $job->accountId, $this->config);
         try {
             $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $account->imap);
         } catch (MailException $e) {

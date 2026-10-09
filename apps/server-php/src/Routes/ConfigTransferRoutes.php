@@ -15,6 +15,7 @@ use Fma\Http\Json;
 use Fma\Http\Middleware\RequireAuth;
 use Fma\Log\Logger;
 use Fma\Mail\TransportPolicy;
+use Fma\OAuth\Provider;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
@@ -33,7 +34,7 @@ use Slim\Exception\HttpException;
  *   status `auth_error` / CREDENTIALS_REQUIRED, so no job runs until the
  *   password is entered. Accounts whose address exists are skipped.
  *
- * @phpstan-type ImportAccount array{displayName: string, emailAddress: string, sortOrder: int, credentialKind: 'oauth2'|'password', syncSince: ?string, imap: array{host: string, port: int, user: string}, smtp: array{host: string, port: int, user: string}, identities: list<array{name: string, emailAddress: string, signature: ?string, isDefault: bool}>, folderRoles: array<string, array{path: string, delimiter: ?string}>}
+ * @phpstan-type ImportAccount array{displayName: string, emailAddress: string, sortOrder: int, credentialKind: 'oauth2'|'password', oauthProvider: ?string, syncSince: ?string, imap: array{host: string, port: int, user: string}, smtp: array{host: string, port: int, user: string}, identities: list<array{name: string, emailAddress: string, signature: ?string, isDefault: bool}>, folderRoles: array<string, array{path: string, delimiter: ?string}>}
  */
 final class ConfigTransferRoutes
 {
@@ -63,10 +64,10 @@ final class ConfigTransferRoutes
     {
         $userId = self::session($request)->userId;
         $pdo = $this->db->pdo();
-        /** @var list<array{id: string, display_name: string, email_address: string, sort_order: int|string, credential_kind: string, sync_since: ?string, imap_host: string, imap_port: int|string, smtp_host: string, smtp_port: int|string, wrapped_dek: string, credential_enc: string}> $accounts */
+        /** @var list<array{id: string, display_name: string, email_address: string, sort_order: int|string, credential_kind: string, oauth_provider: ?string, sync_since: ?string, imap_host: string, imap_port: int|string, smtp_host: string, smtp_port: int|string, wrapped_dek: string, credential_enc: string}> $accounts */
         $accounts = Database::run(
             $pdo,
-            'SELECT id, display_name, email_address, sort_order, credential_kind, sync_since,
+            'SELECT id, display_name, email_address, sort_order, credential_kind, oauth_provider, sync_since,
                     imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc
              FROM mail_account WHERE user_id = ?
              ORDER BY sort_order, created_at',
@@ -110,6 +111,7 @@ final class ConfigTransferRoutes
                     'emailAddress' => $row['email_address'],
                     'sortOrder' => (int) $row['sort_order'],
                     'credentialKind' => $row['credential_kind'] === 'oauth2' ? 'oauth2' : 'password',
+                    'oauthProvider' => $row['credential_kind'] === 'oauth2' ? $row['oauth_provider'] : null,
                     'syncSince' => $row['sync_since'] !== null ? self::iso($row['sync_since']) : null,
                     'imap' => ['host' => $row['imap_host'], 'port' => (int) $row['imap_port'], 'user' => $users['imapUser']],
                     'smtp' => ['host' => $row['smtp_host'], 'port' => (int) $row['smtp_port'], 'user' => $users['smtpUser']],
@@ -180,7 +182,8 @@ final class ConfigTransferRoutes
 
                 $accountId = Uuid::v4();
                 $dek = Envelope::generateDataKey();
-                // Only the user names survive the move; passwords must be re-entered.
+                // Only the user names survive the move; passwords must be re-entered,
+                // OAuth accounts sign in again (OAUTH_EXPIRED shows "Neu anmelden").
                 $credentialEnc = Envelope::encryptField(
                     $dek,
                     json_encode(
@@ -193,14 +196,15 @@ final class ConfigTransferRoutes
                     $pdo,
                     "INSERT INTO mail_account
                        (id, user_id, display_name, email_address, sort_order, imap_host, imap_port,
-                        smtp_host, smtp_port, wrapped_dek, key_id, credential_kind, sync_since,
+                        smtp_host, smtp_port, wrapped_dek, key_id, credential_kind, oauth_provider, sync_since,
                         credential_enc, status, last_error_code)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auth_error', 'CREDENTIALS_REQUIRED')",
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auth_error', ?)",
                     [
                         $accountId, $userId, $account['displayName'], $email, $account['sortOrder'],
                         $account['imap']['host'], $account['imap']['port'], $account['smtp']['host'], $account['smtp']['port'],
-                        Envelope::wrapDataKey($masterKey, $dek, $keyId), $keyId, $account['credentialKind'],
+                        Envelope::wrapDataKey($masterKey, $dek, $keyId), $keyId, $account['credentialKind'], $account['oauthProvider'],
                         self::toDatetime($account['syncSince']), $credentialEnc,
+                        $account['credentialKind'] === 'oauth2' ? 'OAUTH_EXPIRED' : 'CREDENTIALS_REQUIRED',
                     ],
                 );
 
@@ -379,6 +383,8 @@ final class ConfigTransferRoutes
         }
 
         $syncSince = \is_string($input['syncSince'] ?? null) ? self::parseDate($input['syncSince']) : null;
+        $oauthProvider = ($input['credentialKind'] ?? null) === 'oauth2' && \in_array($input['oauthProvider'] ?? null, Provider::IDS, true)
+            ? (string) $input['oauthProvider'] : null;
         $sortOrder = Input::integer($input['sortOrder'] ?? null);
         $displayName = self::str($input['displayName'] ?? null, 100);
 
@@ -386,7 +392,9 @@ final class ConfigTransferRoutes
             'displayName' => preg_replace('/[\r\n\t]+/', ' ', $displayName !== null && $displayName !== '' ? $displayName : $emailAddress) ?? $emailAddress,
             'emailAddress' => $emailAddress,
             'sortOrder' => $sortOrder === null ? 0 : max(-1_000_000, min(1_000_000, $sortOrder)),
-            'credentialKind' => ($input['credentialKind'] ?? null) === 'oauth2' ? 'oauth2' : 'password',
+            // OAuth accounts need their provider to sign in again; without one they fall back to a password.
+            'credentialKind' => $oauthProvider !== null ? 'oauth2' : 'password',
+            'oauthProvider' => $oauthProvider,
             'syncSince' => $syncSince,
             'imap' => $imap,
             'smtp' => ['host' => $smtp['host'], 'port' => $smtp['port'], 'user' => $smtp['user'] !== '' ? $smtp['user'] : $imap['user']],

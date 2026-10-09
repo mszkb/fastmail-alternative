@@ -43,7 +43,7 @@ final class AccountRoutes
 
     /** Explicit column select: credential_enc and wrapped_dek must never leak. */
     private const PUBLIC_COLUMNS = 'id, display_name, email_address, imap_host, imap_port, smtp_host, smtp_port,
-        status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at, sync_since';
+        status, last_error_code, next_retry_at, capabilities, sort_order, last_sync_at, sync_since, credential_kind, oauth_provider';
 
     /** SQL: a folder/message sync of the account is queued (and eligible) or running (roadmap 4.5). */
     public const SYNCING_COLUMN = "EXISTS (
@@ -117,13 +117,56 @@ final class AccountRoutes
             return Json::write($response, ['stage' => 'smtp', 'test' => $smtpResult->toArray()], 422);
         }
 
-        // Fresh DEK per account, wrapped with the master key; the id is known up front for the credential AAD.
-        $masterKey = Envelope::loadMasterKey($this->config->get('MASTER_KEY'));
-        $keyId = $this->config->get('MASTER_KEY_ID', 'v1');
+        $accountId = self::insertAccount(
+            $pdo,
+            $this->config,
+            $this->jobs,
+            $userId,
+            $parsed['displayName'],
+            $parsed['emailAddress'],
+            $parsed['imap'],
+            $parsed['smtp'],
+            $imapResult->capabilities,
+            self::utcMidnight($parsed['syncSince']),
+            static fn(string $dek, string $id): string => self::encryptCredentials($dek, $id, $parsed['imap'], $parsed['smtp']),
+        );
+
+        return Json::write($response, [
+            'account' => $this->publicAccount($accountId),
+            'test' => ['imap' => $imapResult->toArray(), 'smtp' => $smtpResult->toArray()],
+        ], 201);
+    }
+
+    /**
+     * Stores a tested account: fresh DEK wrapped with the master key (the id
+     * is known up front for the credential AAD), the default identity from
+     * the account address (data model, 3.6) and the initial folder sync
+     * (roadmap 2.2). Also used for OAuth accounts (OAuthRoutes).
+     *
+     * @param list<string>                            $capabilities IMAP capabilities from the connection test
+     * @param callable(string, string): string        $encryptCredentials (dek, account id) => credential_enc
+     * @param array{kind: string, provider: ?string}  $credential   credential_kind and oauth_provider
+     */
+    public static function insertAccount(
+        \PDO $pdo,
+        Config $config,
+        JobQueue $jobs,
+        string $userId,
+        string $displayName,
+        string $emailAddress,
+        HostConfig $imap,
+        HostConfig $smtp,
+        array $capabilities,
+        ?string $syncSince,
+        callable $encryptCredentials,
+        array $credential = ['kind' => 'password', 'provider' => null],
+    ): string {
+        $masterKey = Envelope::loadMasterKey($config->get('MASTER_KEY'));
+        $keyId = $config->get('MASTER_KEY_ID', 'v1');
         $accountId = Uuid::v4();
         $dek = Envelope::generateDataKey();
         $wrappedDek = Envelope::wrapDataKey($masterKey, $dek, $keyId);
-        $credentialEnc = self::encryptCredentials($dek, $accountId, $parsed['imap'], $parsed['smtp']);
+        $credentialEnc = $encryptCredentials($dek, $accountId);
 
         $pdo->beginTransaction();
         try {
@@ -131,21 +174,19 @@ final class AccountRoutes
                 $pdo,
                 "INSERT INTO mail_account
                    (id, user_id, display_name, email_address, imap_host, imap_port,
-                    smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, status, capabilities, sync_since)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
+                    smtp_host, smtp_port, wrapped_dek, key_id, credential_enc, credential_kind, oauth_provider, status, capabilities, sync_since)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok', ?, ?)",
                 [
-                    $accountId, $userId, $parsed['displayName'], $parsed['emailAddress'],
-                    $parsed['imap']->host, $parsed['imap']->port, $parsed['smtp']->host, $parsed['smtp']->port,
-                    $wrappedDek, $keyId, $credentialEnc,
-                    json_encode($imapResult->capabilities, JSON_THROW_ON_ERROR), self::utcMidnight($parsed['syncSince']),
+                    $accountId, $userId, $displayName, $emailAddress,
+                    $imap->host, $imap->port, $smtp->host, $smtp->port,
+                    $wrappedDek, $keyId, $credentialEnc, $credential['kind'], $credential['provider'],
+                    json_encode($capabilities, JSON_THROW_ON_ERROR), $syncSince,
                 ],
             );
-            // Default identity from the account email address (data model, 3.6).
             $identityId = Uuid::v4();
-            Database::run($pdo, 'INSERT INTO identity (id, account_id, name, email_address) VALUES (?, ?, ?, ?)', [$identityId, $accountId, $parsed['displayName'], $parsed['emailAddress']]);
+            Database::run($pdo, 'INSERT INTO identity (id, account_id, name, email_address) VALUES (?, ?, ?, ?)', [$identityId, $accountId, $displayName, $emailAddress]);
             Database::run($pdo, 'UPDATE mail_account SET default_identity_id = ? WHERE id = ?', [$identityId, $accountId]);
-            // Kick off the initial folder sync in the worker (roadmap 2.2).
-            $this->jobs->enqueue('folder_sync', $accountId);
+            $jobs->enqueue('folder_sync', $accountId);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -154,10 +195,7 @@ final class AccountRoutes
             throw $e;
         }
 
-        return Json::write($response, [
-            'account' => $this->publicAccount($accountId),
-            'test' => ['imap' => $imapResult->toArray(), 'smtp' => $smtpResult->toArray()],
-        ], 201);
+        return $accountId;
     }
 
     /** @param array<string, string> $args */
@@ -172,10 +210,10 @@ final class AccountRoutes
             return Json::write($response, ['message' => 'Ungültige Kontodaten (Name, Host, Port, Benutzer, Passwort, Sync-Zeitraum prüfen).'], 400);
         }
         $pdo = $this->db->pdo();
-        /** @var array{imap_host: string, imap_port: int, smtp_host: string, smtp_port: int, wrapped_dek: string, credential_enc: string}|false $current */
+        /** @var array{imap_host: string, imap_port: int, smtp_host: string, smtp_port: int, wrapped_dek: string, credential_enc: string, credential_kind: string}|false $current */
         $current = Database::run(
             $pdo,
-            'SELECT imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc
+            'SELECT imap_host, imap_port, smtp_host, smtp_port, wrapped_dek, credential_enc, credential_kind
              FROM mail_account WHERE id = ? AND user_id = ?',
             [$accountId, self::session($request)->userId],
         )->fetch();
@@ -197,6 +235,11 @@ final class AccountRoutes
         if (\array_key_exists('syncSince', $update)) {
             $sets[] = 'sync_since = ?';
             $values[] = self::utcMidnight($update['syncSince']);
+        }
+
+        // OAuth accounts change their login only by signing in again (OAuthRoutes).
+        if ($current['credential_kind'] === 'oauth2' && (isset($update['imap']) || isset($update['smtp']))) {
+            return Json::write($response, ['message' => 'Bei diesem Konto bitte über „Neu anmelden“ beim Anbieter anmelden.'], 400);
         }
 
         $test = null;
@@ -310,6 +353,8 @@ final class AccountRoutes
             'syncSince' => \is_string($syncSince) ? substr($syncSince, 0, 10) : null,
             'unreadCount' => (int) ($row['unread_count'] ?? 0),
             'syncing' => (bool) ($row['syncing'] ?? false),
+            'credentialKind' => $row['credential_kind'] === 'oauth2' ? 'oauth2' : 'password',
+            'oauthProvider' => \is_string($row['oauth_provider'] ?? null) ? $row['oauth_provider'] : null,
         ];
     }
 
