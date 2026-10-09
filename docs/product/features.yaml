@@ -395,6 +395,36 @@ features:
       note: nur Freitext, keine Filter
     server: [apps/server-php/src/Routes/SearchRoutes.php]
 
+  - id: search.global
+    area: Suche
+    name: Globale Suche über alle Konten (Bereich, Operatoren, Status je Konto)
+    issues: [121]
+    note: IMAP SEARCH je Konto, kein eigener Index; Suchbegriffe werden nie gespeichert (ADR-0006, Nachtrag)
+    web:
+      status: partial
+      files:
+        [
+          apps/web/app/components/GlobalSearch.vue,
+          apps/web/app/components/AppHeader.vue,
+          packages/shared/src/search.ts,
+        ]
+      note: 'funktioniert; offen: Messung auf dem Pi und mit echten Anbietern'
+    app:
+      status: no
+      note: App sucht nur im aktiven Konto
+    server:
+      [
+        apps/server-php/src/Routes/GlobalSearchRoutes.php,
+        apps/server-php/src/Mail/ProviderSearch.php,
+      ]
+
+  - id: search.offline
+    area: Suche
+    name: Offline-Suche in den gespeicherten Nachrichten
+    issues: [162]
+    web: { status: no, note: geplant }
+    app: { status: no, note: geplant, App hat noch keinen Offline-Cache (#145) }
+
   # --- Push -------------------------------------------------------------------------------
   - id: push.notify
     area: Push und Badge
@@ -472,6 +502,26 @@ features:
     issues: [113]
     web: { status: yes, files: [packages/shared/src/layout.ts] }
     app: { status: no, note: Tablet-Layout offen (#148) }
+
+  - id: ui.user-themes
+    area: Darstellung und Einstellungen
+    name: Installierbare Themes (*.fmatheme.json)
+    issues: [126]
+    note: nur Farben, Größen und Layout-Optionen, kein Code; Format in docs/themes/README.md
+    web:
+      status: yes
+      files:
+        [
+          apps/web/app/components/ThemeSettings.vue,
+          apps/web/app/utils/user-theme.ts,
+          packages/shared/src/themes.ts,
+        ]
+      note: aktives Theme pro Gerät, Notausgang ?theme=default
+    app:
+      status: no
+      note: App nutzt nur das Standard-Theme aus den Design-Tokens
+    logic: [packages/shared/src/themes.ts, apps/server-php/src/Themes/ThemeValidator.php]
+    server: [apps/server-php/src/Routes/ThemeRoutes.php]
 
   - id: ui.shortcuts
     area: Darstellung und Einstellungen

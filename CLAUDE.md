@@ -18,6 +18,7 @@ Phase 0 (Discovery), ADRs entschieden. Aktuelle Planung: [`ROADMAP.md`](ROADMAP.
 | Vision, Zielgruppen, Scope | `docs/product/vision.md`                |
 | Offene Produktfragen       | `docs/product/offene-fragen.md`         |
 | Funktionen Web ↔ App       | `docs/product/feature-matrix.md`        |
+| Funktionen für Nutzer      | `docs/product/funktionen.md`            |
 | Architektur                | `docs/architecture/overview.md`         |
 | Datenmodell (ER)           | `docs/architecture/data-model.md`       |
 | Daten- & Sicherheitsmodell | `docs/architecture/security.md`         |
