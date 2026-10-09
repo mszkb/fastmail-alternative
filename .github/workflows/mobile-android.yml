@@ -102,6 +102,12 @@ jobs:
           disable-animations: true
           working-directory: apps/mobile
           script: ./gradlew --no-daemon :androidApp:connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-test-report
+          path: apps/mobile/androidApp/build/reports/androidTests/
+          retention-days: 7
 
   # The Kotlin API client against the real PHP API (#143): login with a
   # device token, read endpoints, push registration, logout.

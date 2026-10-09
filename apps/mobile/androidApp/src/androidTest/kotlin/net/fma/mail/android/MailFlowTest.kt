@@ -7,6 +7,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.runtime.Composable
@@ -109,7 +111,15 @@ class MailFlowTest {
             LockedWebView(html, allowRemote, onLink, modifier)
     }
 
-    private fun waitFor(text: String) = compose.waitUntilAtLeastOneExists(hasText(text, substring = true), 10_000)
+    /** Waits for a text; on timeout the message carries the screen's semantics tree and the requests so far. */
+    private fun waitFor(text: String) {
+        try {
+            compose.waitUntilAtLeastOneExists(hasText(text, substring = true), 10_000)
+        } catch (e: Throwable) {
+            val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("?")
+            throw AssertionError("'$text' not shown.\nRequests: $requests\nScreen:\n$tree", e)
+        }
+    }
 
     @Test
     fun loginReadArchiveAndSend() {
