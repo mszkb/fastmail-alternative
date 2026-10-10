@@ -84,7 +84,7 @@ final class App
         $cookie = new SessionCookie($config);
         $authenticator = new Authenticator($sessions, $cookie);
         $requireAuth = new RequireAuth($authenticator, $responses);
-        (new AuthRoutes($db, $sessions, $authenticator, $cookie, new SetupCode($config, $db, $logger), new LoginLockout($db), $logger))
+        (new AuthRoutes($db, $sessions, $authenticator, $cookie, new SetupCode($config, $db, $logger), new LoginLockout($db), $logger, $config->isGenerated('MASTER_KEY')))
             ->register($app, $requireAuth);
         $jobs = new JobQueue($db, $config->int('IMAP_MAX_CONNECTIONS_PER_HOST', 4));
         $tester ??= new SocketConnectionTester($config, $logger);

@@ -122,6 +122,18 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 - **Offline-Suche (#162):** Ohne Verbindung durchsucht die globale Suche diesen Bestand. Die Einträge werden dafür nur im Speicher entschlüsselt und gefiltert (`searchOffline` in `@fma/shared`, `apps/web/app/utils/offline-search.ts`). Es gibt keinen zusätzlichen Index, keine Klartext-Kopie und keine gespeicherten Suchbegriffe; beim Lesen wird nicht einmal die LRU-Zeit geschrieben.
 - Ohne IndexedDB oder WebCrypto (privates Fenster, Instanz per `http://` unter einer LAN-Adresse) arbeitet die App ohne Offline-Ablage.
 
+## Erzeugte Secrets (Docker, #164)
+
+Fehlen `MASTER_KEY`, VAPID-Schlüssel oder Datenbankpasswort in der `.env`, erzeugt der einmalige Dienst `secrets` sie beim ersten Start ([ADR-0016](../adr/0016-generated-secrets.md), `apps/server-php/src/Install/GeneratedSecrets.php`).
+
+- **Ablage:** im Volume `app-secrets`, nicht in DB, Repo oder Logs (Prinzip 5).
+  - `secrets.json`: Eigentümer `www-data`, Rechte `0600`, für `php` und `worker` nur lesend eingebunden.
+  - `mariadb_password`: Eigentümer root, Rechte `0400`.
+- **Vorrang:** Werte aus Umgebung, `.env` und `config.php` gewinnen immer. Sie werden nie in die Datei geschrieben, so dass es nie einen zweiten Master-Key gibt. Erzeugte Werte werden nie ersetzt.
+- **Logs:** nur Namen und Pfad, nie Werte. Weicht ein `MASTER_KEY` in `.env` vom erzeugten ab, wird gewarnt.
+- **Sichern:** `bin/secrets.php export` gibt die Werte nur auf ausdrücklichen Aufruf aus. Das Volume gehört nicht ins Backup; die Einrichtungsseite erinnert an die Sicherung, solange noch kein Benutzer existiert.
+- **Shared Hosting:** unverändert. Der Installer schreibt nichts auf die Platte, und der Setup-Code erfordert weiter die Eingabe des `MASTER_KEY` als Kontrollnachweis.
+
 ## Backups
 
 - Backups werden **verschlüsselt** (`apps/server-php/src/Backup/InstanceBackup.php`): eine Datei aus einem logischen Export der Datenbank (aus PHP, ohne `mysqldump`) und den Dateien im Volume `mail-data`, als Ganzes mit AES-256-GCM in 64-KiB-Blöcken verschlüsselt; der Schlüssel wird je Backup per HKDF aus `MASTER_KEY` und zufälligem Salt abgeleitet. Damit sind auch die Klartext-Metadaten der DB (Hostnamen, Benutzernamen, Adressen, Ordner) geschützt. Der `MASTER_KEY` selbst ist nie im Backup.

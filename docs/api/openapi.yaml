@@ -955,6 +955,12 @@ components:
           type: string
           format: email
           description: Present only when authenticated.
+        masterKeyGenerated:
+          type: boolean
+          description: |
+            Present (true) only while setup is pending and the MASTER_KEY was
+            generated on the first start (#164) instead of being set by the
+            operator: the setup page asks to back it up.
     LoginRequest:
       type: object
       required:

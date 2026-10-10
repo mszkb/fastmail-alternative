@@ -93,7 +93,7 @@ Alle Werte kommen aus der `.env` bzw. `config.php`, ungültige Werte fallen auf 
 
 ## Deployment
 
-- Docker Compose (ADR-0007, ADR-0013): `caddy` (TLS; `/api/*` per FastCGI an `php`, alles andere an `web`), `web` (statische PWA), `php` (php-fpm), `worker` (gleiches Image, `bin/worker.php`), `mariadb`; Volumes `mariadb-data`, `mail-data`, `caddy-data`, `caddy-config`. Anleitung: [installation.md](../operations/installation.md).
+- Docker Compose (ADR-0007, ADR-0013): `caddy` (TLS; `/api/*` per FastCGI an `php`, alles andere an `web`), `web` (statische PWA), `php` (php-fpm), `worker` (gleiches Image, `bin/worker.php`), `mariadb` und der einmalige Dienst `secrets` (erzeugt fehlende Secrets, ADR-0016); Volumes `mariadb-data`, `mail-data`, `app-secrets`, `caddy-data`, `caddy-config`. Anleitung: [installation.md](../operations/installation.md).
 - Alternativ ohne Docker auf Webspace mit PHP und MySQL plus Cron: [installation-php.md](../operations/installation-php.md).
 - Konfiguration über `.env` (erzeugt von `scripts/setup-env.sh`: Domain, `MASTER_KEY`, VAPID, DB-Passwort) bzw. `config.php`.
 - Healthchecks für alle Services; Migrationen laufen beim Start des `php`-Containers (`bin/migrate.php`).

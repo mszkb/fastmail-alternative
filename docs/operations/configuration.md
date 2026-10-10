@@ -1,6 +1,6 @@
 # Konfiguration
 
-Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-0007](../adr/0007-deployment.md)). `docker compose` liest sie beim Start und reicht die Werte an die Dienste weiter. Erzeugt wird sie mit `./scripts/setup-env.sh` (siehe [Installation](installation.md#3-konfiguration-erzeugen-env)); alle Variablen mit Kommentar stehen in `.env.example`.
+Die gesamte Konfiguration steht in der Datei `.env` im Projektverzeichnis ([ADR-0007](../adr/0007-deployment.md)). `docker compose` liest sie beim Start und reicht die Werte an die Dienste weiter. Erzeugt wird sie mit `./scripts/setup-env.sh` (siehe [Installation](installation.md#3-konfiguration-erzeugen-env)); alle Variablen mit Kommentar stehen in `.env.example`. Ohne `.env` bzw. ohne Secrets darin erzeugt der einmalige Dienst `secrets` beim ersten Start `MASTER_KEY`, VAPID-Schlüssel und Datenbankpasswort im Volume `app-secrets` ([ADR-0016](../adr/0016-generated-secrets.md)); Werte aus der `.env` haben immer Vorrang.
 
 - Nach einer Änderung: `docker compose up -d` – Compose erstellt die betroffenen Container neu.
 - Nur Variablen aus den Tabellen unten wirken. Die `docker-compose.yml` reicht ausschließlich diese an die Container weiter; andere Einträge in der `.env` werden ignoriert.
@@ -22,7 +22,7 @@ Dienst `php` ist php-fpm (`/api/*`), `worker` der Dauer-Worker mit demselben Ima
 
 | Variable                   | Standard | Pflicht | Dienst      | Zweck                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------------- | -------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MASTER_KEY`               | –        | **ja**  | php, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern.                                                                                                                                                                                                    |
+| `MASTER_KEY`               | erzeugt  | nein    | php, worker | Master-Key der Envelope-Encryption (32 Byte, base64). Verschlüsselt alle Data Keys und damit Zugangsdaten und Mailinhalte; auch Backups. **Verlust = alle Daten unlesbar.** Getrennt sichern. Leer = beim ersten Start erzeugt (Volume `app-secrets`, #164); sichern mit `docker compose exec php php bin/secrets.php export`. Nie durch einen anderen Wert ersetzen.                            |
 | `MASTER_KEY_ID`            | `v1`     | nein    | php, worker | Version des Master-Keys. Nur zusammen mit einer [Key-Rotation](../process/key-rotation.md) ändern.                                                                                                                                                                                                                                                                                               |
 | `METRICS_TOKEN`            | leer     | nein    | php         | Leer = `/api/metrics` deaktiviert (404). Gesetzt = Prometheus-Metriken mit Header `Authorization: Bearer <METRICS_TOKEN>`.                                                                                                                                                                                                                                                                       |
 | `SETUP_TOKEN`              | leer     | nein    | php         | Setup-Code für die [Ersteinrichtung](installation.md#6-benutzer-anlegen-ersteinrichtung). Leer = das Backend erzeugt beim ersten Aufruf der Einrichtung einen zufälligen Code und schreibt ihn einmalig ins Log (`docker compose logs php`); einen neuen gibt `docker compose exec php php bin/setup-code.php` aus. Gesetzt = dieser Wert (wird nie geloggt). Nach der Einrichtung ohne Wirkung. |
@@ -34,11 +34,11 @@ Dienst `php` ist php-fpm (`/api/*`), `worker` der Dauer-Worker mit demselben Ima
 
 ## Datenbank
 
-| Variable           | Standard | Pflicht | Dienst               | Zweck                                                                 |
-| ------------------ | -------- | ------- | -------------------- | --------------------------------------------------------------------- |
-| `MARIADB_PASSWORD` | –        | **ja**  | mariadb, php, worker | Passwort des Datenbankbenutzers (von `setup-env.sh` zufällig erzeugt) |
-| `MARIADB_USER`     | `mail`   | nein    | mariadb, php, worker | Datenbankbenutzer                                                     |
-| `MARIADB_DATABASE` | `mail`   | nein    | mariadb, php, worker | Datenbankname                                                         |
+| Variable           | Standard | Pflicht | Dienst               | Zweck                                                                                                                            |
+| ------------------ | -------- | ------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `MARIADB_PASSWORD` | erzeugt  | nein    | mariadb, php, worker | Passwort des Datenbankbenutzers (von `setup-env.sh` oder beim ersten Start zufällig erzeugt; MariaDB liest es aus `app-secrets`) |
+| `MARIADB_USER`     | `mail`   | nein    | mariadb, php, worker | Datenbankbenutzer                                                                                                                |
+| `MARIADB_DATABASE` | `mail`   | nein    | mariadb, php, worker | Datenbankname                                                                                                                    |
 
 Benutzer, Passwort und Datenbankname übernimmt MariaDB nur beim **allerersten** Start (leeres Volume `mariadb-data`). Spätere Änderungen in der `.env` ändern die Datenbank nicht – dann starten php und worker nicht mehr (Anmeldung an der Datenbank schlägt fehl). Das root-Passwort von MariaDB ist zufällig und wird von der App nicht gebraucht.
 
@@ -86,7 +86,7 @@ Die Aufbewahrungsfristen sind fest eingestellt: erledigte Jobs 7 Tage, fehlgesch
 | `VAPID_PRIVATE_KEY` | leer                       | für Push                | worker      | Privater VAPID-Schlüssel; nur der Worker versendet Push                                 |
 | `VAPID_SUBJECT`     | `mailto:admin@example.com` | nein (empfohlen ändern) | worker      | Kontakt für die Push-Dienste (`mailto:` oder `https:`-URL)                              |
 
-Leere Schlüssel = Push aus; die App zeigt dann „Auf dem Server sind keine VAPID-Schlüssel eingerichtet“. **Neue Schlüssel machen alle bestehenden Push-Abos ungültig** – Benachrichtigungen müssen dann auf jedem Gerät neu aktiviert werden. Die Schlüssel also nur einmal erzeugen (das erledigt `setup-env.sh`) und mit der `.env` sichern.
+Leere Schlüssel: Mit Docker Compose erzeugt der Dienst `secrets` beim ersten Start ein Paar (Volume `app-secrets`, #164); auf Webspace ohne Schlüssel ist Push aus, die App zeigt dann „Auf dem Server sind keine VAPID-Schlüssel eingerichtet“. **Neue Schlüssel machen alle bestehenden Push-Abos ungültig** – Benachrichtigungen müssen dann auf jedem Gerät neu aktiviert werden. Die Schlüssel also nur einmal erzeugen (das erledigt `setup-env.sh`) und mit der `.env` sichern.
 
 ## Anmeldung mit Google/Microsoft (OAuth2)
 

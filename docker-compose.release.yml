@@ -18,6 +18,9 @@ services:
     image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-server-php:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}
     build: !reset null
 
-  # The worker runs the same image as php.
+  # The secrets service and the worker run the same image as php.
+  secrets:
+    image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-server-php:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}
+
   worker:
     image: ${FMA_IMAGE_PREFIX:-ghcr.io/mszkb}/fastmail-alternative-server-php:${FMA_VERSION:?set FMA_VERSION, e.g. 0.1.0}

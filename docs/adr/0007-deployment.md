@@ -1,6 +1,6 @@
 # ADR-0007: Deployment
 
-- **Status:** Accepted, teilweise superseded by [ADR-0013](0013-php-backend.md) (Dienste `api`/`worker`/`postgres`, Shared Hosting als zusätzlicher Installationsweg)
+- **Status:** Accepted, teilweise superseded by [ADR-0013](0013-php-backend.md) (Dienste `api`/`worker`/`postgres`, Shared Hosting als zusätzlicher Installationsweg), ergänzt durch [ADR-0016](0016-generated-secrets.md) (Secrets beim ersten Start erzeugen, `.env` optional)
 - **Datum:** 2026-10-02
 - **Roadmap:** 0.2, 1.3, 7.2
 

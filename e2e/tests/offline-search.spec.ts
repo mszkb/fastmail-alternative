@@ -34,7 +34,8 @@ test('offline: search the cached messages, open a hit, search online again', asy
   }).toPass({ intervals: [3_000], timeout: 60_000 })
   // Opening caches the message with its text.
   await list.getByText(first).click()
-  await expect(page.getByText(`Projekt Zebra${run} ist fertig`)).toBeVisible()
+  const detail = page.getByRole('region', { name: 'Nachricht', exact: true })
+  await expect(detail.getByText(`Projekt Zebra${run} ist fertig`)).toBeVisible()
 
   await context.setOffline(true)
   const field = page.getByRole('banner').getByLabel('Suchbegriff')
@@ -85,7 +86,6 @@ test('offline: search the cached messages, open a hit, search online again', asy
 
   // A hit opens offline from the cache.
   await items.first().getByRole('button').click()
-  const detail = page.getByRole('region', { name: 'Nachricht', exact: true })
   await expect(detail.getByRole('heading', { name: first })).toBeVisible()
   await expect(detail.getByText(`Projekt Zebra${run} ist fertig`)).toBeVisible()
 

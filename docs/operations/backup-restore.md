@@ -4,7 +4,7 @@ Ein Backup ist **eine verschlüsselte Datei** (`fma-backup-JJJJMMTT-HHMMSS.fmabk
 
 Das Werkzeug ist `php bin/console` im Backend (`apps/server-php`); im Docker-Stack ruft `scripts/backup.sh` es im php-Image auf, auf Webspace läuft es per Cron ([unten](#webspace-ohne-docker)).
 
-> **Der `MASTER_KEY` ist nie im Backup.** Ohne genau diesen Key ist ein Backup wertlos – sowohl die Backup-Datei als auch die Data Keys darin sind damit verschlüsselt. Die `.env` (bzw. mindestens `MASTER_KEY` und `MASTER_KEY_ID`) **getrennt** von den Backups aufbewahren, z. B. im Passwortmanager oder ausgedruckt im Safe. Wer Backup und Key zusammen hat, kann alles lesen.
+> **Der `MASTER_KEY` ist nie im Backup.** Ohne genau diesen Key ist ein Backup wertlos – sowohl die Backup-Datei als auch die Data Keys darin sind damit verschlüsselt. Die `.env` (bzw. mindestens `MASTER_KEY` und `MASTER_KEY_ID`) **getrennt** von den Backups aufbewahren – wurde der Key beim ersten Start erzeugt (#164), die Ausgabe von `docker compose exec php php bin/secrets.php export`; das Volume `app-secrets` ist nicht im Backup – z. B. im Passwortmanager oder ausgedruckt im Safe. Wer Backup und Key zusammen hat, kann alles lesen.
 
 > **Backups des früheren Node-Backends** (`.fmabk` von vor der Umstellung auf PHP, [ADR-0013](../adr/0013-php-backend.md)) haben einen anderen Inhalt (`pg_dump`) und lassen sich **nicht** in das PHP-Backend einspielen; einen Importweg gibt es nicht. Sie sind nur mit der alten Version restorebar. Siehe [Upgrade – Installationen mit dem früheren Node-Backend](upgrade.md#installationen-mit-dem-früheren-node-backend).
 
@@ -80,7 +80,7 @@ Die Dateien sind verschlüsselt und dürfen auf fremdem Speicher liegen – **di
 
 ## Restore auf einer frischen Instanz
 
-1. Installation vorbereiten (`git clone`, gleiche oder neuere App-Version) und die **gesicherte `.env`** übernehmen – nicht neu erzeugen, ein anderer `MASTER_KEY` macht das Backup unlesbar.
+1. Installation vorbereiten (`git clone`, gleiche oder neuere App-Version) und die **gesicherte `.env`** übernehmen – nicht neu erzeugen, ein anderer `MASTER_KEY` macht das Backup unlesbar. War der Key erzeugt (#164), die gesicherten Zeilen aus `bin/secrets.php export` vor dem ersten Start in die `.env` schreiben.
 2. Images bauen (bzw. bei Release-Images `pull`) und nur die Datenbank starten (der php-Container würde sonst schon das Schema anlegen und die Einrichtung anbieten):
 
    ```sh

@@ -8,13 +8,13 @@ Ohne eigenen Server, auf Webspace mit PHP und MySQL/MariaDB (FTP + Cron): [Insta
 
 ## 1. Voraussetzungen
 
-| Was          | Anforderung                                                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Betriebssys. | Linux, `linux/arm64` (z. B. Raspberry Pi 4/5 mit 64-Bit-OS) oder `linux/amd64`                                                                              |
-| Hardware     | min. 1 vCPU, 1 GB RAM (+ Swap/zram), 8 GB Disk **+ Postfachgröße**; empfohlen 2 GB RAM, 32 GB Disk – Details: [Systemanforderungen](system-requirements.md) |
-| Software     | Docker Engine mit **Compose v2** (`docker compose version` funktioniert), `git`, `openssl` (für `scripts/setup-env.sh`). Rootless Docker ist getestet       |
-| Domain       | ein DNS-Name (z. B. `mail.example.org`) mit A- bzw. AAAA-Eintrag auf die öffentliche IP des Servers                                                         |
-| Netzwerk     | Ports **80** und **443** aus dem Internet erreichbar (Let's Encrypt prüft über Port 80/443, Caddy holt das Zertifikat automatisch)                          |
+| Was          | Anforderung                                                                                                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Betriebssys. | Linux, `linux/arm64` (z. B. Raspberry Pi 4/5 mit 64-Bit-OS) oder `linux/amd64`                                                                                          |
+| Hardware     | min. 1 vCPU, 1 GB RAM (+ Swap/zram), 8 GB Disk **+ Postfachgröße**; empfohlen 2 GB RAM, 32 GB Disk – Details: [Systemanforderungen](system-requirements.md)             |
+| Software     | Docker Engine mit **Compose v2** (`docker compose version` funktioniert), `git`, `openssl` (nur für das optionale `scripts/setup-env.sh`). Rootless Docker ist getestet |
+| Domain       | ein DNS-Name (z. B. `mail.example.org`) mit A- bzw. AAAA-Eintrag auf die öffentliche IP des Servers                                                                     |
+| Netzwerk     | Ports **80** und **443** aus dem Internet erreichbar (Let's Encrypt prüft über Port 80/443, Caddy holt das Zertifikat automatisch)                                      |
 
 **Ohne Domain (nur Test im LAN):** Mit `DOMAIN=:80` läuft die Instanz per HTTP ohne TLS. Das reicht zum Ausprobieren im Browser am Rechner, aber **nicht** für den Alltag: Browser aktivieren Service Worker, App-Installation, Offline-Modus und Web Push nur über HTTPS (Ausnahme: `localhost`). Auf iPhone/iPad funktionieren Push und Installation also nur mit Domain und TLS.
 
@@ -50,11 +50,16 @@ Alle weiteren Befehle laufen in diesem Verzeichnis.
 
 ## 3. Konfiguration erzeugen (`.env`)
 
+Zwei Wege, beide gleichwertig:
+
+- **Automatisch (ohne Skript):** Keine Secrets eintragen. Beim ersten `docker compose up` erzeugt der einmalige Dienst `secrets` den `MASTER_KEY`, das VAPID-Schlüsselpaar und das Datenbankpasswort im Volume `app-secrets` (#164, [ADR-0016](../adr/0016-generated-secrets.md)). In die `.env` gehören dann nur `DOMAIN` und `VAPID_SUBJECT` (Schritt 4); ohne `.env` läuft die Instanz unter `:80`. Den erzeugten Key nach dem ersten Start sichern (Kasten unten); die Einrichtungsseite erinnert daran.
+- **Mit Skript:** Es braucht nur `openssl` und schreibt die Secrets direkt in die `.env`:
+
 ```sh
 ./scripts/setup-env.sh        # oder: make env
 ```
 
-Das Skript braucht nur `openssl` und schreibt eine `.env` (Rechte `0600`) mit:
+Das Skript schreibt eine `.env` (Rechte `0600`) mit:
 
 | Variable                                | Inhalt                                                        |
 | --------------------------------------- | ------------------------------------------------------------- |
@@ -67,6 +72,8 @@ Das Skript braucht nur `openssl` und schreibt eine `.env` (Rechte `0600`) mit:
 Eine vorhandene `.env` wird nie überschrieben. Alle weiteren Einstellungen haben sinnvolle Standardwerte; die vollständige Liste steht in [Konfiguration](configuration.md) und in `.env.example`.
 
 > **Den `MASTER_KEY` jetzt sichern – getrennt vom Server und von den Backups** (Passwortmanager, Ausdruck im Safe). Alle Mails und Zugangsdaten sind damit verschlüsselt. Geht er verloren, sind Datenbank und Backups wertlos; es gibt keine Hintertür. Die `.env` nie in Git committen.
+>
+> Beim automatischen Weg zeigt `docker compose exec php php bin/secrets.php export` die erzeugten Werte als `.env`-Zeilen – diese Ausgabe sichern. Wer sie in die `.env` übernimmt, macht die Instanz unabhängig vom Volume (`DB_PASSWORD` heißt dort `MARIADB_PASSWORD`). **Nie einen anderen `MASTER_KEY` in die `.env` schreiben**: Werte aus der `.env` haben Vorrang, und mit einem fremden Key sind die vorhandenen Daten unlesbar (der Dienst `secrets` warnt dann im Log).
 
 ## 4. Domain eintragen
 
@@ -173,7 +180,7 @@ Push-Nachrichten enthalten bewusst **keinen Betreff, Absender oder Inhalt** – 
 ## 9. Nach der Installation
 
 1. **Backup einrichten** (Cron, Offsite-Kopie): [Backup & Restore](backup-restore.md) – und ein erstes Backup mit `verify` prüfen.
-2. **`.env`/`MASTER_KEY`** liegt an einem zweiten, sicheren Ort (siehe Schritt 3).
+2. **`.env`/`MASTER_KEY`** (bzw. die Ausgabe von `bin/secrets.php export`) liegt an einem zweiten, sicheren Ort (siehe Schritt 3).
 3. **Upgrades** immer mit `./scripts/upgrade.sh`: [Upgrade](upgrade.md).
 4. Bei Problemen: [Troubleshooting](troubleshooting.md).
 
