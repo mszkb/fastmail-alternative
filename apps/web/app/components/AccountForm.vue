@@ -5,19 +5,29 @@
 // Provider presets (#117): picking a provider (or typing an address of a
 // known domain) fills server, ports and user name and shows how to get the
 // password the provider expects (e.g. an app password at Fastmail).
+// Unknown domains (#165): the server detects the settings (autoconfig,
+// ISPDB, DNS SRV, MX); they only pre-fill fields the user has not typed.
 // Sign-in with Google/Microsoft (#36): offered for the Gmail and Microsoft
 // presets when the server has the provider configured; OAuth accounts sign
 // in again instead of editing credentials.
 import {
+  AUTOCONFIG_SOURCE_LABELS,
   OAUTH_PROVIDER_LABELS,
   PROVIDER_PRESETS,
   SYNC_SINCE_CHOICES,
+  autoconfigDomain,
+  autoconfigFields,
   presetById,
   presetFields,
   presetForAddress,
   syncSinceFromDays,
 } from '@fma/shared'
-import type { OAuthProviderId, OAuthProvidersResponse, ProviderPreset } from '@fma/shared'
+import type {
+  AutoconfigResponse,
+  OAuthProviderId,
+  OAuthProvidersResponse,
+  ProviderPreset,
+} from '@fma/shared'
 
 interface EditableAccount {
   id: string
@@ -106,7 +116,75 @@ function clearAutoPreset(previous: ProviderPreset): void {
 
 function onPresetChange(): void {
   presetChosenByUser = true
+  detectionRun++
+  detection.value = 'idle'
+  detectedFields = null
   applyPreset()
+}
+
+// Settings detection (#165): state of the hint, the values it filled in
+// (only those are replaced or cleared later) and a counter against
+// answers for an address that has changed meanwhile.
+const detection = ref<'idle' | 'busy' | 'found' | 'none'>('idle')
+const detectionSource = ref('')
+let detectedFields: { imapHost: string; smtpHost: string; user: string } | null = null
+let detectionRun = 0
+
+/** Drops values the detection filled in and the user has not changed since. */
+function clearDetected(): void {
+  if (detectedFields) {
+    if (imapHost.value === detectedFields.imapHost) imapHost.value = ''
+    if (smtpHost.value === detectedFields.smtpHost) smtpHost.value = ''
+    if (imapUser.value === detectedFields.user) imapUser.value = ''
+  }
+  detectedFields = null
+  detection.value = 'idle'
+}
+
+async function detectSettings(): Promise<void> {
+  const run = ++detectionRun
+  const domain = autoconfigDomain(emailAddress.value)
+  if (!domain) {
+    clearDetected()
+    return
+  }
+  // A typed (or preset) server stays; only empty or detected fields are filled.
+  const free = (value: string, detected?: string): boolean => !value || value === detected
+  if (!free(imapHost.value, detectedFields?.imapHost)) {
+    detectedFields = null
+    detection.value = 'idle'
+    return
+  }
+  detection.value = 'busy'
+  let result: AutoconfigResponse | null = null
+  try {
+    const res = await fetch(`/api/autoconfig?domain=${encodeURIComponent(domain)}`)
+    if (res.ok) result = (await res.json()) as AutoconfigResponse
+  } catch {
+    // Offline: manual input as before.
+  }
+  if (run !== detectionRun || presetId.value) return
+  const fields = result ? autoconfigFields(result, emailAddress.value) : undefined
+  const previous = detectedFields
+  if (!fields || !result?.source) {
+    clearDetected()
+    detection.value = 'none'
+    return
+  }
+  if (free(imapHost.value, previous?.imapHost)) {
+    imapHost.value = fields.imapHost
+    imapPort.value = fields.imapPort
+  }
+  if (fields.smtpHost && free(smtpHost.value, previous?.smtpHost)) {
+    smtpHost.value = fields.smtpHost
+    smtpPort.value = fields.smtpPort ?? smtpPort.value
+  }
+  if (free(imapUser.value, previous?.user) || imapUser.value.includes('@')) {
+    imapUser.value = fields.user
+  }
+  detectedFields = { imapHost: imapHost.value, smtpHost: smtpHost.value, user: imapUser.value }
+  detectionSource.value = AUTOCONFIG_SOURCE_LABELS[result.source]
+  detection.value = 'found'
 }
 
 /** Known address domain: suggest its preset once, unless chosen by hand. */
@@ -114,10 +192,16 @@ function onAddressChange(): void {
   if (editing.value) return
   const detected = presetForAddress(emailAddress.value)
   if (detected && !presetChosenByUser && presetId.value !== detected.id) {
+    detectionRun++
+    detection.value = 'idle'
+    detectedFields = null
     presetId.value = detected.id
     applyPreset()
   } else if (!detected && !presetChosenByUser && preset.value) {
     clearAutoPreset(preset.value)
+    void detectSettings()
+  } else if (!detected && !presetChosenByUser) {
+    void detectSettings()
   } else if (preset.value && (!imapUser.value || imapUser.value.includes('@'))) {
     imapUser.value = emailAddress.value.trim()
   }
@@ -332,6 +416,8 @@ async function submit(): Promise<void> {
     syncChoice.value = 'all'
     presetId.value = ''
     presetChosenByUser = false
+    detection.value = 'idle'
+    detectedFields = null
     emit('created')
   } catch {
     error.value = 'API nicht erreichbar.'
@@ -382,6 +468,22 @@ async function submit(): Promise<void> {
       role="note"
     >
       {{ preset.hint }}
+    </p>
+    <p
+      v-if="!editing && !preset && detection !== 'idle'"
+      class="preset-hint"
+      :class="{ muted: detection !== 'found' }"
+      role="status"
+      data-testid="autoconfig-status"
+    >
+      <template v-if="detection === 'busy'">Suche Server-Einstellungen für diese Domain …</template>
+      <template v-else-if="detection === 'found'"
+        >Server-Einstellungen automatisch erkannt ({{ detectionSource }}). Bitte prüfen – der
+        Verbindungstest bestätigt sie.</template
+      >
+      <template v-else
+        >Keine Server-Einstellungen gefunden – bitte IMAP und SMTP selbst eintragen.</template
+      >
     </p>
     <div v-if="canSignIn" class="oauth">
       <button type="button" :disabled="busy" @click="signIn">
@@ -521,6 +623,11 @@ async function submit(): Promise<void> {
   margin: var(--fma-space-3) 0 0;
   font-size: var(--fma-text-sm);
   font-weight: 600;
+}
+
+.preset-hint.muted {
+  border-left-color: var(--fma-border-strong);
+  background: var(--color-base-100);
 }
 
 .preset-hint.blocked {

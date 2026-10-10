@@ -50,6 +50,7 @@ final class App
      * @param list<RateLimitRule>|null $rateLimits defaults to RateLimitRule::defaults()
      * @param ConnectionTester|null $tester IMAP/SMTP connection test; tests inject a fake
      * @param TokenClient|null $tokens OAuth token endpoint client; tests inject a fake
+     * @param Mail\Autoconfig|null $autoconfig settings detection (#165); tests inject one with fakes
      *
      * @return SlimApp<\Psr\Container\ContainerInterface|null>
      */
@@ -60,6 +61,7 @@ final class App
         ?array $rateLimits = null,
         ?ConnectionTester $tester = null,
         ?TokenClient $tokens = null,
+        ?Mail\Autoconfig $autoconfig = null,
     ): SlimApp {
         $db ??= new Database($config);
         $logger ??= new Logger('api', $config->get('LOG_LEVEL', 'info'));
@@ -88,6 +90,8 @@ final class App
         $tester ??= new SocketConnectionTester($config, $logger);
         (new AccountRoutes($db, $config, $tester, $jobs))->register($app, $requireAuth);
         (new Routes\OAuthRoutes($db, $config, $tester, $jobs, $logger, $tokens))->register($app, $requireAuth);
+        $autoconfig ??= new Mail\Autoconfig(new Mail\StreamHttpsGetter(), $config->get('AUTOCONFIG_ISPDB', '1') !== '0');
+        (new Routes\AutoconfigRoutes($autoconfig))->register($app, $requireAuth);
         (new IdentityRoutes($db))->register($app, $requireAuth);
         (new PushRoutes($config, new Subscriptions($db, $config)))->register($app, $requireAuth);
         (new Routes\ConfigTransferRoutes($db, $config, $logger))->register($app, $requireAuth);

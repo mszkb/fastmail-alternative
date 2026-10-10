@@ -161,3 +161,69 @@ export function presetFields(
     user: address.trim(),
   }
 }
+
+/** A server found by `GET /api/autoconfig` (#165). */
+export interface AutoconfigServer {
+  host: string
+  port: number
+}
+
+export type AutoconfigSource = 'autoconfig' | 'well-known' | 'ispdb' | 'srv' | 'mx'
+
+/** Response of `GET /api/autoconfig?domain=` (#165). */
+export interface AutoconfigResponse {
+  found: boolean
+  source?: AutoconfigSource
+  imap?: AutoconfigServer
+  smtp?: AutoconfigServer | null
+  /** User name the provider expects: the full address or its local part. */
+  username?: 'address' | 'localpart'
+}
+
+/** German names of the sources, for the hint under the detected values. */
+export const AUTOCONFIG_SOURCE_LABELS: Record<AutoconfigSource, string> = {
+  autoconfig: 'Autoconfig des Anbieters',
+  'well-known': 'Autoconfig des Anbieters',
+  ispdb: 'Thunderbird-Anbieterdatenbank',
+  srv: 'DNS-Einträge der Domain',
+  mx: 'Mailserver der Domain (MX) und Thunderbird-Anbieterdatenbank',
+}
+
+const DOMAIN_RE =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+/**
+ * The domain to detect settings for: only for a complete address whose
+ * domain has no preset (presets win and need no request).
+ */
+export function autoconfigDomain(address: string): string | undefined {
+  const parts = address.trim().toLowerCase().split('@')
+  if (parts.length !== 2 || !parts[0]) return undefined
+  const domain = parts[1]!.replace(/\.$/, '')
+  if (!DOMAIN_RE.test(domain) || presetForAddress(address)) return undefined
+  return domain
+}
+
+/** Form values from a detection result; SMTP stays undefined when none was found. */
+export function autoconfigFields(
+  result: AutoconfigResponse,
+  address: string,
+):
+  | {
+      imapHost: string
+      imapPort: number
+      smtpHost?: string
+      smtpPort?: number
+      user: string
+    }
+  | undefined {
+  if (!result.found || !result.imap) return undefined
+  const trimmed = address.trim()
+  const user = result.username === 'localpart' ? trimmed.split('@')[0]! : trimmed
+  return {
+    imapHost: result.imap.host,
+    imapPort: result.imap.port,
+    ...(result.smtp ? { smtpHost: result.smtp.host, smtpPort: result.smtp.port } : {}),
+    user,
+  }
+}
