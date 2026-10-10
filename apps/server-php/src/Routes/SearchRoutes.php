@@ -100,7 +100,7 @@ final class SearchRoutes
         }
 
         try {
-            $context = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+            $context = AccountContext::load($pdo, $accountId, $this->config);
             $provider = $this->searchProvider($context, $folders, $query);
         } catch (SearchFailure $e) {
             // Code only: provider responses may echo the query.

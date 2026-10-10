@@ -117,6 +117,7 @@ final class ConfigTransferTest extends DatabaseTestCase
             'emailAddress' => 'work@example.org',
             'sortOrder' => 3,
             'credentialKind' => 'password',
+            'oauthProvider' => null,
             'syncSince' => '2026-01-15T00:00:00.000Z',
             'imap' => ['host' => 'imap.example.org', 'port' => 993, 'user' => 'imap-user'],
             'smtp' => ['host' => 'smtp.example.org', 'port' => 587, 'user' => 'imap-user'],

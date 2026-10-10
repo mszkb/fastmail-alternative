@@ -10,6 +10,9 @@ declare(strict_types=1);
 //   {"capabilities": "IMAP4rev1 CONDSTORE", "highestModseq": 12 | null (NOMODSEQ),
 //    "uids": [1, 2], "flags": {"1": ["\\Seen"]}, "modseqs": {"1": 12}}
 // Every command line is appended to the log (LOGIN without credentials).
+// With "oauthUser"/"oauthToken" in the state, AUTHENTICATE XOAUTH2 checks the
+// SASL response (inline with SASL-IR, else after a continuation) and answers
+// a wrong token like Gmail: an error challenge, then NO.
 // One connection at a time, which is all message_sync uses.
 
 [, $stateFile, $logFile] = $argv;
@@ -32,8 +35,29 @@ while (($conn = @stream_socket_accept($server, -1)) !== false) {
         }
         [, $tag, $command, $rest] = $m;
         $command = strtoupper($command);
-        file_put_contents($logFile, ($command === 'LOGIN' ? "{$tag} LOGIN" : $line) . "\n", FILE_APPEND);
+        file_put_contents($logFile, match ($command) {
+            'LOGIN' => "{$tag} LOGIN",
+            'AUTHENTICATE' => "{$tag} AUTHENTICATE " . strtoupper(explode(' ', trim($rest))[0]),
+            default => $line,
+        } . "\n", FILE_APPEND);
         $box = $state();
+        if ($command === 'AUTHENTICATE') {
+            $parts = explode(' ', trim($rest));
+            $response = $parts[1] ?? null;
+            if ($response === null) {
+                fwrite($conn, "+ \r\n");
+                $response = rtrim((string) fgets($conn), "\r\n");
+            }
+            $expected = 'user=' . ($box['oauthUser'] ?? '') . "\x01auth=Bearer " . ($box['oauthToken'] ?? '') . "\x01\x01";
+            if (strtoupper($parts[0]) === 'XOAUTH2' && isset($box['oauthToken']) && base64_decode($response, true) === $expected) {
+                fwrite($conn, "{$tag} OK authenticated\r\n");
+            } else {
+                fwrite($conn, '+ ' . base64_encode('{"status":"400","schemes":"Bearer","scope":"https://mail.google.com/"}') . "\r\n");
+                fgets($conn);
+                fwrite($conn, "{$tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n");
+            }
+            continue;
+        }
         $out = '';
         switch ($command) {
             case 'CAPABILITY':

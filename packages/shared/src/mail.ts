@@ -3,6 +3,8 @@
  * All human-readable fields are decrypted server-side for the logged-in user.
  */
 
+import type { OAuthProviderId } from './oauth'
+
 export interface MailPerson {
   name: string
   address: string
@@ -404,6 +406,9 @@ export interface AccountSummary {
    * running; clients poll briefly until it is done (roadmap 4.5).
    */
   syncing: boolean
+  /** `oauth2`: sign-in with Google/Microsoft (#36); absent in older caches. */
+  credentialKind?: 'password' | 'oauth2'
+  oauthProvider?: OAuthProviderId | null
 }
 
 /** `GET /api/accounts` */
@@ -435,6 +440,10 @@ export type AccountErrorCode =
   | 'CREDENTIALS_REQUIRED'
   /** Provider throttling or too many connections (roadmap 3.5): backoff. */
   | 'RATE_LIMITED'
+  /** OAuth account (#36): the grant was revoked or expired - sign in again. */
+  | 'OAUTH_EXPIRED'
+  /** OAuth account whose provider is no longer configured on the server. */
+  | 'OAUTH_NOT_CONFIGURED'
 
 export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   AUTH_FAILED: 'Der Mailserver hat die Zugangsdaten abgelehnt.',
@@ -452,6 +461,9 @@ export const ACCOUNT_ERROR_MESSAGES: Record<AccountErrorCode, string> = {
   CREDENTIALS_REQUIRED: 'Das Konto wurde importiert – das Passwort muss neu eingegeben werden.',
   RATE_LIMITED:
     'Der Mailanbieter bremst gerade (zu viele Verbindungen oder Anfragen); der Abgleich pausiert kurz.',
+  OAUTH_EXPIRED: 'Die Anmeldung beim Anbieter ist abgelaufen oder wurde widerrufen.',
+  OAUTH_NOT_CONFIGURED:
+    'Die Anmeldung über diesen Anbieter ist auf dem Server nicht (mehr) richtig eingerichtet – Betreiber informieren (z. B. Client-Secret abgelaufen).',
 }
 
 export interface AccountStatusInfo {
@@ -465,11 +477,20 @@ export interface AccountStatusInfo {
 
 /** Status explanation for the UI; null for a healthy account. */
 export function accountStatusInfo(
-  account: Pick<AccountSummary, 'status' | 'lastErrorCode'>,
+  account: Pick<AccountSummary, 'status' | 'lastErrorCode' | 'credentialKind'>,
 ): AccountStatusInfo | null {
   const reason = account.lastErrorCode ? ACCOUNT_ERROR_MESSAGES[account.lastErrorCode] : ''
   switch (account.status) {
     case 'auth_error':
+      if (account.credentialKind === 'oauth2') {
+        return {
+          label: 'Neu anmelden',
+          description:
+            `${reason || ACCOUNT_ERROR_MESSAGES.OAUTH_EXPIRED} Der Abgleich dieses Kontos ist ` +
+            'angehalten bis zur neuen Anmeldung beim Anbieter. Andere Konten sind nicht betroffen.',
+          action: 'Neu anmelden',
+        }
+      }
       return {
         label:
           account.lastErrorCode === 'CREDENTIALS_REQUIRED'

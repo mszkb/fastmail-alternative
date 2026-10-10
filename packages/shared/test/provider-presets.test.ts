@@ -41,3 +41,11 @@ describe('provider presets', () => {
     }
   })
 })
+
+describe('oauth presets (#36)', () => {
+  it('links Gmail and Microsoft to their OAuth providers', () => {
+    expect(presetById('gmail')?.oauth).toBe('google')
+    expect(presetById('microsoft')?.oauth).toBe('microsoft')
+    expect(presetById('fastmail')?.oauth).toBeUndefined()
+  })
+})

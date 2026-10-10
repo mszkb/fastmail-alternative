@@ -92,7 +92,7 @@ final class DraftSyncJob implements JobHandler
             return false;
         }
 
-        $ctx = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+        $ctx = AccountContext::load($pdo, $accountId, $this->config);
         $upload = null;
         $updatedAt = new \DateTimeImmutable($row['updated_at'], new \DateTimeZone('UTC'));
         if (!$deleted && $drafts !== false) {

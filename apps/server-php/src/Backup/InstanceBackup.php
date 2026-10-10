@@ -38,7 +38,7 @@ use Fma\Jobs\Runner;
  *
  * Order: H, (T R* E) per table, (F D* E) per file, M+, Z. Exported are all
  * tables created in migrations/*.sql except runtime state (rate_limit, search_result,
- * login_lockout, metric_counter) and schema_migrations (whose names are in
+ * login_lockout, metric_counter, oauth_state) and schema_migrations (whose names are in
  * the header); generated columns are left out.
  *
  * - Memory stays bounded: the tables are read unbuffered (one row at a
@@ -66,7 +66,7 @@ final class InstanceBackup
     public const FORMAT = 'fma-backup-mysql';
     public const VERSION = 1;
     /** Not backed up: runtime state, and the migration bookkeeping (header). */
-    public const EXCLUDED_TABLES = ['rate_limit', 'login_lockout', 'metric_counter', 'search_result', 'schema_migrations'];
+    public const EXCLUDED_TABLES = ['rate_limit', 'login_lockout', 'metric_counter', 'search_result', 'schema_migrations', 'oauth_state'];
     /** Tables with rows even in a fresh instance: ignored by the emptiness check. */
     private const SEED_TABLES = ['sequence_counter', 'app_state'];
     public const FILE_PATTERN = 'fma-backup-*.fmabk';

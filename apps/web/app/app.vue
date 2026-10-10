@@ -49,11 +49,14 @@ import {
   onlyQueuedSyncs,
   syncStatusFromAccounts,
   unreadBadgeCount,
+  oauthResultFromQuery,
+  withoutOAuthResult,
 } from '@fma/shared'
 import type {
   AccountListResponse,
   AccountSummary,
   AccountSyncStatus,
+  OAuthResult,
   ReadingPane,
   SyncStatusResponse,
   ThemeLayout,
@@ -67,6 +70,7 @@ import {
   enableOfflineData,
 } from '~/utils/offline-store'
 import {
+  addNotice,
   dismissNotice,
   isOffline,
   loadQueue,
@@ -456,6 +460,32 @@ function onWorkerMessage(event: MessageEvent): void {
   if (data?.type === 'SYNC_REQUEST') void syncNow(true)
 }
 
+// Sign-in with Google/Microsoft (#36): the server sends the browser back to
+// /?oauth=...; the result is shown once the session is confirmed.
+let pendingOAuth: OAuthResult | null = null
+
+function takeOAuthResult(): void {
+  pendingOAuth = oauthResultFromQuery(location.search)
+  if (!pendingOAuth) return
+  history.replaceState(
+    history.state,
+    '',
+    `${location.pathname}${withoutOAuthResult(location.search)}${location.hash}`,
+  )
+}
+
+function showOAuthResult(): void {
+  const result = pendingOAuth
+  pendingOAuth = null
+  if (!result) return
+  addNotice(result.message)
+  if (result.ok && result.accountId && accounts.value.some((a) => a.id === result.accountId)) {
+    void selectAccount(result.accountId)
+  } else if (!result.ok) {
+    section.value = 'settings'
+  }
+}
+
 /** Opens the edit form of an account in the settings (e.g. new credentials). */
 function editAccount(id: string): void {
   editAccountId.value = id
@@ -714,6 +744,7 @@ async function enterApp(userEmail: string): Promise<void> {
   await loadDevices()
   await loadSettings()
   await loadAccounts()
+  showOAuthResult()
   void syncNow(true)
 }
 
@@ -869,6 +900,7 @@ async function logout(): Promise<void> {
 
 onMounted(() => {
   onUnauthorized(() => void handleUnauthorized())
+  takeOAuthResult()
   void loadStatus()
   accountTimer = setInterval(refreshAccounts, ACCOUNT_REFRESH_MS)
   window.addEventListener('focus', onForeground)

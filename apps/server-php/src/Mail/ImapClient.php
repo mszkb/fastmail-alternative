@@ -35,11 +35,15 @@ final class ImapClient
                 $client->socket->startTls();
                 $client->capabilities = $client->fetchCapabilities();
             }
-            if (\in_array('LOGINDISABLED', $client->capabilities, true)) {
+            if ($config->oauthToken === null && \in_array('LOGINDISABLED', $client->capabilities, true)) {
                 throw new MailException('AUTH_FAILED', 'login disabled');
             }
             try {
-                $client->login($config->user, $config->password);
+                if ($config->oauthToken !== null) {
+                    $client->authenticateXoauth2($config);
+                } else {
+                    $client->login($config->user, $config->password);
+                }
             } catch (MailException $e) {
                 throw $e->errorCode === 'PROTOCOL' ? new MailException('AUTH_FAILED', 'login rejected') : $e;
             }
@@ -72,6 +76,40 @@ final class ImapClient
             throw new MailException('PROTOCOL', 'no continuation');
         }
         $this->socket->write(base64_encode("\0{$user}\0{$password}") . "\r\n");
+        $this->finish($tag);
+    }
+
+    /**
+     * AUTHENTICATE XOAUTH2, with the initial response inline when the server
+     * supports SASL-IR. A failed token gets a `+` challenge with an error
+     * description, answered with an empty line before the tagged NO.
+     */
+    private function authenticateXoauth2(HostConfig $config): void
+    {
+        $tag = 'A' . (++$this->tag);
+        if (\in_array('SASL-IR', $this->capabilities, true)) {
+            $this->socket->write("{$tag} AUTHENTICATE XOAUTH2 " . $config->xoauth2() . "\r\n");
+        } else {
+            $this->socket->write("{$tag} AUTHENTICATE XOAUTH2\r\n");
+            if (!str_starts_with($this->socket->readLine(), '+')) {
+                throw new MailException('PROTOCOL', 'no continuation');
+            }
+            $this->socket->write($config->xoauth2() . "\r\n");
+        }
+        $line = $this->socket->readLine();
+        if (str_starts_with($line, '+')) {
+            $this->socket->write("\r\n");
+            $this->finish($tag);
+
+            return;
+        }
+        if (str_starts_with($line, "{$tag} ")) {
+            if (strtoupper(substr($line, \strlen($tag) + 1, 2)) !== 'OK') {
+                throw new MailException('PROTOCOL', 'command rejected');
+            }
+
+            return;
+        }
         $this->finish($tag);
     }
 

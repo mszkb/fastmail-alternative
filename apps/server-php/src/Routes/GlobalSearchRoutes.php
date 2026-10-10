@@ -216,7 +216,7 @@ final class GlobalSearchRoutes
             $folders = ProviderSearch::folders($pdo, $accountId, $folderId, $includeJunk);
             try {
                 $accountDeadline = min($deadline, microtime(true) + self::ACCOUNT_DEADLINE_SECONDS);
-                $context = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+                $context = AccountContext::load($pdo, $accountId, $this->config);
                 $client = ProviderSearch::connect($this->policy(), $context, max(1.0, min(self::CONNECT_TIMEOUT_SECONDS, $accountDeadline - microtime(true))));
                 $this->clients[$accountId] = $client;
                 $found = ProviderSearch::search($client, $folders, $criteria, $accountDeadline);
@@ -480,7 +480,7 @@ final class GlobalSearchRoutes
             if ($this->rateLimiter->hit('GET', 'search', $accountId) > 0) {
                 throw new SearchFailure('RATE_LIMITED', 429, 'Zu viele Suchanfragen.');
             }
-            $context = AccountContext::load($this->db->pdo(), $accountId, $this->config->get('MASTER_KEY'));
+            $context = AccountContext::load($this->db->pdo(), $accountId, $this->config);
             $timeout = min(self::CONNECT_TIMEOUT_SECONDS, $this->requestDeadline - microtime(true) - 1.0);
             $this->clients[$accountId] = ProviderSearch::connect($this->policy(), $context, max(1.0, $timeout));
         }

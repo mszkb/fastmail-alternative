@@ -70,6 +70,8 @@ components:
         - JOB_TIMEOUT
         - CREDENTIALS_REQUIRED
         - RATE_LIMITED
+        - OAUTH_EXPIRED
+        - OAUTH_NOT_CONFIGURED
     HostPort:
       type: object
       required:
@@ -100,6 +102,8 @@ components:
         - syncSince
         - unreadCount
         - syncing
+        - credentialKind
+        - oauthProvider
       properties:
         id:
           type: string
@@ -151,6 +155,17 @@ components:
         syncing:
           type: boolean
           description: A sync is queued or running (false in create/update responses).
+        credentialKind:
+          type: string
+          enum:
+            - password
+            - oauth2
+          description: "`oauth2`: sign-in with Google/Microsoft; new sign-in via POST /api/oauth/{provider}/start with `accountId`."
+        oauthProvider:
+          description: Provider of an `oauth2` account; null for password accounts.
+          oneOf:
+            - $ref: "#/components/schemas/OAuthProvider"
+            - type: "null"
     AccountListResponse:
       type: object
       required:
@@ -1294,6 +1309,11 @@ components:
           enum:
             - password
             - oauth2
+        oauthProvider:
+          description: Provider of an `oauth2` account (the export always sets it). An imported `oauth2` account without a known provider becomes a password account; with one it waits for a new sign-in (`OAUTH_EXPIRED`).
+          oneOf:
+            - $ref: "#/components/schemas/OAuthProvider"
+            - type: "null"
         syncSince:
           type:
             - string
@@ -1911,6 +1931,59 @@ components:
           type: integer
           minimum: 0
           description: Attachments not copied (size, count or pending limits).
+    OAuthProvider:
+      type: string
+      enum:
+        - google
+        - microsoft
+    OAuthProvidersResponse:
+      type: object
+      required:
+        - providers
+        - redirectUri
+      properties:
+        providers:
+          type: object
+          required:
+            - google
+            - microsoft
+          properties:
+            google:
+              type: boolean
+            microsoft:
+              type: boolean
+        redirectUri:
+          type:
+            - string
+            - "null"
+    OAuthStartRequest:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          description: Sign in again for this existing account.
+    OAuthStartResponse:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+    OAuthStartConflict:
+      type: object
+      required:
+        - message
+        - code
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          enum:
+            - NOT_CONFIGURED
+            - NO_PUBLIC_URL
     GlobalSearchItem:
       type: object
       description: |
@@ -3875,6 +3948,116 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorMessage"
+  /api/oauth/{provider}/start:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: startOAuth
+      tags:
+        - accounts
+      summary: Start the sign-in with an OAuth provider
+      description: |
+        Returns the authorization URL (code flow with PKCE); the PWA
+        navigates there. The state is single use and valid for 10 minutes.
+        With `accountId` an existing `oauth2` account of this provider signs
+        in again (expired or revoked grant); the provider must then return
+        the same mailbox. The result comes back via GET /api/oauth/callback.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OAuthStartRequest"
+      responses:
+        "200":
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthStartResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Unknown provider, or `accountId` is not an `oauth2` account of this provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "409":
+          description: Provider not configured (`NOT_CONFIGURED`) or no public address (`NO_PUBLIC_URL`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthStartConflict"
+  /api/oauth/callback:
+    get:
+      operationId: oauthCallback
+      tags:
+        - accounts
+      summary: Redirect target of the OAuth provider
+      security: []
+      description: |
+        Called by the browser coming back from the provider, without the
+        session cookie (SameSite=Strict); the state identifies the sign-in.
+        Exchanges the code, tests IMAP and SMTP with XOAUTH2, then creates
+        the account or stores new tokens for the existing one, and queues a
+        folder sync. Always answers with a redirect to the PWA:
+        `/?oauth=connected&account={id}` or
+        `/?oauth=error&reason={reason}[&code={AccountErrorCode}]` with reason
+        one of `state`, `denied`, `not_configured`, `invalid_client`, `provider`, `network`,
+        `no_refresh_token`, `no_email`, `invalid_grant`, `imap`, `smtp`,
+        `wrong_account`, `limit`.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect to the PWA with the result
+          headers:
+            Location:
+              schema:
+                type: string
+  /api/oauth/providers:
+    get:
+      operationId: listOAuthProviders
+      tags:
+        - accounts
+      summary: OAuth providers configured on this instance
+      description: |
+        Sign-in with Google or Microsoft (ADR-0011) is offered only for
+        providers whose client id and secret are configured
+        (`OAUTH_GOOGLE_*`, `OAUTH_MICROSOFT_*`). `redirectUri` is the address
+        to register at the provider; null without `PUBLIC_URL`/`DOMAIN`.
+      responses:
+        "200":
+          description: Configured providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthProvidersResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /api/outbox:
     post:
       operationId: sendMessage
