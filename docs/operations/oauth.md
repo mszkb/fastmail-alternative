@@ -36,9 +36,9 @@ Ein Raspberry Pi nur im Heimnetz ohne öffentliche Adresse genügt: Die Redirect
    - Unterstützte Kontotypen: „Konten in einem beliebigen Organisationsverzeichnis und persönliche Microsoft-Konten“ (für Outlook.com und Microsoft 365). Nur das eigene Microsoft 365: „Nur Konten in diesem Organisationsverzeichnis“ und `OAUTH_MICROSOFT_TENANT` auf die Mandanten-ID setzen.
    - Umleitungs-URI: Plattform **Web**, Redirect-URI von oben.
 2. **Zertifikate & Geheimnisse → Neuer geheimer Clientschlüssel.** Den **Wert** (nicht die Geheimnis-ID) in die `.env` übernehmen. Das Ablaufdatum notieren, siehe [Fehlerbilder](#fehlerbilder).
-3. **API-Berechtigungen → Berechtigung hinzufügen → Microsoft Graph → Delegierte Berechtigungen:**
-   - `IMAP.AccessAsUser.All`, `SMTP.Send`;
-   - `offline_access`, `openid`, `email`.
+3. **API-Berechtigungen → Berechtigung hinzufügen:**
+   - **Von meiner Organisation verwendete APIs → Office 365 Exchange Online → Delegierte Berechtigungen:** `IMAP.AccessAsUser.All`, `SMTP.Send`. Die App fordert genau diese Outlook-Bereiche an (`https://outlook.office.com/…`); die gleichnamigen Einträge unter Microsoft Graph gehören zu einer anderen Ressource.
+   - **Microsoft Graph → Delegierte Berechtigungen:** `offline_access`, `openid`, `email`.
 
    In Organisationen ggf. „Administratorzustimmung erteilen“.
 
