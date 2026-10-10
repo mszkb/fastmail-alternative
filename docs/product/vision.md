@@ -8,6 +8,16 @@ Eine moderne Multi-Account-Mail-Anwendung, die bestehende IMAP-/SMTP-Konten in e
 - Optionale Managed Cloud und optionales Push-Relay sind Komfortfunktionen – sie dürfen **keine künstlichen Sperren** für die Self-hosted-Nutzung erzeugen.
 - Startpunkt ist eine **PWA** mit iOS-Home-Screen-Unterstützung und Web Push.
 - Eine **native iOS-App** ist das langfristige Ziel, aber keine Voraussetzung für das MVP.
+- Die App soll **super einfach** sein – in der Einrichtung wie in der Bedienung, mit **minimalem Setup**.
+
+### Minimales Setup
+
+Vom leeren Server bis zur ersten Mail sollen nur wenige Schritte nötig sein:
+
+- Installation mit einem Befehl (`docker compose up`) bzw. Hochladen auf Shared Hosting – keine zusätzlichen Dienste, die extra eingerichtet werden müssen.
+- Sinnvolle Standardwerte statt Pflichtkonfiguration: Was sich automatisch erzeugen oder erkennen lässt (Schlüssel, Server-Einstellungen der Mailanbieter), wird automatisch erzeugt oder erkannt.
+- Ein Mailkonto hinzufügen heißt im Normalfall: E-Mail-Adresse und Passwort eingeben bzw. per OAuth2 anmelden – fertig.
+- Jede zusätzliche Einstellung, jeder zusätzliche Container und jeder zusätzliche Setup-Schritt muss sich rechtfertigen; im Zweifel wird er weggelassen.
 
 ### Motivation
 
@@ -37,6 +47,7 @@ Daraus folgen die Qualitätsziele: **Geschwindigkeit, gutes UI, konfigurierbare 
 - **Sensible Zugangsdaten und lesbare Mailinhalte** (Betreff, Adressen, Bodies) werden verschlüsselt gespeichert.
 - **Konten bleiben getrennt.** Keine erzwungene Sammel-Inbox; eine Unified Inbox ist optional und standardmäßig aus.
 - **So einfach wie möglich.** Erst die einfachste Lösung, die funktioniert; Komplexität nur bei echtem Bedarf.
+- **Minimales Setup.** Installation und Kontoeinrichtung in wenigen Schritten, mit sinnvollen Standardwerten statt Pflichtkonfiguration.
 
 ## MVP-Funktionsumfang
 
