@@ -180,7 +180,7 @@ services:
         condition: service_healthy
 
   mariadb:
-    image: mariadb:11
+    image: mariadb:13
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 256m
