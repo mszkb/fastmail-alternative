@@ -41,6 +41,8 @@ final class AuthRoutes
         private readonly SetupCode $setupCode,
         private readonly LoginLockout $lockout,
         private readonly Logger $logger,
+        /** MASTER_KEY generated on the first start (#164): the setup page asks to back it up. */
+        private readonly bool $masterKeyGenerated = false,
     ) {}
 
     /** @param App<\Psr\Container\ContainerInterface|null> $app */
@@ -63,7 +65,8 @@ final class AuthRoutes
         }
         [$session, $rotated] = $this->auth->resolve($request);
         $body = ['needsSetup' => $needsSetup, 'authenticated' => $session !== null]
-            + ($session !== null ? ['email' => $session->email] : []);
+            + ($session !== null ? ['email' => $session->email] : [])
+            + ($needsSetup && $this->masterKeyGenerated ? ['masterKeyGenerated' => true] : []);
 
         return $this->auth->finish(Json::write($response, $body), $rotated);
     }

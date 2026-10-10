@@ -89,6 +89,8 @@ interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email?: string
+  /** Setup pending and the MASTER_KEY was generated on the first start (#164). */
+  masterKeyGenerated?: boolean
 }
 
 interface DeviceInfo {
@@ -700,6 +702,8 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+const masterKeyGenerated = ref(false)
+
 async function loadStatus(): Promise<void> {
   let status: AuthStatus
   try {
@@ -723,6 +727,7 @@ async function loadStatus(): Promise<void> {
   // No (longer a) session: nothing of a previous one may stay on the device.
   if (view.value === 'app') await handleUnauthorized()
   else await clearOffline()
+  masterKeyGenerated.value = status.masterKeyGenerated === true
   view.value = status.needsSetup ? 'setup' : 'login'
 }
 
@@ -944,9 +949,13 @@ onBeforeUnmount(() => {
       ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
-        accounts.length > 0 ? 'In allen Konten suchen …' : 'Kein Konto verbunden'
+        accounts.length === 0
+          ? 'Kein Konto verbunden'
+          : isOffline
+            ? 'Gespeicherte Nachrichten durchsuchen …'
+            : 'In allen Konten suchen …'
       "
-      :search-disabled="accounts.length === 0 || isOffline"
+      :search-disabled="accounts.length === 0"
       :menu-open="menuOpen"
       @search="onHeaderSearch"
       @toggle-menu="menuOpen = !menuOpen"
@@ -1227,8 +1236,13 @@ onBeforeUnmount(() => {
           required
       /></label>
       <p class="hint">
-        Steht im Log der API: <code>docker compose logs api</code> (oder
+        Steht im Log der API: <code>docker compose logs php</code> (oder
         <code>SETUP_TOKEN</code> aus <code>.env</code>).
+      </p>
+      <p v-if="masterKeyGenerated" class="warning" role="note" data-testid="master-key-warning">
+        Der Master-Key wurde beim ersten Start automatisch erzeugt. Bitte jetzt getrennt von den
+        Datenbank-Backups sichern: <code>docker compose exec php php bin/secrets.php export</code>.
+        Ohne ihn sind alle Mails und Zugangsdaten verloren.
       </p>
       <label>E-Mail<input v-model="email" type="email" autocomplete="username" required /></label>
       <label
@@ -1499,6 +1513,15 @@ h2 {
   margin: 0 0 var(--fma-space-3);
   font-size: var(--fma-text-sm);
   color: var(--fma-muted);
+}
+
+.warning {
+  margin: 0 0 var(--fma-space-3);
+  padding: var(--fma-space-2) var(--fma-space-3);
+  border-left: 3px solid var(--color-warning);
+  border-radius: 0.25rem;
+  background: var(--fma-warning-soft);
+  font-size: var(--fma-text-sm);
 }
 
 .form label {

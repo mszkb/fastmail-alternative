@@ -955,6 +955,12 @@ components:
           type: string
           format: email
           description: Present only when authenticated.
+        masterKeyGenerated:
+          type: boolean
+          description: |
+            Present (true) only while setup is pending and the MASTER_KEY was
+            generated on the first start (#164) instead of being set by the
+            operator: the setup page asks to back it up.
     LoginRequest:
       type: object
       required:
@@ -1511,6 +1517,47 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRequestResult"
+    AutoconfigServer:
+      type: object
+      additionalProperties: false
+      required:
+        - host
+        - port
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+    AutoconfigResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - found
+      properties:
+        found:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - autoconfig
+            - well-known
+            - ispdb
+            - srv
+            - mx
+        imap:
+          $ref: "#/components/schemas/AutoconfigServer"
+        smtp:
+          oneOf:
+            - $ref: "#/components/schemas/AutoconfigServer"
+            - type: "null"
+        username:
+          type: string
+          enum:
+            - address
+            - localpart
+          description: User name the provider expects - the full address or the part before the `@`.
     SendRecipient:
       description: A recipient of `POST /api/outbox`, either a plain address or `{ name, address }`.
       oneOf:
@@ -3212,6 +3259,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthStatus"
+  /api/autoconfig:
+    get:
+      operationId: detectMailSettings
+      tags:
+        - accounts
+      summary: Detect IMAP/SMTP settings of an address domain
+      description: |
+        Pre-fill for the account form when no provider preset matches. The
+        server tries, in this order (first result wins): the provider's
+        autoconfig (`https://autoconfig.<domain>/mail/config-v1.1.xml`,
+        then `https://<domain>/.well-known/autoconfig/mail/config-v1.1.xml`),
+        the Thunderbird ISPDB (off with `AUTOCONFIG_ISPDB=0`), DNS SRV
+        records (RFC 6186/8314) and the ISPDB entry of the MX host's base
+        domain (`source` names the one that answered). Only the domain is
+        sent - never the address or a password; https only, public hosts
+        only (SSRF protection), at most ~8 s. Servers without TLS are never
+        returned; implicit TLS is preferred over STARTTLS. Nothing found is
+        no error (`found: false`). The connection test of
+        `POST /api/accounts` confirms the values.
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          description: Domain part of the address, e.g. `example.org`
+          schema:
+            type: string
+            maxLength: 253
+      responses:
+        "200":
+          description: Detected settings, or `found` false
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoconfigResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /api/drafts/{id}:
     get:
       operationId: getDraft

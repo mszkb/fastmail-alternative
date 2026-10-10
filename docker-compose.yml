@@ -1,6 +1,9 @@
 # Deployment per ADR-0007/ADR-0013: caddy, web (static PWA), php (php-fpm
 # for /api/*), worker (job loop + IMAP IDLE, same image) and MariaDB.
-# Configuration via .env (see .env.example and scripts/setup-env.sh).
+# Configuration via .env (see .env.example). Without .env the one-shot
+# `secrets` service generates MASTER_KEY, VAPID keys and the database
+# password on the first start (volume app-secrets, #164, ADR-0016); values
+# set in .env always win. scripts/setup-env.sh stays an optional way.
 # Operators who bring their own reverse proxy can remove the caddy service;
 # everything else keeps working.
 #
@@ -18,12 +21,14 @@ x-php-env: &php-env
   DOMAIN: ${DOMAIN:-:80}
   COOKIE_SECURE: ${COOKIE_SECURE:-}
   MAIL_DATA_DIR: /data/mail
-  MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY in .env (scripts/setup-env.sh)}
+  # Empty = generated value from SECRETS_FILE (#164).
+  MASTER_KEY: ${MASTER_KEY:-}
   MASTER_KEY_ID: ${MASTER_KEY_ID:-v1}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   METRICS_TOKEN: ${METRICS_TOKEN:-}
   MAIL_ALLOW_PRIVATE_HOSTS: ${MAIL_ALLOW_PRIVATE_HOSTS:-}
   MAIL_EXTRA_PORTS: ${MAIL_EXTRA_PORTS:-}
+  AUTOCONFIG_ISPDB: ${AUTOCONFIG_ISPDB:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   PUBLIC_URL: ${PUBLIC_URL:-}
   OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
@@ -50,9 +55,29 @@ x-php-env: &php-env
   DB_PORT: '3306'
   DB_NAME: ${MARIADB_DATABASE:-mail}
   DB_USER: ${MARIADB_USER:-mail}
-  DB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+  DB_PASSWORD: ${MARIADB_PASSWORD:-}
+  SECRETS_FILE: /data/secrets/secrets.json
 
 services:
+  # One-shot: generates the secrets .env does not set (never replaces one),
+  # as root so the files get their owners (secrets.json www-data 0600,
+  # mariadb_password root 0400). Logs only names, never values.
+  secrets:
+    image: fma-server-php:local
+    restart: 'no'
+    logging: *default-logging
+    mem_limit: 64m
+    user: root
+    command: ['php', 'bin/secrets.php', 'init']
+    environment:
+      SECRETS_DIR: /data/secrets
+      MASTER_KEY: ${MASTER_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-}
+    volumes:
+      - app-secrets:/data/secrets
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -107,6 +132,7 @@ services:
     volumes:
       # Encrypted raw mails, attachments and uploads (ADR-0001).
       - mail-data:/data/mail
+      - app-secrets:/data/secrets:ro
     environment:
       <<: *php-env
     expose:
@@ -130,6 +156,7 @@ services:
     command: ['php', 'bin/worker.php']
     volumes:
       - mail-data:/data/mail
+      - app-secrets:/data/secrets:ro
     environment:
       <<: *php-env
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -168,11 +195,16 @@ services:
     environment:
       MARIADB_DATABASE: ${MARIADB_DATABASE:-mail}
       MARIADB_USER: ${MARIADB_USER:-mail}
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      # Written by `secrets`: MARIADB_PASSWORD from .env, else a generated one.
+      MARIADB_PASSWORD_FILE: /run/fma-secrets/mariadb_password
       # Root is not needed by the app; a random one is printed once to the log.
       MARIADB_RANDOM_ROOT_PASSWORD: '1'
     volumes:
       - mariadb-data:/var/lib/mysql
+      - app-secrets:/run/fma-secrets:ro
+    depends_on:
+      secrets:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
       interval: 10s
@@ -183,5 +215,7 @@ services:
 volumes:
   mariadb-data:
   mail-data:
+  # Generated secrets (#164); not part of the backups - export the MASTER_KEY separately.
+  app-secrets:
   caddy-data:
   caddy-config:

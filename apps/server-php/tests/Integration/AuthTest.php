@@ -9,6 +9,7 @@ use Fma\Auth\Sessions;
 use Fma\Config;
 use Fma\Db\Database;
 use Fma\Db\Uuid;
+use Fma\Install\GeneratedSecrets;
 use Fma\Log\Logger;
 use Fma\Tests\Support\Http;
 use Psr\Http\Message\ResponseInterface;
@@ -100,6 +101,24 @@ final class AuthTest extends DatabaseTestCase
         self::assertStringStartsWith('$argon2id$v=19$m=19456,t=2,p=1$', $hash);
         self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM app_state')->fetchColumn(), 'code discarded');
         self::assertSame(403, $this->call('POST', '/api/auth/setup', ['email' => 'x@example.org', 'password' => 'long-enough-1', 'setupCode' => $code])->getStatusCode());
+    }
+
+    public function testStatusAsksToBackUpAGeneratedMasterKeyUntilSetup(): void
+    {
+        self::assertArrayNotHasKey('masterKeyGenerated', Http::json($this->call('GET', '/api/auth/status')));
+        $dir = sys_get_temp_dir() . '/fma-auth-secrets-' . bin2hex(random_bytes(4));
+        GeneratedSecrets::ensure($dir, []);
+        try {
+            $config = Config::load(['DATABASE_URL' => self::$config->get('DATABASE_URL'), 'SECRETS_FILE' => $dir . '/' . GeneratedSecrets::FILE], '/nonexistent/config.php');
+            $this->app = App::create($config, self::$db, new Logger('api', 'info', $this->log), []);
+            self::assertSame(['needsSetup' => true, 'authenticated' => false, 'masterKeyGenerated' => true], Http::json($this->call('GET', '/api/auth/status')));
+            $code = $this->setupCode();
+            self::assertSame(200, $this->call('POST', '/api/auth/setup', ['email' => 'me@example.org', 'password' => 'long-enough-1', 'setupCode' => $code])->getStatusCode());
+            self::assertArrayNotHasKey('masterKeyGenerated', Http::json($this->call('GET', '/api/auth/status')));
+        } finally {
+            array_map('unlink', glob($dir . '/*') ?: []);
+            rmdir($dir);
+        }
     }
 
     /** The generated code is logged once; returns it. */

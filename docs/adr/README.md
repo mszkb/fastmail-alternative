@@ -18,3 +18,4 @@ Neue ADR: `0000-template.md` kopieren, fortlaufend nummerieren, Status zunächst
 | [0012](0012-usage-telemetry.md)          | Anonyme Nutzungsstatistik (Opt-in)                            | Proposed                               |
 | [0013](0013-php-backend.md)              | Backend in PHP (Slim 4) mit MySQL/MariaDB und Cron            | Accepted                               |
 | [0014](0014-styling-tailwind-daisyui.md) | Styling: Tailwind CSS + daisyUI (hell/dunkel), Tabler Icons   | Accepted                               |
+| [0016](0016-generated-secrets.md)        | Secrets beim ersten Start erzeugen (#164)                     | Accepted                               |

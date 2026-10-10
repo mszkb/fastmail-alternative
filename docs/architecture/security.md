@@ -95,6 +95,7 @@ Umgesetzt im ASVS-Review (#56). Jeder Verbindungsaufbau – Verbindungstest und 
 - **DNS-Rebinding:** Verbunden wird mit der geprüften Adresse (IPv4 bevorzugt), nicht mit einer erneuten Auflösung; der Hostname dient nur als TLS-`servername`. Ein zweiter DNS-Wert kann die Verbindung so nicht auf ein internes Ziel umlenken. Push-Endpoints: Der Push-Request (`StreamPushSender`) löst den Host genau einmal auf, prüft jede Adresse und verbindet nur mit einer geprüften; die Zertifikatsprüfung läuft weiter gegen den Hostnamen.
 - **Mail-Ports:** Verbindungen gehen nur an die Standard-Ports (IMAP 143/993, SMTP 25/465/587/2525), damit ein Mailkonto nicht als Port-Scanner oder Client für andere Dienste dient (ASVS N2). Weitere Ports gibt der Betreiber mit `MAIL_EXTRA_PORTS` frei.
 - **Mailserver im LAN:** `MAIL_ALLOW_PRIVATE_HOSTS=1` (php + worker, per `.env`) erlaubt private/interne Ziele, z. B. einen eigenen Mailserver im Heimnetz, und schaltet damit den SSRF-Schutz für Mail-Hosts ab. STARTTLS-Pflicht und Zertifikatsprüfung bleiben **an**; der Server braucht ein gültiges Zertifikat für den konfigurierten Hostnamen. Push-Endpoints sind davon nicht betroffen (immer https auf öffentlichem Host).
+- **Erkennung der Server-Einstellungen (#165):** `GET /api/autoconfig` lädt Autoconfig-Dokumente der Domain und der Thunderbird-ISPDB über `StreamHttpsGetter`: nur https, Host einmal aufgelöst und jede Adresse geprüft (`Ssrf`, auch bei Weiterleitungen, höchstens 2), Verbindung mit der geprüften Adresse, Zertifikatsprüfung gegen den Hostnamen, höchstens 256 KB, Gesamtfrist 8 s; `MAIL_ALLOW_PRIVATE_HOSTS` gilt hier nicht. XML ohne DTD/Entities (`LIBXML_NONET`). Abgefragt wird nur die Domain, nie Adresse oder Passwort; die Domain steht nicht im Log (Request-Log ohne Query-String). Die Ergebnisse sind nur eine Vorbelegung: Server ohne TLS werden verworfen, und der Verbindungstest prüft die Hosts beim Speichern wie bei manueller Eingabe (Ports, SSRF). Rate Limit 30/min.
 - **Nur Entwicklung/Tests:** `MAIL_INSECURE_TRANSPORT=1` erlaubt Klartext ohne STARTTLS, schaltet die Zertifikatsprüfung ab und lässt Push an lokale http-Fakes zu (GreenMail auf Plain-Ports, selbstsigniert). Standard aus, nicht in Compose/`.env.example`; die Testumgebungen (PHPUnit-Integrationstests, `e2e/stack.mjs`) und die CI setzen ihn. Niemals produktiv setzen. Beide Schalter sind unabhängig (Audit N7).
 
 ## HTML-Mails
@@ -118,7 +119,20 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 - **Löschen:** Abmelden, eine abgelaufene oder widerrufene Sitzung (jede `401`-Antwort, auch beim Nachreichen der Queue) und eine Anmeldung mit anderem Benutzer löschen Key, Cache und Queue des Geräts vollständig. Danach sind bis zur nächsten Anmeldung keine Zugriffe auf die Datenbank mehr möglich, so dass verspätete Antworten den Cache nicht neu anlegen. Ein gelöschtes Konto entfernt seine Einträge beim nächsten Laden der Kontoliste.
 - **Widerruf eines Geräts**, das offline bleibt: Der Cache bleibt bis zur nächsten Verbindung lesbar (der Server kann ein Gerät nicht aus der Ferne löschen). Ausstehende Aktionen werden in diesem Fall verworfen; die App meldet das bei der neuen Anmeldung.
 - **Größe:** höchstens ca. 50 MB bzw. 3000 Einträge, Einträge über 5 MB werden nicht gespeichert; verdrängt wird nach LRU (`selectEvictions` in `@fma/shared`). Kontoliste, Ordner, Identitäten, Sitzungsmarke und Queue werden nie verdrängt.
+- **Offline-Suche (#162):** Ohne Verbindung durchsucht die globale Suche diesen Bestand. Die Einträge werden dafür nur im Speicher entschlüsselt und gefiltert (`searchOffline` in `@fma/shared`, `apps/web/app/utils/offline-search.ts`). Es gibt keinen zusätzlichen Index, keine Klartext-Kopie und keine gespeicherten Suchbegriffe; beim Lesen wird nicht einmal die LRU-Zeit geschrieben.
 - Ohne IndexedDB oder WebCrypto (privates Fenster, Instanz per `http://` unter einer LAN-Adresse) arbeitet die App ohne Offline-Ablage.
+
+## Erzeugte Secrets (Docker, #164)
+
+Fehlen `MASTER_KEY`, VAPID-Schlüssel oder Datenbankpasswort in der `.env`, erzeugt der einmalige Dienst `secrets` sie beim ersten Start ([ADR-0016](../adr/0016-generated-secrets.md), `apps/server-php/src/Install/GeneratedSecrets.php`).
+
+- **Ablage:** im Volume `app-secrets`, nicht in DB, Repo oder Logs (Prinzip 5).
+  - `secrets.json`: Eigentümer `www-data`, Rechte `0600`, für `php` und `worker` nur lesend eingebunden.
+  - `mariadb_password`: Eigentümer root, Rechte `0400`.
+- **Vorrang:** Werte aus Umgebung, `.env` und `config.php` gewinnen immer. Sie werden nie in die Datei geschrieben, so dass es nie einen zweiten Master-Key gibt. Erzeugte Werte werden nie ersetzt.
+- **Logs:** nur Namen und Pfad, nie Werte. Weicht ein `MASTER_KEY` in `.env` vom erzeugten ab, wird gewarnt.
+- **Sichern:** `bin/secrets.php export` gibt die Werte nur auf ausdrücklichen Aufruf aus. Das Volume gehört nicht ins Backup; die Einrichtungsseite erinnert an die Sicherung, solange noch kein Benutzer existiert.
+- **Shared Hosting:** unverändert. Der Installer schreibt nichts auf die Platte, und der Setup-Code erfordert weiter die Eingabe des `MASTER_KEY` als Kontrollnachweis.
 
 ## Backups
 

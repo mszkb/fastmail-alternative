@@ -176,6 +176,43 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
   }
 }
 
+/**
+ * All readable entries whose key starts with one of the prefixes (offline
+ * search, #162). Decrypted in memory only; nothing is written (no LRU
+ * update, no index), unreadable entries are skipped.
+ */
+export async function cacheEntries<T>(prefixes: string[]): Promise<{ key: string; value: T }[]> {
+  try {
+    const db = await openDb()
+    const cryptoKey = db && (await cacheKey())
+    if (!db || !cryptoKey) return []
+    const keys = (await promisify(
+      db.transaction(ENTRY_DATA).objectStore(ENTRY_DATA).getAllKeys(),
+    )) as string[]
+    const wanted = keys.filter((key) => prefixes.some((prefix) => key.startsWith(prefix)))
+    const entries: { key: string; value: T }[] = []
+    for (const key of wanted) {
+      const record = (await promisify(
+        db.transaction(ENTRY_DATA).objectStore(ENTRY_DATA).get(key),
+      )) as EntryData | undefined
+      if (!record) continue
+      try {
+        const plain = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: record.iv, additionalData: new TextEncoder().encode(key) },
+          cryptoKey,
+          record.data,
+        )
+        entries.push({ key, value: JSON.parse(new TextDecoder().decode(plain)) as T })
+      } catch {
+        // Unreadable: left for cacheGet to drop.
+      }
+    }
+    return entries
+  } catch {
+    return []
+  }
+}
+
 async function touch(db: IDBDatabase, key: string): Promise<void> {
   try {
     const tx = db.transaction(ENTRY_META, 'readwrite')
