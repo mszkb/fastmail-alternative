@@ -77,6 +77,7 @@ describe.skipIf(!API_URL || !GREENMAIL || !CRON_CMD)('mail endpoints', () => {
       ['GET', `/api/messages/${UNKNOWN}`],
       ['GET', `/api/threads/${UNKNOWN}`],
       ['GET', `/api/accounts/${UNKNOWN}/search?q=x`],
+      ['GET', '/api/search?q=x'],
       ['GET', `/api/accounts/${UNKNOWN}/drafts`],
       ['GET', `/api/outbox/${UNKNOWN}`],
       ['POST', '/api/outbox'],
@@ -225,6 +226,32 @@ describe.skipIf(!API_URL || !GREENMAIL || !CRON_CMD)('mail endpoints', () => {
     const body = found.body as { messages: { id: string }[] }
     expect(body.messages.map((m) => m.id)).toContain(message.id)
     expect((await client.request('GET', `/api/accounts/${accountId}/search`)).status).toBe(400)
+  })
+
+  it('GET /api/search finds it across accounts and pages with a cursor', async () => {
+    const term = encodeURIComponent(subject)
+    const found = await client.request('GET', `/api/search?subject=${term}&limit=1`)
+    expect(found.status).toBe(200)
+    const body = found.body as {
+      messages: { id: string | null; accountId: string; synced: boolean }[]
+      accounts: { accountId: string; status: string }[]
+      nextCursor: string | null
+    }
+    expect(body.messages[0]).toMatchObject({ id: message.id, accountId, synced: true })
+    expect(body.accounts).toContainEqual(expect.objectContaining({ accountId, status: 'ok' }))
+    if (body.nextCursor !== null) {
+      const next = await client.request(
+        'GET',
+        `/api/search?subject=${term}&limit=1&cursor=${encodeURIComponent(body.nextCursor)}`,
+      )
+      expect(next.status).toBe(200)
+      const other = await client.request(
+        'GET',
+        `/api/search?subject=x&limit=1&cursor=${encodeURIComponent(body.nextCursor)}`,
+      )
+      expect(other.status).toBe(400)
+    }
+    expect((await client.request('GET', '/api/search')).status).toBe(400)
   })
 
   it('reply draft, attachment copy, draft save, list and discard', async () => {

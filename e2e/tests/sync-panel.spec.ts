@@ -86,7 +86,8 @@ test('sync panel shows progress, stops and starts again', async ({ page }) => {
   expect((await cancel).status()).toBe(200)
   await expect(page.getByRole('button', { name: 'Aktualisieren', exact: true })).toBeVisible()
   await expect(row.getByText('Wird gestoppt …')).toBeVisible()
-  fake = null
+  // Stopped (not the real state: other specs may have queued a sync meanwhile).
+  fake = { state: 'idle', done: 4000 }
   await expect(
     page.locator('[aria-live="polite"]', { hasText: 'Synchronisierung gestoppt' }),
   ).toHaveCount(1, {

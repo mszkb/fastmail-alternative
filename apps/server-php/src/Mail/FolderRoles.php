@@ -61,7 +61,7 @@ final class FolderRoles
             if ($result[$folder['path']] !== null || self::isRole($folder['override'])) {
                 continue;
             }
-            if (!self::isRole($detected) || isset($taken[$detected])) {
+            if ((!self::isRole($detected) && $detected !== 'all') || isset($taken[$detected])) {
                 continue;
             }
             $result[$folder['path']] = $detected;

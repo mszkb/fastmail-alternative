@@ -58,4 +58,18 @@ final class FolderDetectionTest extends TestCase
             ]),
         );
     }
+
+    public function testDetectsGmailAllMailButNeverByName(): void
+    {
+        $detected = FolderDetection::detect([
+            ['path' => '[Gmail]/Alle Nachrichten', 'delimiter' => '/', 'specialUse' => '\All'],
+            ['path' => 'All Mail', 'delimiter' => '/', 'specialUse' => null],
+        ]);
+        self::assertSame(['[Gmail]/Alle Nachrichten' => 'all', 'All Mail' => null], $detected);
+        self::assertSame(
+            ['[Gmail]/Alle Nachrichten' => 'all'],
+            \Fma\Mail\FolderRoles::resolve([['path' => '[Gmail]/Alle Nachrichten', 'detected' => 'all', 'override' => null]]),
+        );
+        self::assertFalse(\Fma\Mail\FolderRoles::isRole('all'));
+    }
 }

@@ -72,6 +72,28 @@ Dovecot 2.3 im Container (`dovecot/dovecot:2.3.21`, Klartext-Login nur für den 
 
 Damit ist der langsame Initial-Sync gegen GreenMail bestätigt als Artefakt des Testservers.
 
+### Globale Suche (#121, 2026-10-09, Entwicklungsmaschine, kein Pi)
+
+**Server** (`composer loadtest -- --accounts=3 --messages=3500 --runs=10`, GreenMail, MariaDB 10.11; der Lasttest misst `GET /api/search?subject=Lasttest`, bei dem alle 10 500 Mails der drei Konten treffen):
+
+| Messgröße                                                                               | Wert                        |
+| --------------------------------------------------------------------------------------- | --------------------------- |
+| Seite 1 (je Konto eine Verbindung und `UID SEARCH`, 3 Konten nacheinander)              | 553 ms                      |
+| Folgeseite aus den gespeicherten UID-Listen, Treffer lokal synchronisiert               | p50 10,7 ms, p95 13,2 ms    |
+| 40 Seiten nacheinander (ab Seite 5 kaum noch lokale Treffer, Kopfdaten per `UID FETCH`) | 44 s, also ≈ 1,1 s je Seite |
+
+Zielwert „erste Seite bei lokalem Trefferbestand < 1 s“ erreicht. Seiten mit vielen nicht synchronisierten Treffern brauchen je Konto eine neue IMAP-Verbindung und einen `UID FETCH` der Kopfdaten; gegen GreenMail ≈ 1 s je Seite, gegen Dovecot deutlich schneller zu erwarten (Initial-Sync dort 100× schneller). Messung auf dem Pi und mit echten Anbietern steht aus.
+
+**PWA** (Playwright, Chromium, 1280×800, `/api/search` gemockt mit 200 Seiten zu 50 Treffern):
+
+| Messgröße                                            | Wert                                            |
+| ---------------------------------------------------- | ----------------------------------------------- |
+| Erste Seite bis sichtbar (Enter in der Kopfzeile)    | ≈ 120 ms                                        |
+| Eine weitere Seite anhängen, bei 10 000 Treffern     | ≈ 11 ms                                         |
+| Scrollen durch 10 000 Treffer (400 px je Frame, 5 s) | Frame-Abstand p50 16,7 ms, p95 16,8 ms (60 fps) |
+
+Gefundener Engpass: Zuerst wurden alle Zeilen gerendert (nur mit `content-visibility`); bei 10 000 Treffern dauerte jede weitere Seite ≈ 140 ms und Scrollen lief mit ≈ 12 fps. Jetzt rendert die Liste nur die Zeilen um den sichtbaren Bereich (Fenster mit Platzhaltern, einheitliche Zeilenhöhe).
+
 ### Gefundene Engpässe
 
 1. **Behoben: Die Nachrichtenliste sortierte den ganzen Ordner.** Sie ordnete nach dem Datum der verbundenen Nachricht, also musste MariaDB jede Zeile des Ordners samt verschlüsselter Spalten und Flag-Unterabfragen in eine temporäre Tabelle kopieren und sortieren (`Using temporary; Using filesort`): **475 ms (p50) je Seite bei 50 000 Mails** auf x86, auf dem Pi also mehrere Sekunden. Migration `0005_message_sort_key` kopiert das (unveränderliche) Sortierdatum nach `message_location.sort_at` und indiziert `(folder_id, sort_at, id)`; eine Seite wird jetzt in Indexreihenfolge gelesen: **4,1 ms**. Details: [Datenmodell](../architecture/data-model.md).

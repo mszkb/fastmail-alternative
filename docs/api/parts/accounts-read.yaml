@@ -517,11 +517,11 @@ paths:
       description: |
         Runs IMAP SEARCH at the provider and maps the matching UIDs to
         locally synced messages (newest first, at most 100). Without
-        `folderId`, INBOX and the other selectable folders except Junk/Trash
-        are searched (at most 20). At least one of `q`, `from`, `subject`,
-        `since`, `before` is required. Provider results are cached in memory
-        for 60 s; at most 10 provider searches per account and minute (cache
-        hits do not count). The query is never logged or stored.
+        `folderId`, all selectable folders except Junk/Trash (unless
+        `includeJunk`) and Gmail's "All Mail" are searched (at most 100). At least one criterion (`q`, `from`, `to`,
+        `subject`, `since`, `before`, `unread`, `attachment`) is required. At
+        most 10 provider searches per account and minute. The query is never
+        logged or stored.
       parameters:
         - name: q
           in: query
@@ -536,6 +536,10 @@ paths:
           in: query
           required: false
           schema: { type: string, maxLength: 200 }
+        - $ref: '#/components/parameters/SearchTo'
+        - $ref: '#/components/parameters/SearchUnread'
+        - $ref: '#/components/parameters/SearchAttachment'
+        - $ref: '#/components/parameters/SearchIncludeJunk'
         - name: since
           in: query
           required: false
@@ -956,8 +960,8 @@ components:
         depth: { type: integer, minimum: 0 }
         specialUse:
           type: [string, 'null']
-          enum: [inbox, sent, drafts, trash, archive, junk, null]
-          description: Effective role (detected or overridden); `inbox` for INBOX.
+          enum: [inbox, sent, drafts, trash, archive, junk, all, null]
+          description: Effective role (detected or overridden); `inbox` for INBOX; `all` for Gmail's "All Mail" (`\\All`, detected only, never an override).
         specialUseOverride:
           description: Manually assigned role; null = automatic detection.
           oneOf:

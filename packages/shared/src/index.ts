@@ -44,3 +44,4 @@ export interface HealthStatus {
     database: 'ok' | 'down'
   }
 }
+export * from './themes'

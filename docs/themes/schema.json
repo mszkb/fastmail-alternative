@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mszkb/fastmail-alternative/docs/themes/schema.json",
+  "title": "fastmail-alternative Theme (*.fmatheme.json)",
+  "description": "Deklaratives Theme (#126): nur Werte aus der Allowlist, kein Code, kein freies CSS, keine URLs. Zusätzlich gilt: Datei höchstens 32 KB, Kontrast der Text/Hintergrund-Paare unter 4.5:1 in hell oder dunkel ergibt eine Warnung (prüft der Validator, nicht das Schema). Werte im Bereich der Größen in rem.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "id", "name", "version", "author", "license", "minAppVersion"],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>{}\\\\]+$"
+    },
+    "version": {
+      "$ref": "#/$defs/semver"
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>{}\\\\]+$"
+    },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>{}\\\\]+$"
+    },
+    "minAppVersion": {
+      "$ref": "#/$defs/semver"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^\\u0000-\\u001f\\u007f<>{}\\\\]+$"
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "light": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "base-100": {
+              "$ref": "#/$defs/color"
+            },
+            "base-200": {
+              "$ref": "#/$defs/color"
+            },
+            "base-300": {
+              "$ref": "#/$defs/color"
+            },
+            "base-content": {
+              "$ref": "#/$defs/color"
+            },
+            "primary": {
+              "$ref": "#/$defs/color"
+            },
+            "primary-content": {
+              "$ref": "#/$defs/color"
+            },
+            "secondary": {
+              "$ref": "#/$defs/color"
+            },
+            "secondary-content": {
+              "$ref": "#/$defs/color"
+            },
+            "accent": {
+              "$ref": "#/$defs/color"
+            },
+            "accent-content": {
+              "$ref": "#/$defs/color"
+            },
+            "neutral": {
+              "$ref": "#/$defs/color"
+            },
+            "neutral-content": {
+              "$ref": "#/$defs/color"
+            },
+            "info": {
+              "$ref": "#/$defs/color"
+            },
+            "info-content": {
+              "$ref": "#/$defs/color"
+            },
+            "success": {
+              "$ref": "#/$defs/color"
+            },
+            "success-content": {
+              "$ref": "#/$defs/color"
+            },
+            "warning": {
+              "$ref": "#/$defs/color"
+            },
+            "warning-content": {
+              "$ref": "#/$defs/color"
+            },
+            "error": {
+              "$ref": "#/$defs/color"
+            },
+            "error-content": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        },
+        "dark": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "base-100": {
+              "$ref": "#/$defs/color"
+            },
+            "base-200": {
+              "$ref": "#/$defs/color"
+            },
+            "base-300": {
+              "$ref": "#/$defs/color"
+            },
+            "base-content": {
+              "$ref": "#/$defs/color"
+            },
+            "primary": {
+              "$ref": "#/$defs/color"
+            },
+            "primary-content": {
+              "$ref": "#/$defs/color"
+            },
+            "secondary": {
+              "$ref": "#/$defs/color"
+            },
+            "secondary-content": {
+              "$ref": "#/$defs/color"
+            },
+            "accent": {
+              "$ref": "#/$defs/color"
+            },
+            "accent-content": {
+              "$ref": "#/$defs/color"
+            },
+            "neutral": {
+              "$ref": "#/$defs/color"
+            },
+            "neutral-content": {
+              "$ref": "#/$defs/color"
+            },
+            "info": {
+              "$ref": "#/$defs/color"
+            },
+            "info-content": {
+              "$ref": "#/$defs/color"
+            },
+            "success": {
+              "$ref": "#/$defs/color"
+            },
+            "success-content": {
+              "$ref": "#/$defs/color"
+            },
+            "warning": {
+              "$ref": "#/$defs/color"
+            },
+            "warning-content": {
+              "$ref": "#/$defs/color"
+            },
+            "error": {
+              "$ref": "#/$defs/color"
+            },
+            "error-content": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        }
+      }
+    },
+    "sizes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "space-1": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 1rem"
+        },
+        "space-2": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 1.5rem"
+        },
+        "space-3": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 2rem"
+        },
+        "space-4": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 2.5rem"
+        },
+        "space-5": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 3rem"
+        },
+        "radius": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 1.5rem"
+        },
+        "radius-box": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0rem bis 2rem"
+        },
+        "text-xs": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0.625rem bis 1rem"
+        },
+        "text-sm": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0.7rem bis 1.15rem"
+        },
+        "text-md": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0.8rem bis 1.3rem"
+        },
+        "text-lg": {
+          "type": "string",
+          "pattern": "^\\d{1,2}(\\.\\d{1,4})?rem$",
+          "description": "0.9rem bis 1.6rem"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readingPane": {
+          "enum": ["right", "bottom", "off"]
+        },
+        "density": {
+          "enum": ["normal", "compact"]
+        },
+        "accountRail": {
+          "enum": ["icons", "list"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9a-f]{6}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^\\d{1,4}\\.\\d{1,4}\\.\\d{1,4}$"
+    }
+  }
+}
