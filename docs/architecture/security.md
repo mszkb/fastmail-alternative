@@ -119,6 +119,7 @@ Umgesetzt in Roadmap 4.6. Damit gelesene Mails offline sichtbar bleiben, legt di
 - **Löschen:** Abmelden, eine abgelaufene oder widerrufene Sitzung (jede `401`-Antwort, auch beim Nachreichen der Queue) und eine Anmeldung mit anderem Benutzer löschen Key, Cache und Queue des Geräts vollständig. Danach sind bis zur nächsten Anmeldung keine Zugriffe auf die Datenbank mehr möglich, so dass verspätete Antworten den Cache nicht neu anlegen. Ein gelöschtes Konto entfernt seine Einträge beim nächsten Laden der Kontoliste.
 - **Widerruf eines Geräts**, das offline bleibt: Der Cache bleibt bis zur nächsten Verbindung lesbar (der Server kann ein Gerät nicht aus der Ferne löschen). Ausstehende Aktionen werden in diesem Fall verworfen; die App meldet das bei der neuen Anmeldung.
 - **Größe:** höchstens ca. 50 MB bzw. 3000 Einträge, Einträge über 5 MB werden nicht gespeichert; verdrängt wird nach LRU (`selectEvictions` in `@fma/shared`). Kontoliste, Ordner, Identitäten, Sitzungsmarke und Queue werden nie verdrängt.
+- **Offline-Suche (#162):** Ohne Verbindung durchsucht die globale Suche diesen Bestand. Die Einträge werden dafür nur im Speicher entschlüsselt und gefiltert (`searchOffline` in `@fma/shared`, `apps/web/app/utils/offline-search.ts`). Es gibt keinen zusätzlichen Index, keine Klartext-Kopie und keine gespeicherten Suchbegriffe; beim Lesen wird nicht einmal die LRU-Zeit geschrieben.
 - Ohne IndexedDB oder WebCrypto (privates Fenster, Instanz per `http://` unter einer LAN-Adresse) arbeitet die App ohne Offline-Ablage.
 
 ## Backups

@@ -944,9 +944,13 @@ onBeforeUnmount(() => {
       ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
-        accounts.length > 0 ? 'In allen Konten suchen …' : 'Kein Konto verbunden'
+        accounts.length === 0
+          ? 'Kein Konto verbunden'
+          : isOffline
+            ? 'Gespeicherte Nachrichten durchsuchen …'
+            : 'In allen Konten suchen …'
       "
-      :search-disabled="accounts.length === 0 || isOffline"
+      :search-disabled="accounts.length === 0"
       :menu-open="menuOpen"
       @search="onHeaderSearch"
       @toggle-menu="menuOpen = !menuOpen"
