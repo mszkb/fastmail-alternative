@@ -402,6 +402,12 @@ final class ImapClient
         return $this->socket->readAvailable();
     }
 
+    /** Deadline (unix time) for reading the following responses, null to clear (see MailSocket::setDeadline()). */
+    public function setDeadline(?float $deadline): void
+    {
+        $this->socket->setDeadline($deadline);
+    }
+
     /** Closes the connection without LOGOUT. */
     public function disconnect(): void
     {

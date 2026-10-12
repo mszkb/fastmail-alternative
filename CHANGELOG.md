@@ -66,6 +66,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
 ### Fixed
 
+- Suche bricht nicht mehr ständig mit „Zeitüberschreitung“ ab: Freitext im Suchfeld sucht jetzt standardmäßig in Betreff, Absender und Empfänger. Den Mailtext durchsucht die Suche nur mit „Auch im Mailtext suchen (langsam)“, denn Anbieter ohne Suchindex (z. B. netcup) brauchen dafür in großen Postfächern bis zu mehreren Minuten. Läuft die Frist ab, erscheinen die Treffer der bereits durchsuchten Ordner („Zeitüberschreitung, nicht alle Ordner durchsucht“), statt dass das ganze Konto leer bleibt. Neuer Parameter `fulltext` an `GET /api/search` und `GET /api/accounts/{id}/search` ([ADR-0006-Nachtrag](docs/adr/0006-search-index.md#nachtrag-freitext-ohne-mailtext-teiltreffer-bei-zeitüberschreitung-2026-10-12)). Keine Betreiber-Änderung
 - Verfassen: Der Knopf „Rückgängig“ im Senden-Countdown war unsichtbar (Klassenkonflikt mit daisyUI); Empfänger-Vorschläge im Cc/Bcc-Feld gingen verloren, wenn man direkt nach dem Feldwechsel tippte – Enter schickte dann das Formular ab
 - Tastenkürzel: Nach `?` und `Esc` blieb der Fokus auf dem Hilfe-Knopf, das nächste `Enter` öffnete wieder die Hilfe statt der Nachricht
 - Handy: Das Sync-Panel lag unter der Nachrichtenliste, „Stoppen“ war nicht klickbar

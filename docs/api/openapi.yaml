@@ -2118,7 +2118,9 @@ components:
             contacted) or the provider rejected the credentials;
             `rate_limited`: more than 10 provider searches of this account in
             the last minute; `error`: provider unreachable, blocked or the
-            account is disabled (see `code`).
+            account is disabled (see `code`); `timeout`: the deadline ended
+            the search, the hits of the folders searched until then
+            (`foldersSearched`) are still included.
         code:
           type: string
           description: Stable error code when `status` is not `ok`.
@@ -2412,6 +2414,18 @@ components:
       in: query
       required: false
       description: Also search Spam and Trash (left out by default). Gmail's "All Mail" is never searched.
+      schema:
+        type: string
+        enum:
+          - "1"
+          - "true"
+          - "0"
+          - "false"
+    SearchFulltext:
+      name: fulltext
+      in: query
+      required: false
+      description: "Free text `q` also in the body (IMAP TEXT). Opt-in: providers without a search index scan every message, which can take minutes. In `GET /api/search` the account may then use the whole search deadline instead of its own. Not a criterion on its own."
       schema:
         type: string
         enum:
@@ -2754,7 +2768,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema:
             type: string
             maxLength: 200
@@ -2774,6 +2788,7 @@ paths:
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
         - $ref: "#/components/parameters/SearchIncludeJunk"
+        - $ref: "#/components/parameters/SearchFulltext"
         - name: since
           in: query
           required: false
@@ -4389,7 +4404,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema:
             type: string
             maxLength: 200
@@ -4409,6 +4424,7 @@ paths:
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
         - $ref: "#/components/parameters/SearchIncludeJunk"
+        - $ref: "#/components/parameters/SearchFulltext"
         - name: since
           in: query
           required: false

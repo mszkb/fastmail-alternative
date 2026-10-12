@@ -74,6 +74,18 @@ components:
       schema:
         type: string
         enum: ['1', 'true', '0', 'false']
+    SearchFulltext:
+      name: fulltext
+      in: query
+      required: false
+      description: >-
+        Free text `q` also in the body (IMAP TEXT). Opt-in: providers without
+        a search index scan every message, which can take minutes. In
+        `GET /api/search` the account may then use the whole search deadline
+        instead of its own. Not a criterion on its own.
+      schema:
+        type: string
+        enum: ['1', 'true', '0', 'false']
     SearchAttachment:
       name: attachment
       in: query

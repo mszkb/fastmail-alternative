@@ -2,7 +2,9 @@
 // Global search (#121): the search field in the header searches all
 // accounts at their providers (GET /api/search, IMAP SEARCH, online only).
 // The text may carry operators (from:, to:, subject:, before:, after:,
-// has:attachment, is:unread; parseSearchInput from @fma/shared). Hits of all
+// has:attachment, is:unread; parseSearchInput from @fma/shared). Free text
+// matches subject, sender and recipient; the mail text only when chosen
+// (slow at providers without a search index, ADR-0006). Hits of all
 // accounts come merged by date, each with its account icon and folder, the
 // terms highlighted in the subject (text parts, no HTML). More hits load
 // while scrolling (IntersectionObserver on the end of the list, a button as
@@ -58,6 +60,8 @@ const emit = defineEmits<{
 const scope = ref<GlobalSearchScope>('all')
 /** Spam and Trash are left out unless chosen; their hits are marked. */
 const includeJunk = ref(false)
+/** Free text also in the mail text (IMAP TEXT); off by default because it is slow. */
+const fulltext = ref(false)
 // Thousands of hits: rows are prepared once when a page arrives (labels,
 // highlighted subject) and kept shallow.
 interface Row {
@@ -170,7 +174,11 @@ async function search(): Promise<void> {
     error.value = parsed
     return
   }
-  query.value = includeJunk.value ? { ...parsed, includeJunk: true } : parsed
+  query.value = {
+    ...parsed,
+    ...(includeJunk.value ? { includeJunk: true } : {}),
+    ...(fulltext.value ? { fulltext: true } : {}),
+  }
   // The aborted request no longer clears `loading` (its number is stale).
   loading.value = false
   await load(current, null)
@@ -381,7 +389,7 @@ watch(
   () => props.text,
   () => void search(),
 )
-watch([scope, includeJunk], () => void search())
+watch([scope, includeJunk, fulltext], () => void search())
 
 defineExpose({ search })
 </script>
@@ -416,6 +424,9 @@ defineExpose({ search })
         >
         <label
           ><input v-model="includeJunk" type="checkbox" /> Spam und Papierkorb einbeziehen</label
+        >
+        <label
+          ><input v-model="fulltext" type="checkbox" /> Auch im Mailtext suchen (langsam)</label
         >
       </fieldset>
       <button type="button" class="secondary" @click="close">Suche beenden</button>

@@ -28,6 +28,11 @@ describe('parseSearchQuery', () => {
 
   it('rejects invalid input with a German message', () => {
     expect(parseSearchQuery({})).toMatch(/Suchbegriff/)
+    // `fulltext` widens the free text to the body but is no criterion on its own.
+    expect(parseSearchQuery({ q: 'a', fulltext: '1' })).toEqual({ q: 'a', fulltext: true })
+    expect(parseSearchQuery({ q: 'a', fulltext: 'false' })).toEqual({ q: 'a' })
+    expect(parseSearchQuery({ fulltext: true })).toMatch(/Suchbegriff/)
+    expect(parseSearchQuery({ q: 'a', fulltext: 'ja' })).toMatch(/Filter/)
     expect(parseSearchQuery({ q: '   ' })).toMatch(/Suchbegriff/)
     expect(parseSearchQuery({ q: 'x'.repeat(SEARCH_LIMITS.maxTermLength + 1) })).toMatch(/lang/)
     expect(parseSearchQuery({ since: '2026-02-30' })).toBe('Ungültiges Datum.')
@@ -118,6 +123,13 @@ describe('global search (#121)', () => {
   it('names account problems in German', () => {
     expect(searchAccountProblem({ status: 'ok' })).toBeNull()
     expect(searchAccountProblem({ status: 'timeout' })).toBe('Zeitüberschreitung')
+    expect(searchAccountProblem({ status: 'timeout', foldersSearched: 0 })).toBe(
+      'Zeitüberschreitung',
+    )
+    // Partial result: the hits of the folders searched in time are shown.
+    expect(searchAccountProblem({ status: 'timeout', foldersSearched: 3 })).toBe(
+      'Zeitüberschreitung, nicht alle Ordner durchsucht',
+    )
     expect(searchAccountProblem({ status: 'error', code: 'DISABLED' })).toBe(
       'Konto ist deaktiviert',
     )

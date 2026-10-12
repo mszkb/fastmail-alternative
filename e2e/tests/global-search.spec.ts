@@ -131,3 +131,66 @@ test('a new search aborts the one still running', async ({ browser }) => {
   await expect(results.getByRole('listitem').filter({ hasText: 'Hallo 2' })).toBeVisible()
   await context.close()
 })
+
+test('free text skips the mail text unless chosen; a timeout keeps partial hits', async ({
+  browser,
+}) => {
+  // The term is only in the body: header search must miss it, full text find it.
+  const term = `koerper${run}`
+  const date = new Date(Date.now() - 60_000)
+  await appendOld(
+    MAILBOX_A,
+    textMail(MAILBOX_A, `Volltext ${run}`, `Steht nur ${term} hier`, date),
+    date,
+  )
+  const context = await browser.newContext({
+    storageState: '.auth/state.json',
+    viewport: { width: 1280, height: 800 },
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  const sent: URLSearchParams[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/search?')) sent.push(new URL(request.url()).searchParams)
+  })
+  await page.getByRole('banner').getByLabel('Suchbegriff').fill(term)
+  await page.keyboard.press('Enter')
+  const results = page.getByRole('region', { name: 'Suche in allen Konten' })
+  await expect(results.getByText('Keine Treffer.')).toBeVisible({ timeout: 30_000 })
+  expect(sent.at(-1)?.has('fulltext')).toBe(false)
+
+  const fulltext = results.getByLabel('Auch im Mailtext suchen (langsam)')
+  await expect(fulltext).not.toBeChecked()
+  await fulltext.check()
+  await expect(results.getByRole('listitem').filter({ hasText: `Volltext ${run}` })).toBeVisible({
+    timeout: 30_000,
+  })
+  expect(sent.at(-1)?.get('fulltext')).toBe('1')
+
+  // Deadline reached after some folders: their hits stay, the account says why.
+  const accounts = (await (await page.request.get('/api/accounts')).json()) as {
+    accounts: { id: string }[]
+  }
+  await page.route('**/api/search?*', (route) =>
+    route.fulfill({
+      json: {
+        messages: [],
+        accounts: [
+          {
+            accountId: accounts.accounts[0]!.id,
+            status: 'timeout',
+            code: 'TIMEOUT',
+            matches: 0,
+            foldersSearched: 2,
+            foldersFailed: 0,
+          },
+        ],
+        total: 0,
+        nextCursor: null,
+      },
+    }),
+  )
+  await fulltext.uncheck()
+  await expect(results.getByText('Zeitüberschreitung, nicht alle Ordner durchsucht')).toBeVisible()
+  await context.close()
+})

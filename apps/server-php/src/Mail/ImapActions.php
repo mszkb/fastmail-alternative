@@ -62,25 +62,38 @@ final class ImapActions
 
     /**
      * Search criteria of a validated query (see SearchRoutes::parseQuery):
-     * TEXT/FROM/TO/SUBJECT as quoted strings, or as literals with CHARSET
-     * UTF-8 when not 7-bit; SINCE/BEFORE as IMAP dates; `unread` as UNSEEN;
+     * text criteria as quoted strings, or as literals with CHARSET UTF-8
+     * when not 7-bit; SINCE/BEFORE as IMAP dates; `unread` as UNSEEN;
      * `attachment` as a multipart/mixed Content-Type (IMAP has no attachment
      * criterion, this is what most clients send with attachments).
      *
-     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true} $query
+     * Free text `q` matches subject, sender or recipient (`OR SUBJECT q OR
+     * FROM q TO q`); only with `fulltext` it is TEXT (headers and body).
+     * Providers without a search index scan every body for TEXT: about two
+     * minutes for 8 000 messages at netcup, far beyond the search deadline.
+     *
+     * @param array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, fulltext?: true} $query
      *
      * @return array{parts: list<string>, utf8: bool}
      */
     public static function searchCriteria(array $query): array
     {
+        /** @var list<array{string, string}> $text keyword(s) and value */
         $text = [];
-        foreach (['q' => 'TEXT', 'from' => 'FROM', 'to' => 'TO', 'subject' => 'SUBJECT'] as $key => $keyword) {
+        if (isset($query['q']) && $query['q'] !== '') {
+            if (isset($query['fulltext'])) {
+                $text[] = ['TEXT', $query['q']];
+            } else {
+                array_push($text, ['OR SUBJECT', $query['q']], ['OR FROM', $query['q']], ['TO', $query['q']]);
+            }
+        }
+        foreach (['from' => 'FROM', 'to' => 'TO', 'subject' => 'SUBJECT'] as $key => $keyword) {
             if (isset($query[$key]) && $query[$key] !== '') {
-                $text[$keyword] = $query[$key];
+                $text[] = [$keyword, $query[$key]];
             }
         }
         $utf8 = false;
-        foreach ($text as $value) {
+        foreach ($text as [, $value]) {
             if (preg_match('/[\x80-\xFF]/', $value) === 1) {
                 $utf8 = true;
             }
@@ -90,7 +103,7 @@ final class ImapActions
             $last = \count($parts) - 1;
             $parts[$last] .= ($parts[$last] === '' || str_ends_with($parts[$last], ' ') ? '' : ' ') . $text;
         };
-        foreach ($text as $keyword => $value) {
+        foreach ($text as [$keyword, $value]) {
             if ($utf8) {
                 $append($keyword . ' ');
                 $parts[] = $value;

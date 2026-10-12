@@ -60,7 +60,7 @@ final class GlobalSearchRoutes
     /** Seconds a result's UID lists are kept for later pages. */
     public const RESULT_TTL = 300;
     private const CONNECT_TIMEOUT_SECONDS = 8.0;
-    /** Deadline of one account's search. */
+    /** Deadline of one account's search; a full-text search may use the whole fan-out deadline. */
     private const ACCOUNT_DEADLINE_SECONDS = 10.0;
     /** Deadline of the fan-out over all accounts (below PHP's usual 30 s). */
     private const SEARCH_DEADLINE_SECONDS = 25.0;
@@ -194,7 +194,7 @@ final class GlobalSearchRoutes
         $deadline = microtime(true) + self::SEARCH_DEADLINE_SECONDS;
         $folderId = isset($query['folderId']) && \is_string($query['folderId']) ? $query['folderId'] : null;
         $includeJunk = isset($query['includeJunk']);
-        /** @var array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true} $query */
+        /** @var array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, fulltext?: true} $query */
         $criteria = ImapActions::searchCriteria($query);
         $result = ['accounts' => [], 'streams' => []];
         foreach ($accounts as $account) {
@@ -215,11 +215,19 @@ final class GlobalSearchRoutes
             }
             $folders = ProviderSearch::folders($pdo, $accountId, $folderId, $includeJunk);
             try {
-                $accountDeadline = min($deadline, microtime(true) + self::ACCOUNT_DEADLINE_SECONDS);
+                // TEXT scans every body at providers without a search index
+                // (opt-in, ADR-0006): it gets what is left of the fan-out.
+                $accountDeadline = isset($query['fulltext']) ? $deadline : min($deadline, microtime(true) + self::ACCOUNT_DEADLINE_SECONDS);
                 $context = AccountContext::load($pdo, $accountId, $this->config);
                 $client = ProviderSearch::connect($this->policy(), $context, max(1.0, min(self::CONNECT_TIMEOUT_SECONDS, $accountDeadline - microtime(true))));
                 $this->clients[$accountId] = $client;
                 $found = ProviderSearch::search($client, $folders, $criteria, $accountDeadline);
+                if ($found['timedOut']) {
+                    // Keep the folders searched so far; the connection may be mid-command.
+                    $this->logger->warn('search failed', ['accountId' => $accountId, 'code' => ProviderSearch::TIMEOUT[0]]);
+                    $this->drop($accountId);
+                    $entry = ['accountId' => $accountId, 'status' => 'timeout', 'code' => ProviderSearch::TIMEOUT[0]] + $entry;
+                }
             } catch (SearchFailure $e) {
                 // Code only: provider responses may echo the query.
                 $this->logger->warn('search failed', ['accountId' => $accountId, 'code' => $e->errorCode]);

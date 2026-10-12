@@ -18,7 +18,10 @@ export const SEARCH_LIMITS = {
 
 /** Criteria of a search; text criteria match substrings (IMAP semantics). */
 export interface SearchQuery {
-  /** Any text in headers and body (IMAP TEXT). */
+  /**
+   * Free text: subject, sender or recipient (`OR SUBJECT OR FROM TO`); with
+   * `fulltext` anywhere in headers and body (IMAP TEXT).
+   */
   q?: string
   from?: string
   /** Recipient (IMAP TO). */
@@ -28,6 +31,11 @@ export interface SearchQuery {
   unread?: boolean
   /** Only messages with attachments (multipart/mixed). */
   attachment?: boolean
+  /**
+   * Free text also in the body (IMAP TEXT). Opt-in: providers without a
+   * search index scan every message, which can take minutes (ADR-0006).
+   */
+  fulltext?: boolean
   /** Also search Spam and Trash (left out by default). */
   includeJunk?: boolean
   /** Received on or after this day (YYYY-MM-DD, IMAP SINCE). */
@@ -94,7 +102,7 @@ export function parseSearchQuery(input: Record<string, unknown>): SearchQuery | 
   if (query.since && query.before && query.since >= query.before) {
     return 'Der Zeitraum ist leer.'
   }
-  for (const key of ['unread', 'attachment', 'includeJunk'] as const) {
+  for (const key of ['unread', 'attachment', 'fulltext', 'includeJunk'] as const) {
     const raw = input[key]
     if (raw === undefined || raw === '' || raw === false || raw === '0' || raw === 'false') continue
     if (raw !== true && raw !== '1' && raw !== 'true') return 'Ungültiger Filter.'
@@ -105,7 +113,11 @@ export function parseSearchQuery(input: Record<string, unknown>): SearchQuery | 
     if (typeof folderId !== 'string' || !UUID_RE.test(folderId)) return 'Ungültiger Ordner.'
     query.folderId = folderId.toLowerCase()
   }
-  if (Object.keys(query).every((key) => key === 'folderId' || key === 'includeJunk')) {
+  if (
+    Object.keys(query).every(
+      (key) => key === 'folderId' || key === 'includeJunk' || key === 'fulltext',
+    )
+  ) {
     return 'Bitte einen Suchbegriff oder Zeitraum angeben.'
   }
   return query
@@ -185,13 +197,16 @@ export function globalSearchPath(
 
 /** German text for an account that could not be searched (null when ok). */
 export function searchAccountProblem(
-  account: Pick<GlobalSearchAccount, 'status' | 'code'>,
+  account: Pick<GlobalSearchAccount, 'status' | 'code'> &
+    Partial<Pick<GlobalSearchAccount, 'foldersSearched'>>,
 ): string | null {
   switch (account.status) {
     case 'ok':
       return null
     case 'timeout':
-      return 'Zeitüberschreitung'
+      return (account.foldersSearched ?? 0) > 0
+        ? 'Zeitüberschreitung, nicht alle Ordner durchsucht'
+        : 'Zeitüberschreitung'
     case 'auth_error':
       return 'Anmeldung beim Anbieter fehlgeschlagen'
     case 'rate_limited':
@@ -215,7 +230,7 @@ const OPERATORS: Record<string, keyof SearchQuery> = {
  * Splits the text of the search field into criteria: `from:`, `to:`,
  * `subject:`, `before:`/`after:` (YYYY-MM-DD), `has:attachment` and
  * `is:unread`; values may be quoted (`from:"Anna Muster"`). Everything else
- * is free text (IMAP TEXT). Unknown operators stay free text. The result
+ * is free text (see SearchQuery.q). Unknown operators stay free text. The result
  * still needs parseSearchQuery for validation.
  */
 export function parseSearchInput(text: string): SearchQuery {

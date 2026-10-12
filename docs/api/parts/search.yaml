@@ -38,7 +38,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema:
             type: string
             maxLength: 200
@@ -58,6 +58,7 @@ paths:
         - $ref: '#/components/parameters/SearchUnread'
         - $ref: '#/components/parameters/SearchAttachment'
         - $ref: '#/components/parameters/SearchIncludeJunk'
+        - $ref: '#/components/parameters/SearchFulltext'
         - name: since
           in: query
           required: false
@@ -220,7 +221,11 @@ components:
 
             the last minute; `error`: provider unreachable, blocked or the
 
-            account is disabled (see `code`).
+            account is disabled (see `code`); `timeout`: the deadline ended
+
+            the search, the hits of the folders searched until then
+
+            (`foldersSearched`) are still included.
 
             '
         code:
