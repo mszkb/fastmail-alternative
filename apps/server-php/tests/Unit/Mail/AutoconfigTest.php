@@ -132,6 +132,8 @@ final class AutoconfigTest extends TestCase
         // An MX under the domain itself says nothing about the provider.
         $own = static fn(string $name, int $type): array => $type === DNS_MX ? [['target' => 'mx.example.org', 'pri' => 0]] : [];
         self::assertNull((new Autoconfig(new FakeGetter([]), true, $own))->discover('example.org'));
+        $sub = static fn(string $name, int $type): array => $type === DNS_MX ? [['target' => 'mx.team.example.org', 'pri' => 0]] : [];
+        self::assertNull((new Autoconfig(new FakeGetter([]), true, $sub))->discover('team.example.org'));
     }
 
     public function testNothingFoundAndInvalidDomain(): void

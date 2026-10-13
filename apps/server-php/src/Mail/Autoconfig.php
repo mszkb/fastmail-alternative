@@ -182,7 +182,8 @@ final class Autoconfig
         $records = array_filter(($this->dns)($domain, DNS_MX), static fn(array $r): bool => isset($r['target']));
         usort($records, static fn(array $a, array $b): int => (int) ($a['pri'] ?? 0) <=> (int) ($b['pri'] ?? 0));
         $host = strtolower(rtrim((string) ($records[0]['target'] ?? ''), '.'));
-        if (preg_match(self::DOMAIN_RE, $host) !== 1) {
+        // A mail server under the address domain itself names no provider.
+        if (preg_match(self::DOMAIN_RE, $host) !== 1 || $host === $domain || str_ends_with($host, ".{$domain}")) {
             return null;
         }
 

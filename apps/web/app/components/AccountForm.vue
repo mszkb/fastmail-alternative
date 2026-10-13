@@ -174,10 +174,21 @@ async function detectSettings(): Promise<void> {
   const previous = detectedFields
   const mxPreset = result?.mxDomain ? presetForMxDomain(result.mxDomain) : undefined
   if (mxPreset && free(imapHost.value, previous?.imapHost)) {
+    // Like detected values: typed SMTP server or user name stay.
+    const smtpFree = free(smtpHost.value, previous?.smtpHost)
+    const userFree = free(imapUser.value, previous?.user) || imapUser.value.includes('@')
     clearDetected()
     presetId.value = mxPreset.id
     presetViaMx.value = true
-    applyPreset()
+    const values = presetFields(mxPreset, emailAddress.value)
+    imapHost.value = values.imapHost
+    imapPort.value = values.imapPort
+    if (smtpFree) {
+      smtpHost.value = values.smtpHost
+      smtpPort.value = values.smtpPort
+    }
+    if (userFree && values.user) imapUser.value = values.user
+    samePassword.value = true
     return
   }
   const fields = result ? autoconfigFields(result, emailAddress.value) : undefined
