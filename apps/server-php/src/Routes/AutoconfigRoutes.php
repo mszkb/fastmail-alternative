@@ -15,7 +15,9 @@ use Slim\App;
  * GET /api/autoconfig?domain=example.org (#165): IMAP/SMTP settings for an
  * address domain without a provider preset, to pre-fill the account form.
  * Takes the domain only (never the address); nothing found is no error
- * (`found: false`). The domain is not logged.
+ * (`found: false`). `mxDomain` names the MX host's base domain when that
+ * step ran, so the client can pick a provider preset for it (e.g. Google
+ * Workspace on an own domain). The domain is not logged.
  */
 final class AutoconfigRoutes
 {
@@ -36,6 +38,6 @@ final class AutoconfigRoutes
         }
         $result = $this->autoconfig->discover($domain);
 
-        return Json::write($response, $result === null ? ['found' => false] : ['found' => true] + $result);
+        return Json::write($response, ['found' => isset($result['source'])] + ($result ?? []));
     }
 }

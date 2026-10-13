@@ -37,7 +37,10 @@ final class AutoconfigRoutesTest extends DatabaseTestCase
             </emailProvider></clientConfig>
             XML]);
         $config = Config::fromArray(['DATABASE_URL' => self::$config->get('DATABASE_URL'), 'MASTER_KEY' => base64_encode(random_bytes(32))]);
-        $autoconfig = new Autoconfig($this->http, true, static fn(string $name, int $type): array => []);
+        $dns = static fn(string $name, int $type): array => $type === DNS_MX && $name === 'workspace.example'
+            ? [['target' => 'aspmx.l.google.com', 'pri' => 1]]
+            : [];
+        $autoconfig = new Autoconfig($this->http, true, $dns);
         $this->app = App::create($config, self::$db, new Logger('api', 'error', Http::memoryStream()), [], new FakeConnectionTester(), null, $autoconfig);
         $userId = Uuid::v4();
         Database::run($pdo, 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [$userId, 'me@example.org', 'unused']);
@@ -65,6 +68,10 @@ final class AutoconfigRoutesTest extends DatabaseTestCase
 
         $response = $this->get('/api/autoconfig?domain=nothing.example', $this->token);
         self::assertSame(['found' => false], Http::json($response));
+
+        // Only the MX is known: its base domain lets the client pick a preset.
+        $response = $this->get('/api/autoconfig?domain=workspace.example', $this->token);
+        self::assertSame(['found' => false, 'mxDomain' => 'google.com'], Http::json($response));
     }
 
     public function testNeedsSessionAndValidDomain(): void

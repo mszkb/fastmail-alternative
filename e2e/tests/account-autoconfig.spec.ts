@@ -63,3 +63,37 @@ test('unknown domain: detected servers pre-fill the form, nothing found leaves i
   await expect(status).toHaveCount(0)
   expect(asked).toEqual(['eigene-domain.example', 'unbekannt.example'])
 })
+
+test('own domain at a known provider: the MX host selects its preset', async ({ page }) => {
+  await page.route('**/api/autoconfig?*', async (route) => {
+    const domain = new URL(route.request().url()).searchParams.get('domain') ?? ''
+    await route.fulfill({
+      json:
+        domain === 'workspace.example'
+          ? { found: false, mxDomain: 'google.com' }
+          : { found: false },
+    })
+  })
+  await page.goto('/')
+  await openSettings(page)
+  const form = page.locator('form', {
+    has: page.getByRole('heading', { name: 'Konto hinzufügen' }),
+  })
+  const imap = form.locator('fieldset').filter({ has: page.locator('legend', { hasText: 'IMAP' }) })
+  const address = form.getByLabel('E-Mail-Adresse des Kontos')
+  const status = form.getByTestId('autoconfig-status')
+
+  await address.fill('ich@workspace.example')
+  await address.blur()
+  await expect(form.getByLabel('Anbieter')).toHaveValue('gmail')
+  await expect(status).toContainText('Gmail / Google Workspace (MX-Eintrag)')
+  await expect(imap.getByLabel('Host')).toHaveValue('imap.gmail.com')
+  await expect(imap.getByLabel('Benutzer')).toHaveValue('ich@workspace.example')
+
+  // Another domain: the preset and its servers go again.
+  await address.fill('ich@unbekannt.example')
+  await address.blur()
+  await expect(form.getByLabel('Anbieter')).toHaveValue('')
+  await expect(status).toContainText('Keine Server-Einstellungen gefunden')
+  await expect(imap.getByLabel('Host')).toHaveValue('')
+})
