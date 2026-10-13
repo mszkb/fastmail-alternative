@@ -89,8 +89,9 @@ test('offline: search the cached messages, open a hit, search online again', asy
   await expect(detail.getByRole('heading', { name: first })).toBeVisible()
   await expect(detail.getByText(`Projekt Zebra${run} ist fertig`)).toBeVisible()
 
-  // Back online: the full search is offered.
-  await field.fill(`Offline ${run}`)
+  // Back online: the full search is offered (subject: because GreenMail
+  // refuses the FROM/TO values with spaces that free text sends).
+  await field.fill(`subject:"Offline ${run}"`)
   await page.keyboard.press('Enter')
   await expect(results.getByRole('status')).toHaveText('2 gespeicherte Treffer')
   await context.setOffline(false)
