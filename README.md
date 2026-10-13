@@ -13,7 +13,7 @@ docker compose up -d --build --wait
 docker compose exec php php bin/secrets.php export   # MASTER_KEY separat sichern!
 ```
 
-Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md).
+Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md). Ob dein Hoster passt, zeigt vorab [`scripts/hosting-check.php`](scripts/hosting-check.php) (eine Datei hochladen und im Browser öffnen).
 
 Ausführlich (Voraussetzungen, Ersteinrichtung, Push, Backup, Upgrade, Troubleshooting): [Betreiber-Doku](docs/operations/README.md)
 

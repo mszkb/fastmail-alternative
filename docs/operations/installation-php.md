@@ -22,6 +22,8 @@ Für einen eigenen Server ist die [Docker-Installation](installation.md) der Sta
 | Netzwerk  | ausgehende Verbindungen zu IMAP 993 und SMTP 465/587 (manche Hoster sperren sie – der Installer prüft das)                                                                 |
 | Cron      | Cronjob mit PHP-CLI (jede Minute) oder ein Web-Cron-Dienst, der eine URL aufruft                                                                                           |
 
+**Vorab testen, ob der Hoster passt:** [`scripts/hosting-check.php`](../../scripts/hosting-check.php) ist eine einzelne Datei ohne Abhängigkeiten. In den Webroot hochladen und `https://<domain>/hosting-check.php` aufrufen. Sie prüft PHP-Version, Erweiterungen und gesperrte Funktionen, Argon2id/AES-GCM/EC-Schlüssel, HTTPS, Laufzeit- und Upload-Grenzen, einen beschreibbaren Ordner neben dem Webroot, ausgehende Verbindungen zu IMAP 993, SMTP 465/587 und Web Push (mit Zertifikatsprüfung) und – mit den Zugangsdaten im Formular – Datenbankversion, die für Migrationen nötigen Rechte und `SKIP LOCKED` (mit einer Testtabelle `fma_check_…`, die sofort wieder gelöscht wird). Das Passwort wird weder gespeichert noch angezeigt. Cron und `.htaccess` lassen sich von dort nicht sicher prüfen. Die Datei sperrt sich 60 Minuten nach dem ersten Aufruf selbst; danach mit dem Knopf am Seitenende oder per FTP löschen. Die Syntax läuft auch auf altem PHP, damit eine zu alte Version lesbar gemeldet wird.
+
 ### Aufbau des Pakets
 
 Das Paket `fma-<version>-php.zip` (gebaut mit `scripts/build-php-release.sh`, siehe [unten](#paket-selbst-bauen)) enthält zwei Ordner:
