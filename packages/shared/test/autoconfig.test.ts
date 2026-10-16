@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoconfigDomain, autoconfigFields } from '../src/provider-presets'
+import { autoconfigDomain, autoconfigFields, presetForMxDomain } from '../src/provider-presets'
 
 describe('autoconfig (#165)', () => {
   it('asks only for complete addresses without a preset', () => {
@@ -32,5 +32,12 @@ describe('autoconfig (#165)', () => {
       autoconfigFields({ ...result, smtp: null, username: 'address' }, 'ich@example.org'),
     ).toEqual({ imapHost: 'imap.example.org', imapPort: 993, user: 'ich@example.org' })
     expect(autoconfigFields({ found: false }, 'ich@example.org')).toBeUndefined()
+  })
+
+  it('finds the preset of an MX base domain', () => {
+    expect(presetForMxDomain('google.com')?.id).toBe('gmail')
+    expect(presetForMxDomain(' Outlook.com ')?.id).toBe('microsoft')
+    expect(presetForMxDomain('messagingengine.com')?.id).toBe('fastmail')
+    expect(presetForMxDomain('example.org')).toBeUndefined()
   })
 })

@@ -13,7 +13,9 @@ namespace Fma\Mail;
  *    unless disabled (AUTOCONFIG_ISPDB=0);
  * 3. DNS SRV records after RFC 6186/8314 (_imaps, _imap, _submissions, _submission);
  * 4. the MX host's base domain (e.g. google.com for Google Workspace on an
- *    own domain) looked up in the ISPDB.
+ *    own domain): returned as `mxDomain`, so the client can pick its provider
+ *    preset, and looked up in the ISPDB (unless disabled). The MX lookup is
+ *    DNS only and also runs with the ISPDB disabled.
  *
  * Only the domain leaves the server - never the address or the password.
  * The result only pre-fills the account form; the connection test confirms
@@ -43,7 +45,9 @@ final class Autoconfig
     }
 
     /**
-     * @return array{source: string, imap: ?array{host: string, port: int}, smtp: ?array{host: string, port: int}, username: 'address'|'localpart'}|null
+     * A result without `source` carries only the MX base domain (nothing else found).
+     *
+     * @return array{source?: string, imap?: ?array{host: string, port: int}, smtp?: ?array{host: string, port: int}, username?: 'address'|'localpart', mxDomain?: string}|null
      */
     public function discover(string $domain): ?array
     {
@@ -69,17 +73,18 @@ final class Autoconfig
         if ($srv !== null) {
             return ['source' => 'srv'] + $srv;
         }
+        $base = $this->mxBaseDomain($domain);
+        if ($base === null || $base === $domain) {
+            return null;
+        }
         if ($this->useIspdb) {
-            $base = $this->mxBaseDomain($domain);
-            if ($base !== null && $base !== $domain) {
-                $found = $this->fromUrl(self::ISPDB_URL . $base, $domain, $deadline);
-                if ($found !== null) {
-                    return ['source' => 'mx'] + $found;
-                }
+            $found = $this->fromUrl(self::ISPDB_URL . $base, $domain, $deadline);
+            if ($found !== null) {
+                return ['source' => 'mx'] + $found + ['mxDomain' => $base];
             }
         }
 
-        return null;
+        return ['mxDomain' => $base];
     }
 
     /**
@@ -177,7 +182,8 @@ final class Autoconfig
         $records = array_filter(($this->dns)($domain, DNS_MX), static fn(array $r): bool => isset($r['target']));
         usort($records, static fn(array $a, array $b): int => (int) ($a['pri'] ?? 0) <=> (int) ($b['pri'] ?? 0));
         $host = strtolower(rtrim((string) ($records[0]['target'] ?? ''), '.'));
-        if (preg_match(self::DOMAIN_RE, $host) !== 1) {
+        // A mail server under the address domain itself names no provider.
+        if (preg_match(self::DOMAIN_RE, $host) !== 1 || $host === $domain || str_ends_with($host, ".{$domain}")) {
             return null;
         }
 

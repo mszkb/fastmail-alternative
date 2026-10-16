@@ -7,6 +7,8 @@
 // password the provider expects (e.g. an app password at Fastmail).
 // Unknown domains (#165): the server detects the settings (autoconfig,
 // ISPDB, DNS SRV, MX); they only pre-fill fields the user has not typed.
+// An MX host of a known provider (Google Workspace, Microsoft 365 on an own
+// domain) selects its preset, with its hint and sign-in.
 // Sign-in with Google/Microsoft (#36): offered for the Gmail and Microsoft
 // presets when the server has the provider configured; OAuth accounts sign
 // in again instead of editing credentials.
@@ -20,6 +22,7 @@ import {
   presetById,
   presetFields,
   presetForAddress,
+  presetForMxDomain,
   syncSinceFromDays,
 } from '@fma/shared'
 import type {
@@ -90,6 +93,8 @@ const presetId = ref('')
 const preset = computed(() => (presetId.value ? presetById(presetId.value) : undefined))
 // A provider (or "Eigener Server") was picked by hand: no auto-detection.
 let presetChosenByUser = false
+// The preset was selected by the domain's MX host (#165), not its name.
+const presetViaMx = ref(false)
 
 function applyPreset(): void {
   const chosen = preset.value
@@ -112,10 +117,12 @@ function clearAutoPreset(previous: ProviderPreset): void {
   if (imapHost.value === fields.imapHost) imapHost.value = ''
   if (smtpHost.value === fields.smtpHost) smtpHost.value = ''
   presetId.value = ''
+  presetViaMx.value = false
 }
 
 function onPresetChange(): void {
   presetChosenByUser = true
+  presetViaMx.value = false
   detectionRun++
   detection.value = 'idle'
   detectedFields = null
@@ -164,8 +171,27 @@ async function detectSettings(): Promise<void> {
     // Offline: manual input as before.
   }
   if (run !== detectionRun || presetId.value) return
-  const fields = result ? autoconfigFields(result, emailAddress.value) : undefined
   const previous = detectedFields
+  const mxPreset = result?.mxDomain ? presetForMxDomain(result.mxDomain) : undefined
+  if (mxPreset && free(imapHost.value, previous?.imapHost)) {
+    // Like detected values: typed SMTP server or user name stay.
+    const smtpFree = free(smtpHost.value, previous?.smtpHost)
+    const userFree = free(imapUser.value, previous?.user) || imapUser.value.includes('@')
+    clearDetected()
+    presetId.value = mxPreset.id
+    presetViaMx.value = true
+    const values = presetFields(mxPreset, emailAddress.value)
+    imapHost.value = values.imapHost
+    imapPort.value = values.imapPort
+    if (smtpFree) {
+      smtpHost.value = values.smtpHost
+      smtpPort.value = values.smtpPort
+    }
+    if (userFree && values.user) imapUser.value = values.user
+    samePassword.value = true
+    return
+  }
+  const fields = result ? autoconfigFields(result, emailAddress.value) : undefined
   if (!fields || !result?.source) {
     clearDetected()
     detection.value = 'none'
@@ -196,6 +222,7 @@ function onAddressChange(): void {
     detection.value = 'idle'
     detectedFields = null
     presetId.value = detected.id
+    presetViaMx.value = false
     applyPreset()
   } else if (!detected && !presetChosenByUser && preset.value) {
     clearAutoPreset(preset.value)
@@ -416,6 +443,7 @@ async function submit(): Promise<void> {
     syncChoice.value = 'all'
     presetId.value = ''
     presetChosenByUser = false
+    presetViaMx.value = false
     detection.value = 'idle'
     detectedFields = null
     emit('created')
@@ -461,6 +489,15 @@ async function submit(): Promise<void> {
         </option>
       </select>
     </label>
+    <p
+      v-if="!editing && preset && presetViaMx"
+      class="preset-hint muted"
+      role="status"
+      data-testid="autoconfig-status"
+    >
+      Die Domain empfängt ihre Mails bei {{ preset.label }} (MX-Eintrag) – Einstellungen von dort
+      übernommen. Bitte prüfen – der Verbindungstest bestätigt sie.
+    </p>
     <p
       v-if="!editing && preset && !signInOnly"
       class="preset-hint"

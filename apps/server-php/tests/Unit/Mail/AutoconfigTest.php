@@ -88,7 +88,8 @@ final class AutoconfigTest extends TestCase
     {
         $http = new FakeGetter([Autoconfig::ISPDB_URL . 'example.org' => self::XML, Autoconfig::ISPDB_URL . 'google.com' => self::XML]);
         $dns = static fn(string $name, int $type): array => $type === DNS_MX ? [['target' => 'aspmx.l.google.com', 'pri' => 1]] : [];
-        self::assertNull((new Autoconfig($http, false, $dns))->discover('example.org'));
+        // The MX lookup is DNS only and still names the base domain for the presets.
+        self::assertSame(['mxDomain' => 'google.com'], (new Autoconfig($http, false, $dns))->discover('example.org'));
         foreach ($http->requested as $url) {
             self::assertStringNotContainsString('thunderbird', $url);
         }
@@ -117,7 +118,22 @@ final class AutoconfigTest extends TestCase
             : [];
         $result = (new Autoconfig($http, true, $dns))->discover('example.org');
         self::assertSame('mx', $result['source'] ?? null);
+        self::assertSame('google.com', $result['mxDomain'] ?? null);
         self::assertContains(Autoconfig::ISPDB_URL . 'google.com', $http->requested);
+    }
+
+    public function testMxBaseDomainWithoutIspdbEntry(): void
+    {
+        $dns = static fn(string $name, int $type): array => $type === DNS_MX && $name === 'example.org'
+            ? [['target' => 'example-org.mail.protection.outlook.com.', 'pri' => 0]]
+            : [];
+        self::assertSame(['mxDomain' => 'outlook.com'], (new Autoconfig(new FakeGetter([]), true, $dns))->discover('example.org'));
+
+        // An MX under the domain itself says nothing about the provider.
+        $own = static fn(string $name, int $type): array => $type === DNS_MX ? [['target' => 'mx.example.org', 'pri' => 0]] : [];
+        self::assertNull((new Autoconfig(new FakeGetter([]), true, $own))->discover('example.org'));
+        $sub = static fn(string $name, int $type): array => $type === DNS_MX ? [['target' => 'mx.team.example.org', 'pri' => 0]] : [];
+        self::assertNull((new Autoconfig(new FakeGetter([]), true, $sub))->discover('team.example.org'));
     }
 
     public function testNothingFoundAndInvalidDomain(): void

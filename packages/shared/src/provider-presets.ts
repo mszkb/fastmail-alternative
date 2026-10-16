@@ -21,6 +21,11 @@ export interface ProviderPreset {
   hint: string
   /** Address domains that select this preset automatically. */
   domains: string[]
+  /**
+   * Base domains of the provider's MX hosts (#165): an own domain whose mail
+   * goes there (e.g. Google Workspace) gets this preset after detection.
+   */
+  mxDomains?: string[]
   /** Sign-in with this OAuth provider when the server has it configured (#36). */
   oauth?: OAuthProviderId
 }
@@ -45,6 +50,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'fastmail.to',
       'messagingengine.com',
     ],
+    mxDomains: ['messagingengine.com'],
   },
   {
     id: 'posteo',
@@ -63,6 +69,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     auth: 'password',
     hint: 'mailbox.org: das normale Passwort des Postfachs verwenden.',
     domains: ['mailbox.org'],
+    mxDomains: ['mailbox.org'],
   },
   {
     id: 'gmail',
@@ -74,6 +81,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'Google verlangt ein App-Passwort (nur mit aktivierter Bestätigung in zwei Schritten): im ' +
       'Google-Konto unter „Sicherheit“ → „App-Passwörter“ anlegen. Labels erscheinen als Ordner.',
     domains: ['gmail.com', 'googlemail.com'],
+    mxDomains: ['google.com', 'googlemail.com'],
     oauth: 'google',
   },
   {
@@ -86,6 +94,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'iCloud verlangt ein app-spezifisches Passwort: unter account.apple.com → „Anmelden und ' +
       'Sicherheit“ → „App-spezifische Passwörter“ anlegen. Benutzer ist die iCloud-Adresse.',
     domains: ['icloud.com', 'me.com', 'mac.com'],
+    mxDomains: ['icloud.com'],
   },
   {
     id: 'yahoo',
@@ -133,6 +142,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'live.de',
       'msn.com',
     ],
+    mxDomains: ['outlook.com'],
     oauth: 'microsoft',
   },
 ]
@@ -146,6 +156,12 @@ export function presetForAddress(address: string): ProviderPreset | undefined {
   const domain = address.trim().toLowerCase().split('@')[1]
   if (!domain) return undefined
   return PROVIDER_PRESETS.find((p) => p.domains.includes(domain))
+}
+
+/** The preset whose MX hosts sit under this base domain (`mxDomain` of `GET /api/autoconfig`). */
+export function presetForMxDomain(mxDomain: string): ProviderPreset | undefined {
+  const domain = mxDomain.trim().toLowerCase()
+  return PROVIDER_PRESETS.find((p) => p.mxDomains?.includes(domain))
 }
 
 /** Form values a preset fills in; the user name is the full address. */
@@ -178,6 +194,8 @@ export interface AutoconfigResponse {
   smtp?: AutoconfigServer | null
   /** User name the provider expects: the full address or its local part. */
   username?: 'address' | 'localpart'
+  /** Base domain of the MX host, when that step ran (e.g. `google.com`). */
+  mxDomain?: string
 }
 
 /** German names of the sources, for the hint under the detected values. */

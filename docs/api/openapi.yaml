@@ -1558,6 +1558,9 @@ components:
             - address
             - localpart
           description: User name the provider expects - the full address or the part before the `@`.
+        mxDomain:
+          type: string
+          description: Base domain of the preferred MX host (e.g. `google.com`), when the MX step ran.
     SendRecipient:
       description: A recipient of `POST /api/outbox`, either a plain address or `{ name, address }`.
       oneOf:
@@ -3287,7 +3290,10 @@ paths:
         then `https://<domain>/.well-known/autoconfig/mail/config-v1.1.xml`),
         the Thunderbird ISPDB (off with `AUTOCONFIG_ISPDB=0`), DNS SRV
         records (RFC 6186/8314) and the ISPDB entry of the MX host's base
-        domain (`source` names the one that answered). Only the domain is
+        domain (`source` names the one that answered). When the MX step ran,
+        `mxDomain` names that base domain (also with the ISPDB off and
+        `found` false), so the client can pick its provider preset, e.g.
+        Gmail for Google Workspace on an own domain. Only the domain is
         sent - never the address or a password; https only, public hosts
         only (SSRF protection), at most ~8 s. Servers without TLS are never
         returned; implicit TLS is preferred over STARTTLS. Nothing found is
