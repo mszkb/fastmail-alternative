@@ -61,3 +61,31 @@ docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$MARIADB_PASSWOR
 ```
 
 Ein geprüfter Anbieter bekommt in der Spalte „Geprüft“ das Datum; abweichende Werte in der Tabelle korrigieren.
+
+## Live-Tests gegen ein echtes Konto
+
+`apps/server-php/tests/Live/ProviderLiveTest.php` prüft einen echten Anbieter mit der Transport-Policy des Betriebs (nur öffentliche Hosts, Zertifikate werden geprüft):
+
+- Verbindungstest IMAP und SMTP, ohne Zugangsdaten im Log; die gemeldeten Erweiterungen (IDLE, CONDSTORE, QRESYNC, MOVE, SPECIAL-USE, UIDPLUS, LITERAL+) stehen in der Testausgabe – Grundlage für die Spalten der Tabelle oben
+- falsches Passwort ergibt `AUTH_FAILED`
+- Ordnerrollen Posteingang, Gesendet, Entwürfe, Papierkorb und Spam werden erkannt
+- eine Mail an sich selbst kommt per SMTP im Posteingang an (nicht im Spam), wird per IMAP-Suche nach Betreff gefunden und danach gelöscht
+
+Nur mit einem **eigenen Testkonto** verwenden: Jeder Lauf sendet eine Mail und löscht alle Mails mit dem Betreff-Präfix `fma-live-` in Posteingang, Spam und Gesendet (auch Reste abgebrochener Läufe). Ohne Zugangsdaten werden die Tests übersprungen.
+
+Lokal: `.env.live.example` nach `.env.live` kopieren (nie committen), Zugangsdaten eintragen, `make test-live`. Beim Testkonto bei GMX/Web.de vorher im Webmail _Einstellungen → POP3/IMAP Abruf_ einschalten.
+
+Im Gitea-Nightly (`msz/gitea-workflows`) als eigener Schritt, die Zugangsdaten als Secrets `LIVE_MAIL_USER` und `LIVE_MAIL_PASSWORD`:
+
+```yaml
+- name: Live provider tests (GMX)
+  working-directory: apps/server-php
+  env:
+    LIVE_MAIL_USER: ${{ secrets.LIVE_MAIL_USER }}
+    LIVE_MAIL_PASSWORD: ${{ secrets.LIVE_MAIL_PASSWORD }}
+    LIVE_IMAP_HOST: imap.gmx.net
+    LIVE_SMTP_HOST: mail.gmx.net
+  run: composer test:live
+```
+
+Nicht im GitHub-CI: Pull Requests aus Forks dürfen keine Zugangsdaten sehen, und Anbieter sperren Logins aus fremden Rechenzentren gern.
