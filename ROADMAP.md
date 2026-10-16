@@ -208,3 +208,4 @@ Aktueller Stand mit Belegen und offenen Punkten: [`docs/process/mvp-status.md`](
 - **Native Clients pro Plattform** (ADR-0010): iOS zuerst, dann Android und Desktop. Logik auf dem Server, gemeinsamer API-Vertrag (OpenAPI) und gemeinsame Design-Tokens.
 - **Native iOS-App** mit APNs-Push – das eigentliche Langfristziel (siehe README). Die PWA ist der Startpunkt; API und Push-Architektur sollen von Anfang an so gebaut werden, dass ein nativer Client ohne Backend-Umbau andocken kann.
 - Erweiterte Regeln/Filter (Sieve-ähnlich), Kalender/Kontakte, KI-Funktionen – bewusst nach dem MVP.
+- **MCP-Server** für KI-Clients (Claude, ChatGPT, lokale Modelle) als Endpunkt `/api/mcp` im PHP-Backend – Machbarkeit und Stufenplan: [`docs/architecture/mcp.md`](docs/architecture/mcp.md); wartet auf Owner-Entscheidung.
