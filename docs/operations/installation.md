@@ -100,7 +100,7 @@ Das baut die Images (web und php; der worker nutzt das php-Image), startet alle 
 | `web`     | `apps/web/Dockerfile`        | PWA (statisch, nginx, Sicherheitsheader)                                                  |
 | `php`     | `apps/server-php/Dockerfile` | php-fpm für `/api/*`; wendet beim Start ausstehende Migrationen an                        |
 | `worker`  | dasselbe Image wie `php`     | `php bin/worker.php`: Hintergrundjobs (Sync, Versand, Push, Aufräumen) und IMAP IDLE      |
-| `mariadb` | `mariadb:11`                 | Datenbank (Volume `mariadb-data`), nur im Compose-Netz erreichbar, kein Port auf dem Host |
+| `mariadb` | `mariadb:12.3`               | Datenbank (Volume `mariadb-data`), nur im Compose-Netz erreichbar, kein Port auf dem Host |
 
 Verschlüsselte Rohmails liegen im Volume `mail-data`.
 

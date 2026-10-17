@@ -40,7 +40,7 @@ upgrade: ## Upgrade to origin/main (see docs/operations/upgrade.md)
 test-services: ## Start MariaDB (33306) and GreenMail (3143/3025, TLS 3993/3465) for tests; after changes: make test-services-down
 	docker start $(TEST_DB) 2>/dev/null || docker run -d --name $(TEST_DB) \
 	  -e MARIADB_USER=mail -e MARIADB_PASSWORD=mail -e MARIADB_DATABASE=mail_test \
-	  -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:33306:3306 mariadb:11 \
+	  -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:33306:3306 mariadb:12.3 \
 	  --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 	docker start $(TEST_MAIL) 2>/dev/null || docker run -d --name $(TEST_MAIL) \
 	  -e GREENMAIL_OPTS='-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.users=testuser@example.com:secret123' \

@@ -180,7 +180,8 @@ services:
         condition: service_healthy
 
   mariadb:
-    image: mariadb:11
+    # LTS line only (12.3 LTS); rolling releases (12.0-12.2, 13.x) are skipped.
+    image: mariadb:12.3
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 256m
@@ -197,6 +198,8 @@ services:
       MARIADB_USER: ${MARIADB_USER:-mail}
       # Written by `secrets`: MARIADB_PASSWORD from .env, else a generated one.
       MARIADB_PASSWORD_FILE: /run/fma-secrets/mariadb_password
+      # Runs mariadb-upgrade once when the data volume comes from an older version.
+      MARIADB_AUTO_UPGRADE: '1'
       # Root is not needed by the app; a random one is printed once to the log.
       MARIADB_RANDOM_ROOT_PASSWORD: '1'
     volumes:
