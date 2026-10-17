@@ -52,7 +52,7 @@ final class WebPushTest extends TestCase
         self::assertSame(4096, unpack('N', substr($body, 16, 4))[1] ?? null);
         self::assertSame(65, \ord($body[20]));
         $asPublic = substr($body, 21, 65);
-        $secret = openssl_pkey_derive(WebPushCrypto::publicKeyFromPoint($asPublic), $ua, 32);
+        $secret = openssl_pkey_derive(WebPushCrypto::publicKeyFromPoint($asPublic), $ua);
         self::assertIsString($secret);
         $ikm = hash_hkdf('sha256', $secret, 32, "WebPush: info\x00" . $uaPublic . $asPublic, $auth);
         $cek = hash_hkdf('sha256', $ikm, 16, "Content-Encoding: aes128gcm\x00", $salt);

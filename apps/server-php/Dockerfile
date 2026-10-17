@@ -8,7 +8,7 @@ COPY composer.json composer.lock ./
 # Extensions are installed in the runtime stage, not in this one.
 RUN composer install --no-dev --no-interaction --no-progress --no-scripts --prefer-dist --optimize-autoloader --ignore-platform-req='ext-*'
 
-FROM php:8.3-fpm-alpine
+FROM php:8.5-fpm-alpine
 # pdo_mysql for MySQL/MariaDB, pcntl for the worker's signal handling;
 # openssl, mbstring, sodium and argon2 are part of the official image.
 RUN docker-php-ext-install pdo_mysql pcntl \

@@ -213,7 +213,7 @@ final class PushTest extends DatabaseTestCase
         $salt = substr($body, 0, 16);
         $asPublic = substr($body, 21, 65);
         $uaPublic = WebPushCrypto::publicPoint($this->uaKey);
-        $secret = (string) openssl_pkey_derive(WebPushCrypto::publicKeyFromPoint($asPublic), $this->uaKey, 32);
+        $secret = (string) openssl_pkey_derive(WebPushCrypto::publicKeyFromPoint($asPublic), $this->uaKey);
         $ikm = hash_hkdf('sha256', $secret, 32, "WebPush: info\x00" . $uaPublic . $asPublic, (string) WebPushCrypto::base64UrlDecode($this->auth));
         $sealed = substr($body, 86);
         $plain = openssl_decrypt(substr($sealed, 0, -16), 'aes-128-gcm', hash_hkdf('sha256', $ikm, 16, "Content-Encoding: aes128gcm\x00", $salt), OPENSSL_RAW_DATA, hash_hkdf('sha256', $ikm, 12, "Content-Encoding: nonce\x00", $salt), substr($sealed, -16));
