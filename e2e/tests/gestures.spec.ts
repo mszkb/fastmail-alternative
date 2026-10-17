@@ -101,3 +101,64 @@ test('swipe back never drops a half-filled form', async ({ page }) => {
   await touchDrag(page, { x: 60, y: viewport.height / 2 }, { x: 280, y: viewport.height / 2 })
   await expect(compose.getByLabel('Nachricht')).toHaveValue('Nicht verlieren')
 })
+
+test('swipe right leaves the settings, swipe left goes forward again', async ({ page }) => {
+  await openAccount(page, ACCOUNT_A)
+  await openSettings(page)
+  const settings = page.getByRole('heading', { name: 'Einstellungen', level: 1 })
+  const list = page.getByRole('region', { name: 'Nachrichten' })
+  const viewport = page.viewportSize()!
+  const y = viewport.height / 3
+  const right = viewport.width - 60
+
+  await touchDrag(page, { x: 60, y }, { x: 280, y })
+  await expect(settings).toBeHidden()
+  await expect(list.getByText('Hallo 1')).toBeVisible()
+
+  // Forward step from the swipe back: the settings open again.
+  await touchDrag(page, { x: right, y }, { x: right - 220, y })
+  await expect(settings).toBeVisible()
+
+  // That was the last forward step: another swipe left only rubber-bands.
+  await touchDrag(page, { x: right, y }, { x: right - 220, y })
+  await page.waitForTimeout(500)
+  await expect(settings).toBeVisible()
+})
+
+test('swipe left reopens a message only while a forward step exists', async ({ page }) => {
+  await openAccount(page, ACCOUNT_A)
+  const list = page.getByRole('region', { name: 'Nachrichten' })
+  const detail = page.getByRole('region', { name: 'Nachricht', exact: true })
+  const viewport = page.viewportSize()!
+  const y = viewport.height / 2
+  const right = viewport.width - 60
+  await expect(list.getByText('Hallo 2')).toBeVisible()
+
+  // No forward history yet: nothing navigates.
+  await touchDrag(page, { x: right, y }, { x: right - 220, y })
+  await page.waitForTimeout(500)
+  await expect(list).toBeVisible()
+  await expect(detail).toBeHidden()
+
+  await list.getByRole('button', { name: /Hallo 2/ }).click()
+  await expect(detail.getByRole('heading', { name: 'Hallo 2' })).toBeVisible()
+  await touchDrag(page, { x: 60, y }, { x: 260, y })
+  await expect(list).toBeVisible()
+
+  await touchDrag(page, { x: right, y }, { x: right - 220, y })
+  await expect(detail.getByRole('heading', { name: 'Hallo 2' })).toBeVisible()
+  await expect(list).toBeHidden()
+
+  // Back by swipe, then a new navigation (another message, closed with the
+  // button): the forward step is gone, like in a browser.
+  await touchDrag(page, { x: 60, y }, { x: 260, y })
+  await expect(list).toBeVisible()
+  await list.getByRole('button', { name: /Hallo 1/ }).click()
+  await expect(detail.getByRole('heading', { name: 'Hallo 1' })).toBeVisible()
+  await detail.getByRole('button', { name: /Zurück/ }).click()
+  await expect(list).toBeVisible()
+  await touchDrag(page, { x: right, y }, { x: right - 220, y })
+  await page.waitForTimeout(500)
+  await expect(list).toBeVisible()
+  await expect(detail).toBeHidden()
+})
