@@ -36,7 +36,7 @@ use Slim\App;
 final class AccountRoutes
 {
     public const MAX_ACCOUNTS = 20;
-    private const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+\z/u';
+    public const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+\z/u';
     /** DNS hostname labels (letters, digits, inner hyphens), optional trailing dot. */
     private const HOSTNAME_RE = '/^(?=.{1,253}\z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?\z/';
     private const NOT_FOUND = 'Konto nicht gefunden.';
@@ -359,7 +359,7 @@ final class AccountRoutes
     }
 
     /** Credential blob JSON: {imapUser, imapPassword, smtpUser, smtpPassword}. */
-    private static function encryptCredentials(string $dek, string $accountId, HostConfig $imap, HostConfig $smtp): string
+    public static function encryptCredentials(string $dek, string $accountId, HostConfig $imap, HostConfig $smtp): string
     {
         $json = json_encode(
             ['imapUser' => $imap->user, 'imapPassword' => $imap->password, 'smtpUser' => $smtp->user, 'smtpPassword' => $smtp->password],
