@@ -24,6 +24,15 @@ final class Database
     }
 
     /**
+     * Drops the connection; the next pdo() connects again. For long-running
+     * processes after a database error (e.g. MariaDB restarted).
+     */
+    public function disconnect(): void
+    {
+        $this->pdo = null;
+    }
+
+    /**
      * Prepares and executes a statement. With ERRMODE_EXCEPTION failures
      * throw, so callers always get a statement back.
      *
