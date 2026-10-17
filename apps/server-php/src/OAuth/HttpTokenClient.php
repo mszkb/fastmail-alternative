@@ -29,12 +29,20 @@ final class HttpTokenClient implements TokenClient
             ],
             'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
-        $body = @file_get_contents($url, false, $context);
-        if ($body === false) {
+        // Headers from the stream metadata: the magic $http_response_header is deprecated since PHP 8.5.
+        $stream = @fopen($url, 'r', false, $context);
+        if ($stream === false) {
             throw new OAuthException('network');
         }
-        // PHP 8.4 deprecates the magic $http_response_header.
-        $headers = \function_exists('http_get_last_response_headers') ? (http_get_last_response_headers() ?? []) : $http_response_header;
+        try {
+            $body = stream_get_contents($stream);
+            $headers = stream_get_meta_data($stream)['wrapper_data'] ?? [];
+        } finally {
+            fclose($stream);
+        }
+        if ($body === false || !\is_array($headers)) {
+            throw new OAuthException('network');
+        }
         if ($headers === [] || preg_match('#^HTTP/\S+ (\d{3})#', $headers[0], $m) !== 1) {
             throw new OAuthException('network');
         }

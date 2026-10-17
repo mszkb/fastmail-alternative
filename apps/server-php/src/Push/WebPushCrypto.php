@@ -40,7 +40,7 @@ final class WebPushCrypto
         $asPrivate ??= self::generateKey();
         $asPublic = self::publicPoint($asPrivate);
 
-        $ecdhSecret = openssl_pkey_derive(self::publicKeyFromPoint($uaPublic), $asPrivate, 32);
+        $ecdhSecret = openssl_pkey_derive(self::publicKeyFromPoint($uaPublic), $asPrivate);
         if ($ecdhSecret === false || \strlen($ecdhSecret) !== 32) {
             throw new \RuntimeException('ECDH failed');
         }
