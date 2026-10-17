@@ -36,7 +36,7 @@ use Slim\App;
 final class AccountRoutes
 {
     public const MAX_ACCOUNTS = 20;
-    private const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+\z/u';
+    public const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+\z/u';
     /** DNS hostname labels (letters, digits, inner hyphens), optional trailing dot. */
     private const HOSTNAME_RE = '/^(?=.{1,253}\z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?\z/';
     private const NOT_FOUND = 'Konto nicht gefunden.';

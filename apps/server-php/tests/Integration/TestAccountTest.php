@@ -46,10 +46,10 @@ final class TestAccountTest extends DatabaseTestCase
         return TestAccount::add(self::$db, $this->instance, $this->tester, new JobQueue(self::$db), $env);
     }
 
-    private function createUser(): string
+    private function createUser(string $email = 'me@example.org'): string
     {
         $id = Uuid::v4();
-        Database::run(self::$db->pdo(), 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [$id, 'me@example.org', 'unused']);
+        Database::run(self::$db->pdo(), 'INSERT INTO `user` (id, email, password_hash) VALUES (?, ?, ?)', [$id, $email, 'unused']);
 
         return $id;
     }
@@ -115,5 +115,32 @@ final class TestAccountTest extends DatabaseTestCase
             self::assertStringContainsString('setup is not completed', $e->getMessage());
         }
         self::assertSame([], $this->tester->calls);
+    }
+
+    public function testRefusesALoginThatIsNoEmailAddress(): void
+    {
+        $this->createUser();
+
+        try {
+            $this->add(['LIVE_MAIL_USER' => 'tester'] + self::ENV);
+            self::fail('expected an invalid address');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('must be an email address', $e->getMessage());
+        }
+        self::assertSame([], $this->tester->calls);
+    }
+
+    public function testRefusesToPickOneOfSeveralUsers(): void
+    {
+        $this->createUser();
+        $this->createUser('other@example.org');
+
+        try {
+            $this->add();
+            self::fail('expected more than one user');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('more than one user', $e->getMessage());
+        }
+        self::assertSame(0, (int) Database::run(self::$db->pdo(), 'SELECT COUNT(*) FROM mail_account')->fetchColumn());
     }
 }

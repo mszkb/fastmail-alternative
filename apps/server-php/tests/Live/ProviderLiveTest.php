@@ -113,7 +113,8 @@ final class ProviderLiveTest extends TestCase
             $foundIn = null;
             $deadline = microtime(true) + 120;
             while ($foundIn === null && microtime(true) < $deadline) {
-                foreach ($folders as $path) {
+                // Delivery only: a copy in Sent may show up before the INBOX one.
+                foreach ($folders['delivery'] as $path) {
                     if ($this->search($client, $path, $subject) !== []) {
                         $foundIn = $path;
                         break;
@@ -124,7 +125,7 @@ final class ProviderLiveTest extends TestCase
                 }
             }
             // Before the assertions; also removes leftovers of earlier aborted runs.
-            foreach ($folders as $path) {
+            foreach ([...$folders['delivery'], ...$folders['sent']] as $path) {
                 $actions = new ImapActions($client);
                 $actions->select($path);
                 $actions->delete($actions->search(ImapActions::searchCriteria(['subject' => self::MARKER])['parts']));
@@ -139,20 +140,23 @@ final class ProviderLiveTest extends TestCase
     }
 
     /**
-     * INBOX, junk and sent (some providers keep a copy of SMTP mail).
+     * Where the mail may be delivered (INBOX, junk) and the sent folders
+     * (some providers keep a copy of SMTP mail there).
      *
-     * @return list<string>
+     * @return array{delivery: list<string>, sent: list<string>}
      */
     private function deliveryFolders(ImapClient $client): array
     {
-        $paths = ['INBOX'];
+        $folders = ['delivery' => ['INBOX'], 'sent' => []];
         foreach (FolderDetection::detect($client->list()) as $path => $role) {
-            if ($role === 'junk' || $role === 'sent') {
-                $paths[] = $path;
+            if ($role === 'junk') {
+                $folders['delivery'][] = $path;
+            } elseif ($role === 'sent') {
+                $folders['sent'][] = $path;
             }
         }
 
-        return $paths;
+        return $folders;
     }
 
     /** @return list<int> */

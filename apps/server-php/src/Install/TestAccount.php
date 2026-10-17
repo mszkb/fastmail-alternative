@@ -38,15 +38,25 @@ final class TestAccount
         if ($user === '' || $password === '' || $imapHost === '' || $smtpHost === '') {
             throw new \RuntimeException('LIVE_MAIL_USER, LIVE_MAIL_PASSWORD, LIVE_IMAP_HOST and LIVE_SMTP_HOST are required (.env.live)');
         }
+        // Login and sender address are the same value; stored like the account form does.
+        $address = mb_strtolower($user);
+        if (preg_match(AccountRoutes::EMAIL_RE, $address) !== 1) {
+            throw new \RuntimeException('LIVE_MAIL_USER must be an email address (it is also the sender address)');
+        }
         $imapPort = (int) (($env['LIVE_IMAP_PORT'] ?? '') ?: 993);
         $smtpPort = (int) (($env['LIVE_SMTP_PORT'] ?? '') ?: 587);
 
         $pdo = $db->pdo();
-        $userId = Database::run($pdo, 'SELECT id FROM `user` LIMIT 1')->fetchColumn();
-        if (!\is_string($userId)) {
+        // Single-user instance (ADR-0004): never guess the owner.
+        $userIds = Database::run($pdo, 'SELECT id FROM `user` LIMIT 2')->fetchAll(\PDO::FETCH_COLUMN);
+        if ($userIds === []) {
             throw new \RuntimeException('setup is not completed yet - create the user first');
         }
-        $existing = Database::run($pdo, 'SELECT id FROM mail_account WHERE user_id = ? AND LOWER(email_address) = LOWER(?)', [$userId, $user])->fetchColumn();
+        if (\count($userIds) !== 1 || !\is_string($userIds[0])) {
+            throw new \RuntimeException('the instance has more than one user - refusing to pick one');
+        }
+        $userId = $userIds[0];
+        $existing = Database::run($pdo, 'SELECT id FROM mail_account WHERE user_id = ? AND LOWER(email_address) = ?', [$userId, $address])->fetchColumn();
         if (\is_string($existing)) {
             return ['status' => 'exists', 'accountId' => $existing];
         }
@@ -68,7 +78,7 @@ final class TestAccount
             $jobs,
             $userId,
             self::DISPLAY_NAME,
-            $user,
+            $address,
             $imap,
             $smtp,
             $imapResult->capabilities,
