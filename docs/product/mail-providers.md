@@ -89,3 +89,15 @@ Im Gitea-Nightly (`msz/gitea-workflows`) als eigener Schritt, die Zugangsdaten a
 ```
 
 Nicht im GitHub-CI: Pull Requests aus Forks dürfen keine Zugangsdaten sehen, und Anbieter sperren Logins aus fremden Rechenzentren gern.
+
+### Testkonto in einer Instanz einrichten (nur für Entwickler)
+
+Dasselbe Konto lässt sich bei Bedarf in eine laufende Instanz eintragen, z. B. um die Oberfläche mit echten Mails zu testen. Es gehört nicht zur Installation: ohne `.env.live` passiert nichts, in der Oberfläche gibt es dafür keinen Eintrag.
+
+```sh
+make test-account   # im Projektverzeichnis neben der .env.live, Stack läuft
+```
+
+Der Befehl (`apps/server-php/bin/test-account.php`) nimmt denselben Weg wie „Konto hinzufügen“: erst der Verbindungstest, dann wird das Konto „Testkonto (live)“ verschlüsselt gespeichert und der erste Sync eingereiht. Ist die Adresse schon eingerichtet, ändert er nichts. Voraussetzung ist ein eingerichteter Benutzer. Die Zugangsdaten gehen nur als Umgebungsvariablen in den php-Container, nicht als Befehlsargument. Entfernen über die Oberfläche (Konto löschen).
+
+Ohne Docker (`pnpm dev:api`): `set -a; . ./.env.live; set +a; cd apps/server-php && php bin/test-account.php` mit derselben Datenbank-Konfiguration wie die API.

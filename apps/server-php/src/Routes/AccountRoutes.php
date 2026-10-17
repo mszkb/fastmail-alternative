@@ -359,7 +359,7 @@ final class AccountRoutes
     }
 
     /** Credential blob JSON: {imapUser, imapPassword, smtpUser, smtpPassword}. */
-    private static function encryptCredentials(string $dek, string $accountId, HostConfig $imap, HostConfig $smtp): string
+    public static function encryptCredentials(string $dek, string $accountId, HostConfig $imap, HostConfig $smtp): string
     {
         $json = json_encode(
             ['imapUser' => $imap->user, 'imapPassword' => $imap->password, 'smtpUser' => $smtp->user, 'smtpPassword' => $smtp->password],
