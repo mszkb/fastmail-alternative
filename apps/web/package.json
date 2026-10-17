@@ -14,7 +14,7 @@
   "dependencies": {
     "@fma/shared": "workspace:*",
     "@tabler/icons-vue": "^3.49.0",
-    "nuxt": "^4.5.2",
+    "nuxt": "^4.6.0",
     "vue": "^3.5.43"
   },
   "devDependencies": {
