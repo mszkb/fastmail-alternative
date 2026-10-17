@@ -50,6 +50,10 @@ while (!$stop) {
         }
     } catch (Throwable $e) {
         $logger->error('worker loop failed', ['errName' => $e::class]);
+        // A dead connection (database restarted) never recovers by itself.
+        if ($e instanceof PDOException) {
+            $db->disconnect();
+        }
         sleep(5);
     }
 }
