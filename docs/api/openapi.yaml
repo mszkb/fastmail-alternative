@@ -3769,8 +3769,8 @@ paths:
         - messages
       summary: Download one attachment
       description: |
-        Streams the decoded attachment. Only raster images
-        (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
+        Streams the decoded attachment (decoded while sent, not buffered).
+        Only raster images (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
         own content type and may be shown inline (`inline=1`); every other
         type is sent as `application/octet-stream` with
         `Content-Disposition: attachment`. Always sandboxed by CSP.
@@ -3833,6 +3833,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: Message or attachment not found (also for an invalid index or unsynced raw mail)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "503":
+          description: |
+            The raw mail does not fit into the server's PHP `memory_limit`
+            (it is decrypted in one piece, about twice its size is needed).
           content:
             application/json:
               schema:

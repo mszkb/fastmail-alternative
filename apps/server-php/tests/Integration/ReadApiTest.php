@@ -359,4 +359,49 @@ final class ReadApiTest extends DatabaseTestCase
         self::assertSame(['html' => null, 'remoteContentBlocked' => false], Http::json($this->call('GET', "/api/messages/{$noRaw}/html")));
         self::assertSame(['attachments' => []], Http::json($this->call('GET', "/api/messages/{$noRaw}/attachments")));
     }
+
+    public function testLargeAttachmentIsStreamed(): void
+    {
+        $inbox = $this->folder('INBOX');
+        $content = random_bytes(25 * 1024 * 1024);
+        $raw = "From: a@example.org\r\nSubject: x\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n"
+            . "--b1\r\nContent-Type: text/plain\r\n\r\nHallo\r\n"
+            . "--b1\r\nContent-Type: application/pdf; name=\"gross.pdf\"\r\nContent-Disposition: attachment; filename=\"gross.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+            . chunk_split(base64_encode($content), 76, "\r\n") . "--b1--\r\n";
+        $id = $this->message($inbox, 1, 'A', '2026-10-01 10:00:00', raw: $raw);
+        $expected = hash('sha256', $content);
+        $rawSize = \strlen($raw);
+        unset($content, $raw);
+
+        memory_reset_peak_usage();
+        $before = memory_get_usage();
+        $response = $this->call('GET', "/api/messages/{$id}/attachments/0");
+        $body = $response->getBody();
+        $hash = hash_init('sha256');
+        // Read in chunks like Slim's ResponseEmitter.
+        $body->rewind();
+        while (!$body->eof()) {
+            hash_update($hash, $body->read(8192));
+        }
+        $peak = memory_get_peak_usage() - $before;
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('application/octet-stream', $response->getHeaderLine('Content-Type'));
+        self::assertSame('attachment; filename="gross.pdf"; filename*=UTF-8\'\'gross.pdf', $response->getHeaderLine('Content-Disposition'));
+        self::assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
+        self::assertSame($expected, hash_final($hash));
+        // Ciphertext + plaintext once each (before #175: about five copies of the raw mail).
+        self::assertLessThan(2.5 * $rawSize, $peak, \sprintf('peak %.1f MB for a raw mail of %.1f MB', $peak / 1048576, $rawSize / 1048576));
+
+        // Too large for memory_limit: a clear error instead of a fatal one.
+        $limit = (string) \ini_get('memory_limit');
+        ini_set('memory_limit', (string) (memory_get_usage() + $rawSize));
+        try {
+            $tooLarge = $this->call('GET', "/api/messages/{$id}/attachments/0");
+        } finally {
+            ini_set('memory_limit', $limit);
+        }
+        self::assertSame(503, $tooLarge->getStatusCode());
+        self::assertStringContainsString('memory_limit', (string) Http::json($tooLarge)['message']);
+    }
 }

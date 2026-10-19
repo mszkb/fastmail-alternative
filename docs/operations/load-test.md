@@ -94,6 +94,19 @@ Zielwert „erste Seite bei lokalem Trefferbestand < 1 s“ erreicht. Seiten mit
 
 Gefundener Engpass: Zuerst wurden alle Zeilen gerendert (nur mit `content-visibility`); bei 10 000 Treffern dauerte jede weitere Seite ≈ 140 ms und Scrollen lief mit ≈ 12 fps. Jetzt rendert die Liste nur die Zeilen um den sichtbaren Bereich (Fenster mit Platzhaltern, einheitliche Zeilenhöhe).
 
+### Anhang-Download (#175, 2026-10-19, Entwicklungsmaschine, kein Pi)
+
+`ReadApiTest::testLargeAttachmentIsStreamed`: Mail mit einem 25-MB-Anhang (base64, Rohmail 34,2 MB), `GET /api/messages/{id}/attachments/0` im Prozess, Body in 8-KB-Stücken gelesen wie beim Senden; gemessen wird der Spitzen-Speicher des PHP-Prozesses über den Request (PHP 8.3, x86_64).
+
+| Stand                                                                        | Spitzen-Speicher |
+| ---------------------------------------------------------------------------- | ---------------- |
+| Vorher: Rohmail ganz entschlüsselt, Anhang dekodiert und in den Body kopiert | 171,6 MB (≈ 5×)  |
+| Nachher: Datei stückweise gelesen, Anhang als Stream ausgeliefert            | 68,5 MB (≈ 2×)   |
+
+Vorher lag die Rohmail bis zu fünfmal im Speicher: die gelesene Datei, zwei Kopien beim Abtrennen von Präfix, Nonce und Tag, der Klartext und der dekodierte Anhang. Jetzt liest `Envelope::decryptBytesFromStream()` Nonce, Chiffrat und Tag einzeln aus der Datei; der Klartext wandert in einen `php://temp`-Stream (wie bisher beim Parsen, ab 2 MB in eine temporäre Datei), und der MIME-Parser dekodiert den Anhang erst beim Senden.
+
+Was bleibt: Chiffrat und Klartext liegen einmal ganz im Speicher. AES-256-GCM wird in einem Stück geöffnet; der Tag wird geprüft, bevor irgendein Klartext verwendet wird ([ADR-0001](../adr/0001-mail-cache-mode.md)). Echtes Streaming bräuchte ein gestückeltes Format für die Rohmails (wie bei den Backups) und eine Migration aller gespeicherten Mails. Das lohnt erst, wenn Mails deutlich über 25 MB üblich werden. Bis dahin gilt: Eine Mail braucht beim Download etwa das Doppelte ihrer Größe plus 16 MB. Passt das nicht in `memory_limit`, antwortet der Server mit 503 und dem Hinweis auf `memory_limit` statt mit einem Fatal Error. Mit `memory_limit = 128M` (häufig bei Shared Hosting) reicht das für Mails bis etwa 50 MB, mit dem php-Container (256 MB) für etwa 110 MB.
+
 ### Gefundene Engpässe
 
 1. **Behoben: Die Nachrichtenliste sortierte den ganzen Ordner.** Sie ordnete nach dem Datum der verbundenen Nachricht, also musste MariaDB jede Zeile des Ordners samt verschlüsselter Spalten und Flag-Unterabfragen in eine temporäre Tabelle kopieren und sortieren (`Using temporary; Using filesort`): **475 ms (p50) je Seite bei 50 000 Mails** auf x86, auf dem Pi also mehrere Sekunden. Migration `0005_message_sort_key` kopiert das (unveränderliche) Sortierdatum nach `message_location.sort_at` und indiziert `(folder_id, sort_at, id)`; eine Seite wird jetzt in Indexreihenfolge gelesen: **4,1 ms**. Details: [Datenmodell](../architecture/data-model.md).
