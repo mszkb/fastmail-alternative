@@ -147,6 +147,39 @@ final class Envelope
         return self::openRaw($dataKey, substr($envelope, \strlen(self::BYTES_PREFIX)), $aad);
     }
 
+    /**
+     * decryptBytes for a file of `$size` bytes, read in pieces: only the
+     * ciphertext and the plaintext are in memory, no further copies of the
+     * envelope (a 25 MB attachment would otherwise be held five times).
+     *
+     * @param resource $handle positioned at the start of the envelope
+     */
+    public static function decryptBytesFromStream(string $dataKey, $handle, int $size, string $aad): string
+    {
+        $prefix = (string) fread($handle, \strlen(self::BYTES_PREFIX));
+        if ($prefix !== self::BYTES_PREFIX) {
+            // Legacy text format (small): read it whole.
+            return self::decryptBytes($dataKey, $prefix . (string) stream_get_contents($handle), $aad);
+        }
+        $ctLength = $size - \strlen(self::BYTES_PREFIX) - self::NONCE_BYTES - self::TAG_BYTES;
+        if ($ctLength < 0) {
+            throw new CryptoException('invalid envelope: too short');
+        }
+        self::assertKey($dataKey);
+        $nonce = (string) fread($handle, self::NONCE_BYTES);
+        $ct = $ctLength === 0 ? '' : (string) stream_get_contents($handle, $ctLength);
+        $tag = (string) fread($handle, self::TAG_BYTES);
+        if (\strlen($nonce) !== self::NONCE_BYTES || \strlen($ct) !== $ctLength || \strlen($tag) !== self::TAG_BYTES) {
+            throw new CryptoException('invalid envelope: truncated');
+        }
+        $plaintext = openssl_decrypt($ct, self::CIPHER, $dataKey, OPENSSL_RAW_DATA, $nonce, $tag, $aad);
+        if ($plaintext === false) {
+            throw new CryptoException('decryption failed: wrong key, context or corrupt data');
+        }
+
+        return $plaintext;
+    }
+
     /** Derives an HMAC key (e.g. for subject_hash) from a DEK, independent from the encryption key. */
     public static function deriveHmacKey(string $dataKey, string $context): string
     {

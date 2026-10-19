@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Fma\Mail;
 
+use Psr\Http\Message\StreamInterface;
 use ZBateson\MailMimeParser\IMessage;
 use ZBateson\MailMimeParser\MailMimeParser;
 use ZBateson\MailMimeParser\Message\IMessagePart;
@@ -32,6 +33,17 @@ final class MimeMail
         fwrite($stream, $raw);
         rewind($stream);
 
+        return self::parseStream($stream);
+    }
+
+    /**
+     * Parses from a stream positioned at the start; the parser reads parts
+     * from it lazily, so it has to stay open.
+     *
+     * @param resource $stream
+     */
+    public static function parseStream($stream): self
+    {
         return new self((new MailMimeParser())->parse($stream, false));
     }
 
@@ -95,17 +107,37 @@ final class MimeMail
         return ['meta' => self::meta($part, $index, \strlen($content)), 'content' => $content];
     }
 
+    /**
+     * Filename, type and the decoded content of one attachment as a stream
+     * (decoded while read, nothing buffered), null if there is no such part.
+     *
+     * @return array{filename: string, contentType: string, stream: ?StreamInterface}|null
+     */
+    public function attachmentStream(int $index): ?array
+    {
+        $parts = array_values($this->message->getAllAttachmentParts());
+        $part = $parts[$index] ?? null;
+
+        return $part === null ? null : self::names($part, $index) + ['stream' => $part->getBinaryContentStream()];
+    }
+
     /** @return array{index: int, filename: string, contentType: string, size: int, inline: bool} */
     private static function meta(IMessagePart $part, int $index, int $size): array
     {
         $parent = $part->getParent();
 
-        return [
-            'index' => $index,
-            'filename' => AttachmentNames::sanitizeFilename($part->getFilename(), 'anhang-' . ($index + 1)),
-            'contentType' => AttachmentNames::normalizeContentType($part->getContentType('application/octet-stream')),
+        return ['index' => $index] + self::names($part, $index) + [
             'size' => $size,
             'inline' => $parent !== null && strtolower((string) $parent->getContentType('')) === 'multipart/related',
+        ];
+    }
+
+    /** @return array{filename: string, contentType: string} */
+    private static function names(IMessagePart $part, int $index): array
+    {
+        return [
+            'filename' => AttachmentNames::sanitizeFilename($part->getFilename(), 'anhang-' . ($index + 1)),
+            'contentType' => AttachmentNames::normalizeContentType($part->getContentType('application/octet-stream')),
         ];
     }
 
