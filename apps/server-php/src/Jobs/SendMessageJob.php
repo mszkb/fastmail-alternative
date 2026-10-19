@@ -22,7 +22,9 @@ use Fma\Mail\Uploads;
  * outbox message via SMTP, then stores a copy in "Sent" (APPEND, \Seen).
  *
  * - Not yet accepted (`sent_at` NULL): permanent errors (auth, 5xx,
- *   blocked host/port) fail the message at once; transient ones leave it
+ *   blocked host/port) fail the message at once; AUTH_FAILED also puts the
+ *   account into 'auth_error' like a failed sync, so no further jobs of it
+ *   run until the credentials change; transient ones leave it
  *   'queued' with the code and throw (retry with backoff); after the last
  *   attempt it becomes 'failed'.
  * - Accepted: never sent again, only the Sent copy is retried; after the
@@ -157,6 +159,10 @@ final class SendMessageJob implements JobHandler
                 if ($permanent || $finalAttempt) {
                     $this->setStatus($row['id'], ['status' => 'failed', 'last_error_code' => $code]);
                     $this->logger->warn('send_message failed', ['accountId' => $accountId, 'outboxId' => $outboxId, 'code' => $code, 'permanent' => $permanent]);
+                    if ($code === 'AUTH_FAILED') {
+                        // Principle 7: same circuit breaker as the sync (roadmap 3.4).
+                        (new AccountHealth($this->db))->recordFailure($accountId, new AccountErrorException($code, $e));
+                    }
 
                     return false;
                 }
