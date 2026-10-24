@@ -12,6 +12,7 @@
  * and described as JSON schema in docs/themes/schema.json.
  */
 import { contrastRatio } from './account-avatar'
+import { BUILTIN_THEME_COLORS } from './design-tokens'
 import type { DensityChoice } from './appearance'
 import type { ReadingPane } from './layout'
 
@@ -106,53 +107,11 @@ export interface ThemeListResponse {
   themes: InstalledTheme[]
 }
 
-/** The built-in palettes (assets/css/main.css): fallback for the contrast check. */
-export const DEFAULT_THEME_COLORS: Record<'light' | 'dark', Record<ThemeColor, string>> = {
-  light: {
-    'base-100': '#ffffff',
-    'base-200': '#f5f7fa',
-    'base-300': '#e3e8ee',
-    'base-content': '#1f2933',
-    primary: '#0f5cb5',
-    'primary-content': '#ffffff',
-    secondary: '#6d3fc0',
-    'secondary-content': '#ffffff',
-    accent: '#0f766e',
-    'accent-content': '#ffffff',
-    neutral: '#2f3b47',
-    'neutral-content': '#f5f7fa',
-    info: '#1d6fd6',
-    'info-content': '#ffffff',
-    success: '#127146',
-    'success-content': '#ffffff',
-    warning: '#c27a06',
-    'warning-content': '#1f1400',
-    error: '#b42318',
-    'error-content': '#ffffff',
-  },
-  dark: {
-    'base-100': '#161b22',
-    'base-200': '#1d242d',
-    'base-300': '#2a333e',
-    'base-content': '#dfe5ec',
-    primary: '#5ea2f2',
-    'primary-content': '#06182c',
-    secondary: '#b18cf0',
-    'secondary-content': '#1a0c33',
-    accent: '#3cc3b4',
-    'accent-content': '#04201d',
-    neutral: '#cfd7e0',
-    'neutral-content': '#161b22',
-    info: '#6aaaf5',
-    'info-content': '#06182c',
-    success: '#4cc38a',
-    'success-content': '#04200f',
-    warning: '#e6a73a',
-    'warning-content': '#231600',
-    error: '#f2726a',
-    'error-content': '#2b0503',
-  },
-}
+/** The built-in palettes (packages/design-tokens): fallback for the contrast check. */
+export const DEFAULT_THEME_COLORS: Record<
+  'light' | 'dark',
+  Record<ThemeColor, string>
+> = BUILTIN_THEME_COLORS
 
 /** Text/background pairs that must reach THEME_MIN_CONTRAST. */
 export const THEME_CONTRAST_PAIRS: [ThemeColor, ThemeColor][] = [
