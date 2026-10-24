@@ -38,7 +38,7 @@ Epic #111 (vertraute Oberfläche), seit PR #125 in `main`:
 | **M2 – Beta**             | Phasen 5–6 | Suche, Anhänge, Cache-Modi, OAuth, Backup/Restore, Security Review.                               |
 | **M3 – Stable**           | Phase 7    | Release-Images, vollständige Doku, Demo-Deployment, Support-Prozess.                              |
 | **M4 – Managed Services** | Phase 8    | Hosted Push Relay, Managed Hosting, Business-Funktionen.                                          |
-| _Später_                  | –          | Native iOS-App (siehe [Ausblick](#ausblick)).                                                     |
+| _Später_                  | Phase 9    | Native Apps für iOS und Android (Kotlin Multiplatform + Compose Multiplatform, ADR-0015).         |
 
 ## Phasenübersicht
 
@@ -46,6 +46,7 @@ Epic #111 (vertraute Oberfläche), seit PR #125 in `main`:
 P0 Discovery ─► P1 Foundation ─► P2 Single account ─► P3 Multi-account ─► P4 PWA ─► [M1 MVP]
                                         └──────────────► P5 Search & attachments ─┐
                                  P1 ───────────────────► P6 Hardening ────────────┴─► [M2 Beta] ─► P7 Release [M3] ─► P8 Paid [M4]
+                                                                   [M1 MVP] ─► P9 Native Apps (iOS, dann Android)
 ```
 
 ---
@@ -190,6 +191,37 @@ Ziel: Self-Hosting auf jedem Webhoster mit PHP und MySQL; Docker Compose bleibt 
 
 ---
 
+## Phase 9 – Native Apps 🟨
+
+Epic #136, [ADR-0015](docs/adr/0015-mobile-kotlin-multiplatform.md): iOS zuerst, dann Android, Logik und UI in einer Kotlin-Codebasis (Kotlin Multiplatform + Compose Multiplatform). Reihenfolge: Grundlagen (9.1–9.7), geteilte Schicht (9.8–9.9), Features (9.10–9.18, zuerst auf iOS abgenommen), iOS (9.19–9.21), Android (9.22–9.24).
+
+| #    | Epic / Aufgabe                                                                                                                                                                         | Prio | Aufwand | Abhängigkeiten | Akzeptanz                                    |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------- | -------------- | -------------------------------------------- |
+| 9.1  | ✅ ADR-0015: Mobile-Clients mit Kotlin Multiplatform + Compose Multiplatform (#137) – [ADR-0015](docs/adr/0015-mobile-kotlin-multiplatform.md), ADR-0010 und ADR-0005 verweisen darauf | P1   | S       | –              | ADR angenommen                               |
+| 9.2  | Server: gerätegebundene Tokens für native Clients (Bearer, Widerruf, Geräteliste) (#138)                                                                                               | P1   | M       | ADR-0004       | Token nur als Hash, Widerruf → 401           |
+| 9.3  | Server: Push-Transporte APNs und FCM (direkt mit eigenen Keys) (#139)                                                                                                                  | P1   | M       | 9.2, 4.3       | Payload ohne Inhalte, eigene Keys aus `.env` |
+| 9.4  | Push-Relay: APNs/FCM-Zustellung für die Store-Apps (Erweiterung von 8.1) (#140) 🔗                                                                                                     | P1   | L       | 9.3, 8.1       | Self-hosted Direkt-Push bleibt voll nutzbar  |
+| 9.5  | Design-Tokens als plattformneutrales Paket (CSS + Compose-Theme generiert) (#141)                                                                                                      | P1   | M       | –              | Web und App aus derselben Quelle             |
+| 9.6  | KMP-Projektgerüst `apps/mobile` mit CI (Android + iOS-Build) (#142)                                                                                                                    | P1   | L       | 9.1            | CI baut beide Plattformen                    |
+| 9.7  | Kotlin-API-Client aus OpenAPI generieren (geteiltes KMP-Modul) (#143)                                                                                                                  | P1   | M       | 9.6            | Client aus `docs/api/openapi.yaml`           |
+| 9.8  | Domänenlogik aus `@fma/shared` nach Kotlin portieren, mit gemeinsamen Test-Fixtures (#144)                                                                                             | P1   | L       | 9.6            | Vitest und KMP grün gegen dieselben Fixtures |
+| 9.9  | Verschlüsselter Offline-Cache, Offline-Queue und Secure Storage (#145)                                                                                                                 | P1   | L       | 9.7, 9.8       | Inhalte auf dem Gerät nur verschlüsselt      |
+| 9.10 | App: Instanz verbinden, Login, Setup und Geräteverwaltung (#146)                                                                                                                       | P1   | M       | 9.2, 9.7       | Anmeldung an eigener Instanz                 |
+| 9.11 | App: Kontoleiste, Kontowechsel, optionale Unified Inbox, Sync-Status (#147)                                                                                                            | P1   | M       | 9.10           | Konten getrennt, Unified Inbox optional      |
+| 9.12 | App: Ordner, Nachrichtenliste und Threads (#148)                                                                                                                                       | P1   | L       | 9.9, 9.11      | Paritär zur PWA                              |
+| 9.13 | App: Nachricht lesen (sicheres HTML-Rendering, Anhänge, externe Inhalte) (#149)                                                                                                        | P1   | L       | 9.12           | Externe Inhalte nur nach Zustimmung          |
+| 9.14 | App: Verfassen, Antworten, Entwürfe, Anhänge, Outbox und Rückgängig-Senden (#150)                                                                                                      | P1   | L       | 9.12           | Paritär zur PWA                              |
+| 9.15 | App: Nachrichtenaktionen, Wischgesten und Mehrfachauswahl (#151)                                                                                                                       | P1   | M       | 9.12           | Auch offline über die Queue                  |
+| 9.16 | App: Suche (je Konto, später global) (#152)                                                                                                                                            | P1   | M       | 9.12           | IMAP `SEARCH` über die API                   |
+| 9.17 | App: Einstellungen (Konten, OAuth2, Identitäten, Ordnerrollen, Darstellung, Speicher, Export) (#153)                                                                                   | P1   | L       | 9.10           | Paritär zur PWA                              |
+| 9.18 | Feature-Matrix Web ↔ App und E2E-Tests für die Apps (#154)                                                                                                                             | P1   | S       | 9.12           | Matrix gepflegt, E2E in CI                   |
+| 9.19 | iOS: Push-Benachrichtigungen (APNs), Badge und Öffnen aus der Benachrichtigung (#155) 🔗                                                                                               | P1   | M       | 9.3            | Push ohne Inhalte, Klick öffnet die App      |
+| 9.20 | iOS: Plattform-Integration (Teilen, mailto, Face ID, Hintergrund-Sync, iPad) (#156)                                                                                                    | P2   | M       | 9.12           | –                                            |
+| 9.21 | iOS: Release im App Store (Signing, Fastlane, TestFlight, Review) (#157) 🔗                                                                                                            | P1   | M       | 9.19           | App im Store                                 |
+| 9.22 | Android: Push-Benachrichtigungen (FCM), Badge und Öffnen aus der Benachrichtigung (#158) 🔗                                                                                            | P1   | M       | 9.3            | Push ohne Inhalte, Klick öffnet die App      |
+| 9.23 | Android: Plattform-Integration (Teilen, mailto, Biometrie, Hintergrund-Sync, Tablets) (#159)                                                                                           | P2   | M       | 9.12           | –                                            |
+| 9.24 | Android: Release in Google Play (Signing, Fastlane, interner Test, Data Safety) (#160) 🔗                                                                                              | P1   | M       | 9.22           | App im Store                                 |
+
 ## MVP-Akzeptanzkriterien
 
 Aktueller Stand mit Belegen und offenen Punkten: [`docs/process/mvp-status.md`](docs/process/mvp-status.md) (#70).
@@ -205,7 +237,6 @@ Aktueller Stand mit Belegen und offenen Punkten: [`docs/process/mvp-status.md`](
 
 ## Ausblick
 
-- **Native Clients pro Plattform** (ADR-0010): iOS zuerst, dann Android und Desktop. Logik auf dem Server, gemeinsamer API-Vertrag (OpenAPI) und gemeinsame Design-Tokens.
-- **Native iOS-App** mit APNs-Push – das eigentliche Langfristziel (siehe README). Die PWA ist der Startpunkt; API und Push-Architektur sollen von Anfang an so gebaut werden, dass ein nativer Client ohne Backend-Umbau andocken kann.
+- **Native Apps für iOS und Android** sind jetzt [Phase 9](#phase-9--native-apps-) (ADR-0015). Native Desktop-Clients bleiben offen (ADR-0010).
 - Erweiterte Regeln/Filter (Sieve-ähnlich), Kalender/Kontakte, KI-Funktionen – bewusst nach dem MVP.
 - **MCP-Server** für KI-Clients (Claude, ChatGPT, lokale Modelle) als Endpunkt `/api/mcp` im PHP-Backend – Machbarkeit und Stufenplan: [`docs/architecture/mcp.md`](docs/architecture/mcp.md); wartet auf Owner-Entscheidung.

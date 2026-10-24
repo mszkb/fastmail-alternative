@@ -1,6 +1,6 @@
 # ADR-0010: Client-Strategie
 
-- **Status:** Accepted
+- **Status:** Accepted, für iOS und Android teilweise ersetzt durch [ADR-0015](0015-mobile-kotlin-multiplatform.md) (Kotlin Multiplatform + Compose Multiplatform)
 - **Datum:** 2026-10-02
 - **Roadmap:** Phase 4, Ausblick
 
