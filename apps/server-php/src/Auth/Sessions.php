@@ -13,14 +13,23 @@ use Fma\Db\Uuid;
  * - absolute timeout 30 days after login (expires_at never moves);
  * - rotation after 24 h; a session not rotated for 14 days is idle and
  *   rejected (rotated_at doubles as "last activity");
- * - every session belongs to a device; revoking a device ends its sessions.
+ * - every session belongs to a device; revoking a device ends its sessions;
+ * - native clients (#138) get a device-bound bearer token instead: same
+ *   tables, kind 'bearer', never rotated, expires BEARER_IDLE_SECONDS after
+ *   its last use. A token is only accepted the way it was issued (cookie or
+ *   Authorization header).
  */
 final class Sessions
 {
     public const TTL_SECONDS = 30 * 24 * 3600;
     public const IDLE_SECONDS = 14 * 24 * 3600;
     public const ROTATION_SECONDS = 24 * 3600;
+    public const BEARER_IDLE_SECONDS = 90 * 24 * 3600;
+    public const COOKIE = 'cookie';
+    public const BEARER = 'bearer';
     private const TOUCH_SECONDS = 60;
+    /** A bearer session's expiry moves forward at most once per day. */
+    private const EXTEND_SECONDS = 24 * 3600;
 
     public function __construct(private readonly Database $db) {}
 
@@ -40,9 +49,12 @@ final class Sessions
         return Database::run($this->db->pdo(), $sql, $params);
     }
 
-    /** Creates a device and its first session; returns the token. */
-    public function createDeviceWithSession(string $userId, string $deviceName, string $platform): string
+    /** Creates a device and its first session (cookie or bearer); returns the token. */
+    public function createDeviceWithSession(string $userId, string $deviceName, string $platform, string $kind = self::COOKIE): string
     {
+        if ($kind !== self::COOKIE && $kind !== self::BEARER) {
+            throw new \InvalidArgumentException('unknown session kind');
+        }
         $deviceId = Uuid::v4();
         $token = self::generateToken();
         $this->run(
@@ -51,26 +63,29 @@ final class Sessions
             [$deviceId, $userId, $deviceName, $platform, Uuid::v4()],
         );
         $this->run(
-            'INSERT INTO session (id, device_id, token_hash, expires_at, rotated_at)
-             VALUES (?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL ? SECOND, UTC_TIMESTAMP(6))',
-            [Uuid::v4(), $deviceId, self::hashToken($token), self::TTL_SECONDS],
+            'INSERT INTO session (id, device_id, token_hash, expires_at, rotated_at, kind)
+             VALUES (?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL ? SECOND, UTC_TIMESTAMP(6), ?)',
+            [Uuid::v4(), $deviceId, self::hashToken($token), $kind === self::BEARER ? self::BEARER_IDLE_SECONDS : self::TTL_SECONDS, $kind],
         );
 
         return $token;
     }
 
-    /** Resolves a token; rejects expired, idle and revoked sessions. */
-    public function resolve(string $token): ?Session
+    /**
+     * Resolves a token of the given kind; rejects expired, idle (cookie)
+     * and revoked sessions as well as a token presented the other way.
+     */
+    public function resolve(string $token, string $kind = self::COOKIE): ?Session
     {
         /** @var array{session_id: string, rotated_at: string, device_id: string, user_id: string, email: string}|false $row */
         $row = $this->run(
-            'SELECT s.id AS session_id, s.rotated_at, d.id AS device_id, u.id AS user_id, u.email
+            "SELECT s.id AS session_id, s.rotated_at, d.id AS device_id, u.id AS user_id, u.email
              FROM session s
              JOIN device d ON d.id = s.device_id
              JOIN `user` u ON u.id = d.user_id
-             WHERE s.token_hash = ? AND s.expires_at > UTC_TIMESTAMP(6) AND d.revoked_at IS NULL
-               AND s.rotated_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND',
-            [self::hashToken($token), self::IDLE_SECONDS],
+             WHERE s.token_hash = ? AND s.kind = ? AND s.expires_at > UTC_TIMESTAMP(6) AND d.revoked_at IS NULL
+               AND (s.kind = 'bearer' OR s.rotated_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND)",
+            [self::hashToken($token), $kind, self::IDLE_SECONDS],
         )->fetch();
         if ($row === false) {
             return null;
@@ -82,12 +97,23 @@ final class Sessions
             $row['user_id'],
             $row['email'],
             new \DateTimeImmutable($row['rotated_at'], new \DateTimeZone('UTC')),
+            $kind,
+        );
+    }
+
+    /** Bearer sessions expire after BEARER_IDLE_SECONDS without use; at most one write per day. */
+    public function extendBearer(string $sessionId): void
+    {
+        $this->run(
+            "UPDATE session SET expires_at = UTC_TIMESTAMP(6) + INTERVAL ? SECOND
+             WHERE id = ? AND kind = 'bearer' AND expires_at < UTC_TIMESTAMP(6) + INTERVAL ? SECOND",
+            [self::BEARER_IDLE_SECONDS, $sessionId, self::BEARER_IDLE_SECONDS - self::EXTEND_SECONDS],
         );
     }
 
     public function needsRotation(Session $session, ?int $now = null): bool
     {
-        return ($now ?? time()) - $session->tokenIssuedAt->getTimestamp() > self::ROTATION_SECONDS;
+        return !$session->isBearer() && ($now ?? time()) - $session->tokenIssuedAt->getTimestamp() > self::ROTATION_SECONDS;
     }
 
     /** Issues a new token for the session and invalidates the old one. */
@@ -170,8 +196,10 @@ final class Sessions
     /**
      * Password change: new hash, every other device revoked (with sessions
      * and push subscriptions), current token rotated - in one transaction.
+     * A bearer token is kept (the app has no cookie to receive a new one);
+     * then null is returned.
      */
-    public function changePasswordAndEndOtherSessions(Session $session, string $passwordHash): string
+    public function changePasswordAndEndOtherSessions(Session $session, string $passwordHash): ?string
     {
         $token = self::generateToken();
         $pdo = $this->db->pdo();
@@ -194,14 +222,16 @@ final class Sessions
                 $placeholders = implode(', ', array_fill(0, \count($others), '?'));
                 $this->run("DELETE FROM push_subscription WHERE device_id IN ({$placeholders})", array_values($others));
             }
-            $this->run('UPDATE session SET token_hash = ?, rotated_at = UTC_TIMESTAMP(6) WHERE id = ?', [self::hashToken($token), $session->sessionId]);
+            if (!$session->isBearer()) {
+                $this->run('UPDATE session SET token_hash = ?, rotated_at = UTC_TIMESTAMP(6) WHERE id = ?', [self::hashToken($token), $session->sessionId]);
+            }
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
 
-        return $token;
+        return $session->isBearer() ? null : $token;
     }
 
     /** DATETIME(6) in UTC -> ISO 8601 with milliseconds, like Date.toISOString(). */

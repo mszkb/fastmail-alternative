@@ -211,7 +211,7 @@ erDiagram
 
 - **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Im MVP gibt es genau einen Benutzer, angelegt beim ersten Start. Passwort-Hash (Argon2id); `totp_secret_enc` bleibt bis zu späterer 2FA leer. `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
 - **`device`**: gemeinsame Basis für Sessions und Push (ADR-0004). `installation_id` ist die einzige gerätebezogene Kennung im Push-Payload ([push.md](push.md)). Widerruf eines Geräts (`revoked_at`) beendet alle Sessions und deaktiviert alle Subscriptions.
-- **`session`**: nur der **Hash** des Tokens wird gespeichert. Ein späterer nativer Client nutzt dieselbe Tabelle mit einem gerätegebundenen Token.
+- **`session`**: nur der **Hash** des Tokens wird gespeichert. `kind` unterscheidet Browser-Sessions (`cookie`) von gerätegebundenen Tokens nativer Apps (`bearer`, #138, Migration 0009); ein Token gilt nur auf dem Weg, für den es ausgestellt wurde.
 - **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). `endpoint` ist eindeutig (Upsert, wenn derselbe Browser sich neu anmeldet); `keys_enc` ist mit dem DEK des Benutzers verschlüsselt (`user.wrapped_dek`, beim ersten Bedarf angelegt). Bei HTTP 404/410 vom Push-Service wird die Zeile direkt gelöscht; `disabled_at` bleibt für spätere Transporte reserviert. Details: [push.md](push.md).
 
 ### Konten

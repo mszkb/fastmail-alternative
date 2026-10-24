@@ -24,6 +24,15 @@
 - **Logout** löscht die Session serverseitig und setzt das Cookie mit denselben Attributen zurück; Geräte-Widerruf löscht alle Sessions des Geräts.
 - **Passwortwechsel** (`POST /api/auth/password`, umgesetzt): verlangt eine gültige Session und das aktuelle Passwort (Argon2id-Prüfung wie beim Login; Fehlversuche zählen für denselben IP-Lockout wie der Login, zusätzlich Rate-Limit `auth`; falsches Passwort → `403` ohne Details). Das neue Passwort muss dieselben Mindestanforderungen wie bei der Ersteinrichtung erfüllen (10–200 Zeichen, sonst `400`). In **einer Transaktion** werden der neue Hash gespeichert, alle anderen Geräte des Benutzers widerrufen, deren Sessions und Push-Subscriptions gelöscht und das Token der aktuellen Session rotiert (neues Cookie). Das aktuelle Gerät behält seine Push-Subscriptions. Passwörter werden nie geloggt (Request-Bodies landen nie im Log); CSRF-Schutz greift global (siehe unten).
 
+### Gerätegebundene Tokens für native Apps (#138)
+
+- **Login** mit `client: "native"` und `platform` `ios` oder `android` (sonst `400`, zählt nicht als Fehlversuch) liefert ein Zufallstoken (256 Bit) einmalig im Antwort-Body (`Cache-Control: no-store`) statt des Cookies. Dieselben Tabellen wie die PWA (`device`, `session` mit `kind = 'bearer'`), in der DB nur der SHA-256-Hash; Lockout und Rate-Limit `auth` wie beim Cookie-Login.
+- **Verwendung** nur als `Authorization: Bearer <token>`. Ein Token gilt nur auf dem Weg, für den es ausgestellt wurde: ein Bearer-Token als Cookie und ein Cookie-Token als Bearer werden abgewiesen (`401`). Mit Bearer-Header wird ein mitgeschicktes Cookie ignoriert, auch wenn der Header ungültig ist. Andere Schemata (z. B. `Basic` eines vorgeschalteten Reverse Proxys) lassen das Cookie zuständig.
+- **Kein Rotieren:** Die App hätte kein Cookie, über das ein neues Token ankäme. Stattdessen läuft das Token **90 Tage nach der letzten Nutzung** ab (gleitend, höchstens ein Schreibzugriff pro Tag); die 14-Tage-Leerlaufregel der Cookies gilt nicht.
+- **Widerruf** über die Geräteliste (`DELETE /api/auth/devices/{id}`) löscht Session und Push-Subscriptions des Geräts; das Token antwortet danach mit `401`, die App löscht daraufhin ihren lokalen Cache. Logout mit dem Token beendet es ebenso.
+- **Passwortwechsel** mit einem Bearer-Token widerruft alle anderen Geräte, das eigene Token bleibt gültig (kein neues Cookie).
+- **CSRF:** Bearer-Anfragen sind von der Origin-Prüfung ausgenommen. Eine fremde Seite kann den `Authorization`-Header nicht ohne CORS-Preflight setzen, und die API erlaubt kein CORS; das Cookie spielt bei Bearer-Anfragen keine Rolle.
+
 ## CSRF
 
 Zwei unabhängige Schichten, ohne CSRF-Token (`apps/server-php/src/Http/Middleware/CsrfProtection.php`):

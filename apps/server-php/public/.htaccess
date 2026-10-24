@@ -1,7 +1,7 @@
 # Apache: route every request that is not an existing file to index.php.
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  # PHP-FPM/CGI drops the Authorization header (needed for /api/metrics).
+  # PHP-FPM/CGI drops the Authorization header (/api/metrics, native app tokens).
   RewriteCond %{HTTP:Authorization} .
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
   RewriteCond %{REQUEST_FILENAME} !-f

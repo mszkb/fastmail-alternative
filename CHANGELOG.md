@@ -10,6 +10,7 @@ Noch kein Release. Bisheriger Stand (Details in [ROADMAP.md](ROADMAP.md)):
 
 ### Added
 
+- Gerätegebundene Tokens für native Apps (#138): `POST /api/auth/login` mit `client: "native"` liefert ein Bearer-Token statt des Cookies; es erscheint in der Geräteliste, lässt sich dort widerrufen und läuft 90 Tage nach der letzten Nutzung ab. **Betreiber:** Migration `0009_session_kind` ergänzt die Spalte `session.kind` (läuft automatisch mit `bin/migrate.php`); keine `.env`-Änderung
 - Self-hosted Deployment mit Docker Compose (caddy, web, php, worker, mariadb), Healthchecks und `scripts/setup-env.sh` für `MASTER_KEY`, VAPID-Schlüssel und DB-Passwort; läuft auf Raspberry Pi (arm64, rootless Docker); alternativ Shared Hosting mit PHP und MySQL
 - Single-User-Setup, Passwort-Login mit serverseitigen Sessions, Geräteverwaltung und Passwortänderung (beendet alle anderen Sitzungen)
 - Mehrere IMAP-/SMTP-Konten mit Verbindungstest, getrennten Postfächern, Kontowechsel, Ungelesen-Zählern und Identitäten/Aliasen
