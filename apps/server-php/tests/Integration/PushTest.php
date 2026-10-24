@@ -373,6 +373,108 @@ final class PushTest extends DatabaseTestCase
         }
     }
 
+    /**
+     * HTTPS against a local TLS push service with a certificate for
+     * "localhost" from a throwaway CA: the whole job goes through, the
+     * certificate chain and the hostname are verified.
+     */
+    public function testStreamSenderOverTls(): void
+    {
+        $dir = sys_get_temp_dir() . '/fma-push-tls-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        [$caFile, $pemFile] = self::issueLocalhostCertificate($dir);
+        $process = proc_open(
+            [PHP_BINARY, __DIR__ . '/../fixtures/fake-push-service-tls.php', $pemFile, "{$dir}/request.json"],
+            [1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        try {
+            $ready = (string) fgets($pipes[1]);
+            self::assertMatchesRegularExpression('/^PORT \d+$/', trim($ready));
+            $port = (int) substr(trim($ready), 5);
+            $sender = new StreamPushSender(true, 5, null, $caFile);
+
+            self::assertSame(201, $sender->send("https://localhost:{$port}/push/abc?x=1", ['TTL' => '900'], 'payload'));
+            $request = json_decode((string) file_get_contents("{$dir}/request.json"), true);
+            self::assertIsArray($request);
+            self::assertSame('/push/abc?x=1', $request['uri']);
+            self::assertSame("localhost:{$port}", $request['headers']['host']);
+            self::assertSame('payload', base64_decode($request['body']));
+            self::assertSame(410, $sender->send("https://localhost:{$port}/status/410", [], ''));
+
+            // Not trusted: the system CAs do not know the throwaway CA.
+            $this->assertSendFails(new StreamPushSender(true, 5), "https://localhost:{$port}/push/abc");
+            // Wrong name: the certificate is for "localhost", not for the IP.
+            $this->assertSendFails($sender, "https://127.0.0.1:{$port}/push/abc");
+
+            // The whole job over TLS: encrypted, content-free payload with the VAPID audience of the endpoint.
+            $this->subscribe("https://localhost:{$port}/push/job");
+            $handler = new PushNotifyHandler(self::$db, $this->cfg, new Logger('worker', 'error', Http::memoryStream()), $sender, $this->vapid());
+            self::assertSame(['sent' => 1, 'removed' => 0, 'failed' => 0], $handler->notify(['userId' => $this->userId]));
+            $request = json_decode((string) file_get_contents("{$dir}/request.json"), true);
+            self::assertIsArray($request);
+            self::assertSame('/push/job', $request['uri']);
+            self::assertSame('aes128gcm', $request['headers']['content-encoding']);
+            self::assertStringStartsWith('vapid t=', $request['headers']['authorization']);
+            $installationId = Database::run(self::$db->pdo(), 'SELECT installation_id FROM device WHERE id = ?', [$this->deviceId])->fetchColumn();
+            self::assertSame(
+                ['type' => 'new_mail', 'installationId' => $installationId, 'badge' => 0],
+                json_decode($this->decrypt(base64_decode($request['body'])), true),
+            );
+        } finally {
+            proc_terminate($process);
+            proc_close($process);
+            array_map('unlink', glob("{$dir}/*") ?: []);
+            rmdir($dir);
+        }
+    }
+
+    private function assertSendFails(StreamPushSender $sender, string $endpoint): void
+    {
+        try {
+            $sender->send($endpoint, [], '');
+            self::fail("sent to {$endpoint}");
+        } catch (\Fma\Mail\MailException $e) {
+            // A failed handshake looks like any other connect failure.
+            self::assertSame('PUSH_CONNECT_FAILED', $e->errorCode);
+        }
+    }
+
+    /**
+     * Throwaway CA plus a certificate for "localhost" signed by it.
+     *
+     * @return array{string, string} CA certificate file, server certificate + key file
+     */
+    private static function issueLocalhostCertificate(string $dir): array
+    {
+        file_put_contents("{$dir}/openssl.cnf", implode("\n", [
+            '[req]', 'distinguished_name = dn', '[dn]',
+            '[ca]', 'basicConstraints = critical, CA:TRUE', 'keyUsage = critical, keyCertSign, cRLSign',
+            '[leaf]', 'basicConstraints = CA:FALSE', 'subjectAltName = DNS:localhost', 'extendedKeyUsage = serverAuth',
+        ]) . "\n");
+        $options = ['config' => "{$dir}/openssl.cnf", 'digest_alg' => 'sha256', 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'private_key_bits' => 2048];
+        $caKey = openssl_pkey_new($options);
+        $leafKey = openssl_pkey_new($options);
+        self::assertNotFalse($caKey);
+        self::assertNotFalse($leafKey);
+        $caCsr = openssl_csr_new(['commonName' => 'fma test CA'], $caKey, $options);
+        $leafCsr = openssl_csr_new(['commonName' => 'localhost'], $leafKey, $options);
+        self::assertInstanceOf(\OpenSSLCertificateSigningRequest::class, $caCsr);
+        self::assertInstanceOf(\OpenSSLCertificateSigningRequest::class, $leafCsr);
+        $ca = openssl_csr_sign($caCsr, null, $caKey, 1, ['x509_extensions' => 'ca'] + $options, 1);
+        self::assertNotFalse($ca);
+        $leaf = openssl_csr_sign($leafCsr, $ca, $caKey, 1, ['x509_extensions' => 'leaf'] + $options, 2);
+        self::assertNotFalse($leaf);
+        openssl_x509_export($ca, $caPem);
+        openssl_x509_export($leaf, $leafPem);
+        openssl_pkey_export($leafKey, $leafKeyPem, null, $options);
+        file_put_contents("{$dir}/ca.pem", $caPem);
+        file_put_contents("{$dir}/server.pem", $leafPem . $leafKeyPem);
+
+        return ["{$dir}/ca.pem", "{$dir}/server.pem"];
+    }
+
     public function testStrictSenderRefusesPrivateAndHttp(): void
     {
         $sender = new StreamPushSender(false, 2, static fn(string $host): array => ['10.0.0.1']);
