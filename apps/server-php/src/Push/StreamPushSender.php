@@ -16,17 +16,22 @@ use Fma\Mail\Ssrf;
  * - no redirects (the status is returned as is), a timeout for connect and
  *   response, the response body is discarded (it may echo the endpoint);
  * - `insecure` (MAIL_INSECURE_TRANSPORT=1, dev/test only): http allowed
- *   and plain resolution, so local fake push services work.
+ *   and plain resolution, so local fake push services work; https is still
+ *   verified (`caFile` lets tests trust their own CA).
  */
 final class StreamPushSender implements PushSender
 {
     public const TIMEOUT_SECONDS = 15;
 
-    /** @param (callable(string): list<string>)|null $resolve test override for DNS */
+    /**
+     * @param (callable(string): list<string>)|null $resolve test override for DNS
+     * @param string|null $caFile test override for the trusted CAs (PEM file)
+     */
     public function __construct(
         private readonly bool $insecure = false,
         private readonly int $timeoutSeconds = self::TIMEOUT_SECONDS,
         private readonly mixed $resolve = null,
+        private readonly ?string $caFile = null,
     ) {}
 
     public function send(string $endpoint, array $headers, string $body): int
@@ -45,14 +50,18 @@ final class StreamPushSender implements PushSender
             $address = Ssrf::assertPublicHost($url['host'], $resolve)[0];
         }
         $isIp = filter_var($url['host'], FILTER_VALIDATE_IP) !== false;
-        $context = stream_context_create(['ssl' => [
+        $ssl = [
             'verify_peer' => true,
             'verify_peer_name' => true,
             'allow_self_signed' => false,
             'SNI_enabled' => !$isIp,
             'peer_name' => $url['host'],
             'disable_compression' => true,
-        ]]);
+        ];
+        if ($this->caFile !== null) {
+            $ssl['cafile'] = $this->caFile;
+        }
+        $context = stream_context_create(['ssl' => $ssl]);
         $target = str_contains($address, ':') ? "[{$address}]" : $address;
         $transport = $url['scheme'] === 'https' ? 'tls' : 'tcp';
         $errno = 0;

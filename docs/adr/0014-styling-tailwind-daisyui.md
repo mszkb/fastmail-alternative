@@ -16,7 +16,7 @@ Die PWA hatte nur komponentenlokale Styles mit fest codierten Farben, keinen Dun
 
 ## Entscheidung
 
-Option 2, für die ganze App: Tailwind CSS v4 (über `@tailwindcss/vite`) mit daisyUI v5 und zwei eigenen Themes (`fma-light` Standard, `fma-dark` bei `prefers-color-scheme: dark`) in `apps/web/app/assets/css/main.css`. Bestehende Komponenten behalten ihre Styles, nutzen aber nur noch die Theme-Variablen (`--color-base-*`, `--color-primary`, … und wenige App-Token `--fma-*`); neue Komponenten nutzen daisyUI/Tailwind direkt. Icons kommen aus `@tabler/icons-vue` (benannte Imports, nur genutzte Icons im Bundle). Eigene Farben, Kontrast WCAG AA (Kontofarben per Unit-Test geprüft).
+Option 2, für die ganze App: Tailwind CSS v4 (über `@tailwindcss/vite`) mit daisyUI v5 und zwei eigenen Themes (`fma-light` Standard, `fma-dark` bei `prefers-color-scheme: dark`) in `apps/web/app/assets/css/main.css` (Werte seit #141 aus `packages/design-tokens`, siehe [ADR-0015](0015-mobile-kotlin-multiplatform.md)). Bestehende Komponenten behalten ihre Styles, nutzen aber nur noch die Theme-Variablen (`--color-base-*`, `--color-primary`, … und wenige App-Token `--fma-*`); neue Komponenten nutzen daisyUI/Tailwind direkt. Icons kommen aus `@tabler/icons-vue` (benannte Imports, nur genutzte Icons im Bundle). Eigene Farben, Kontrast WCAG AA (Kontofarben per Unit-Test geprüft).
 
 ## Konsequenzen
 

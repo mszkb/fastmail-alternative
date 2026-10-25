@@ -112,7 +112,9 @@ paths:
       description: |
         Creates a new device and session. A still valid session of this
         browser is ended. After 5 failed attempts within 15 minutes the
-        client IP is locked out for 15 minutes (429).
+        client IP is locked out for 15 minutes (429). With `client: native`
+        the response carries a device-bound bearer token instead of the
+        cookie (#138).
       security: []
       requestBody:
         required: true
@@ -124,11 +126,16 @@ paths:
           description: Logged in
           headers:
             Set-Cookie:
-              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP)'
+              description: '`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP); not set for `client: native`'
               schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuthSessionResponse' }
+        '400':
+          description: '`client: native` without platform `ios` or `android` (does not count as a failed login)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
         '401':
           description: Invalid email or password (also for malformed input)
           content:
@@ -153,7 +160,7 @@ paths:
       description: |
         Requires the current password (same lockout as login). Revokes all
         other devices (their sessions and push subscriptions) and rotates
-        the current session token.
+        the current session token (a bearer token stays valid, no cookie).
       requestBody:
         required: true
         content:
@@ -200,7 +207,7 @@ paths:
           description: Logged out; the session cookie is cleared
           headers:
             Set-Cookie:
-              description: Clears `fma_session` (expired cookie).
+              description: Clears `fma_session` (expired cookie); not sent when logged out with a bearer token.
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -577,12 +584,21 @@ components:
           type: string
           maxLength: 100
           default: Browser
-          description: Longer values are truncated; empty becomes `Browser`.
+          description: Longer values are truncated; empty becomes `Browser` (`App` for native clients).
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, ios, android]
           default: desktop
-          description: Unknown values are treated as `desktop`.
+          description: |
+            Unknown values are treated as `desktop`. `ios` and `android` only
+            with `client: native`, where one of them is required (else 400).
+        client:
+          type: string
+          enum: [browser, native]
+          default: browser
+          description: |
+            Login only. `native` returns a device-bound bearer token in the
+            body instead of setting the session cookie.
 
     SetupRequest:
       allOf:
@@ -602,6 +618,10 @@ components:
         email:
           type: string
           format: email
+        token:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+          description: 'Only for `client: native`: the bearer token. Shown once, only its hash is stored.'
 
     PasswordChangeRequest:
       type: object
@@ -627,7 +647,7 @@ components:
           type: string
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, ios, android]
         lastSeenAt:
           type: [string, 'null']
           format: date-time
@@ -713,7 +733,7 @@ components:
           type: string
         platform:
           type: string
-          enum: [ios_pwa, android_pwa, desktop]
+          enum: [ios_pwa, android_pwa, desktop, ios, android]
         isCurrentDevice:
           type: boolean
         pushService:

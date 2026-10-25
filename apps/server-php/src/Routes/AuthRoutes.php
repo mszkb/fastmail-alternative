@@ -25,12 +25,15 @@ use Slim\App;
 /**
  * /api/auth/* (ADR-0004): single-user
  * setup with setup code, password login with lockout, server-side
- * sessions, logout, password change and device management.
+ * sessions, logout, password change and device management. Native
+ * clients log in with `client: "native"` and get a device-bound bearer
+ * token in the response body instead of the cookie (#138).
  */
 final class AuthRoutes
 {
     private const EMAIL_RE = '/^[^\s@]+@[^\s@]+\.[^\s@]+$/u';
     private const PLATFORMS = ['ios_pwa', 'android_pwa', 'desktop'];
+    private const NATIVE_PLATFORMS = ['ios', 'android'];
     private const SETUP_LOCK = 'fma-setup';
 
     public function __construct(
@@ -106,7 +109,13 @@ final class AuthRoutes
         if (($locked = $this->lockout->isLockedOut($ip)) > 0) {
             return self::lockedOut($response, $locked);
         }
-        $credentials = self::readCredentials(Body::json($request));
+        $body = Body::json($request);
+        $native = ($body['client'] ?? null) === 'native';
+        if ($native && !\in_array($body['platform'] ?? null, self::NATIVE_PLATFORMS, true)) {
+            // A client bug, not a guess: no lockout count.
+            return Json::write($response, ['message' => 'Native clients must send platform ios or android'], 400);
+        }
+        $credentials = self::readCredentials($body, $native);
         if ($credentials === null) {
             return $this->authFailure($response, $ip, 'auth.login_failed', 401, 'Invalid email or password');
         }
@@ -121,6 +130,11 @@ final class AuthRoutes
             return $this->authFailure($response, $ip, 'auth.login_failed', 401, 'Invalid email or password');
         }
         $this->lockout->recordSuccess($ip);
+        if ($native) {
+            $token = $this->sessions->createDeviceWithSession($user['id'], $credentials['deviceName'], $credentials['platform'], Sessions::BEARER);
+
+            return Json::write($response->withHeader('Cache-Control', 'no-store'), ['email' => $credentials['email'], 'token' => $token]);
+        }
         // A login on a browser that still holds a valid session replaces it.
         $previous = ($old = SessionCookie::token($request)) !== null ? $this->sessions->resolve($old) : null;
         if ($previous !== null) {
@@ -152,14 +166,16 @@ final class AuthRoutes
         }
         $token = $this->sessions->changePasswordAndEndOtherSessions($session, Password::hash($new));
 
-        return $this->cookie->set($response->withStatus(204), $token);
+        // A bearer token stays valid; only a cookie session gets its rotated token.
+        return $token === null ? $response->withStatus(204) : $this->cookie->set($response->withStatus(204), $token);
     }
 
     private function logout(Request $request, Response $response): Response
     {
-        $this->sessions->delete(self::session($request)->sessionId);
+        $session = self::session($request);
+        $this->sessions->delete($session->sessionId);
 
-        return $this->cookie->clear($response->withStatus(204));
+        return $session->isBearer() ? $response->withStatus(204) : $this->cookie->clear($response->withStatus(204));
     }
 
     private function devices(Request $request, Response $response): Response
@@ -216,21 +232,22 @@ final class AuthRoutes
      *
      * @return array{email: string, password: string, deviceName: string, platform: string}|null
      */
-    private static function readCredentials(array $body): ?array
+    private static function readCredentials(array $body, bool $native = false): ?array
     {
         $email = mb_strtolower(trim(Body::string($body, 'email')));
         $password = Body::string($body, 'password');
         if (preg_match(self::EMAIL_RE, $email) !== 1 || !Password::isAcceptable($password)) {
             return null;
         }
-        $deviceName = mb_substr(trim(Body::string($body, 'deviceName') ?: 'Browser'), 0, 100);
+        $fallbackName = $native ? 'App' : 'Browser';
+        $deviceName = mb_substr(trim(Body::string($body, 'deviceName') ?: $fallbackName), 0, 100);
         $platform = Body::string($body, 'platform');
 
         return [
             'email' => $email,
             'password' => $password,
-            'deviceName' => $deviceName !== '' ? $deviceName : 'Browser',
-            'platform' => \in_array($platform, self::PLATFORMS, true) ? $platform : 'desktop',
+            'deviceName' => $deviceName !== '' ? $deviceName : $fallbackName,
+            'platform' => $native || \in_array($platform, self::PLATFORMS, true) ? $platform : 'desktop',
         ];
     }
 

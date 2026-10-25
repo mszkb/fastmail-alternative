@@ -7,17 +7,10 @@
  * Kept free of DOM access so native clients can share the rules.
  */
 
-/** Background colors of the account icons; white text on each is AA. */
-export const ACCOUNT_COLORS = [
-  '#1d5fbf', // blue
-  '#0f766e', // teal
-  '#7c3aed', // violet
-  '#b4234a', // raspberry
-  '#9a4d0b', // amber brown
-  '#3f6212', // olive
-  '#4338ca', // indigo
-  '#a21caf', // magenta
-] as const
+import { ACCOUNT_COLORS } from './design-tokens'
+
+/** Background colors of the account icons (packages/design-tokens); white text on each is AA. */
+export { ACCOUNT_COLORS }
 
 /**
  * Up to two letters for an icon: first letters of the first two words of

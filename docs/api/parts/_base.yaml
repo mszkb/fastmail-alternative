@@ -15,6 +15,7 @@ servers:
   - url: /
 security:
   - session: []
+  - bearer: []
 tags:
   - name: system
   - name: auth
@@ -33,6 +34,15 @@ components:
       type: apiKey
       in: cookie
       name: fma_session
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        Device-bound token of a native client (`POST /api/auth/login` with
+        `client: native`). Accepted only in the `Authorization` header, never
+        as cookie; with it the cookie is ignored and the origin check does not
+        apply. Not rotated; expires after 90 days without use and on revoking
+        the device.
     metricsToken:
       type: http
       scheme: bearer

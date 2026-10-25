@@ -26,7 +26,7 @@ Ziel aus Epic #111: Wer von Fastmail kommt, findet sich sofort zurecht. Dafür �
 
 ## Design-Tokens
 
-Alle Farben stammen aus den daisyUI-Themes und wenigen abgeleiteten App-Tokens in `apps/web/app/assets/css/main.css`; Komponenten verwenden keine festen Farbwerte.
+Alle Farben stammen aus den daisyUI-Themes und wenigen abgeleiteten App-Tokens in `apps/web/app/assets/css/main.css`; Komponenten verwenden keine festen Farbwerte. Die Werte der Themes, Abstände, Schriftgrößen, Dichte, Kontofarben und die Icon-Liste stehen plattformneutral in [`packages/design-tokens/tokens.json`](../../packages/design-tokens/README.md) (#141); `pnpm tokens` erzeugt daraus CSS, TypeScript, PHP und Kotlin.
 
 | Token                                                         | Zweck                                                         |
 | ------------------------------------------------------------- | ------------------------------------------------------------- |

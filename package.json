@@ -16,7 +16,8 @@
     "build": "pnpm -r build",
     "dev:web": "pnpm --filter @fma/web dev",
     "dev:api": "php apps/server-php/bin/migrate.php && php -S 127.0.0.1:3001 -t apps/server-php/public apps/server-php/public/index.php",
-    "dev:worker": "php apps/server-php/bin/worker.php"
+    "dev:worker": "php apps/server-php/bin/worker.php",
+    "tokens": "node packages/design-tokens/scripts/build.mjs"
   },
   "devDependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",
