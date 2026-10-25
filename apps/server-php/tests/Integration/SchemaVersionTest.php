@@ -35,6 +35,20 @@ final class SchemaVersionTest extends DatabaseTestCase
         self::assertSame(1, (int) Database::run(self::$db->pdo(), "SELECT IS_FREE_LOCK('fma-migrations')")->fetchColumn());
     }
 
+    public function testAcceptsAndDropsRetiredPreviewMigrations(): void
+    {
+        $pdo = self::$db->pdo();
+        foreach (['0006_native_client', '0008_native_client'] as $name) {
+            Database::run($pdo, 'INSERT INTO schema_migrations (name) VALUES (?)', [$name]);
+        }
+        (new Migrator($pdo))->assertNotNewer();
+
+        self::assertSame([], (new Migrator($pdo))->migrate());
+        $names = Database::run($pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertNotContains('0006_native_client', $names);
+        self::assertNotContains('0008_native_client', $names);
+    }
+
     public function testJobRunnersRefuseANewerSchema(): void
     {
         (new Migrator(self::$db->pdo()))->assertNotNewer();

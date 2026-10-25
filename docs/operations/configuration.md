@@ -103,6 +103,18 @@ Einrichtung der eigenen OAuth-App und Bedienung: [Anmeldung mit Google und Micro
 
 Die beiden Secrets gehören wie der `MASTER_KEY` nicht ins Repo und nicht in Support-Anfragen.
 
+## Android-Push (FCM)
+
+Für die Android-App (#139, Vorschau: [android-preview.md](android-preview.md)). Optional und unabhängig von Web Push.
+
+| Variable                   | Standard | Pflicht     | Dienst      | Zweck                                                                                                                                           |
+| -------------------------- | -------- | ----------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FCM_PROJECT_ID`           | leer     | für FCM     | php, worker | Projekt-ID des Firebase-Projekts. Ohne sie lehnt die API FCM-Registrierungen mit 422 ab                                                         |
+| `FCM_SERVICE_ACCOUNT_JSON` | leer     | für FCM     | worker      | JSON-Schlüssel eines Service-Accounts mit der Rolle „Firebase Cloud Messaging API Admin“, base64 in einer Zeile (`base64 -w0 key.json`). Secret |
+| `FCM_SERVICE_ACCOUNT_FILE` | leer     | Alternative | worker      | Pfad zur JSON-Schlüsseldatei statt `FCM_SERVICE_ACCOUNT_JSON` (z. B. als Docker-Secret eingebunden)                                             |
+
+Der Worker sendet über die FCM HTTP v1 API eine reine Daten-Nachricht mit **nur** `event`, `installationId` und `badge` (Prinzip 4); den Text „Neue E-Mail“ erzeugt die App. Abgemeldete Tokens (`UNREGISTERED`) löscht er. Der Schlüssel erscheint nie im Log. Die App muss mit der `google-services.json` **desselben** Firebase-Projekts gebaut sein.
+
 ## Backup-Skript
 
 `scripts/backup.sh` liest diese Variablen aus der Shell-Umgebung (z. B. in der Crontab); `BACKUP_KEEP_DAYS` ersatzweise aus der `.env`. Siehe [Backup & Restore](backup-restore.md).

@@ -117,86 +117,62 @@ function kotlin() {
     Object.entries(tokens.colors[mode]).map(
       ([key, value]) => `        val ${camel(key)} = ${kotlinColor(value)}`,
     )
-  const scheme = (mode, fn) => {
-    const c = `FmaColors.${pascal(mode)}`
-    return [
-      `val Fma${pascal(mode)}ColorScheme = ${fn}(`,
-      `    primary = ${c}.primary,`,
-      `    onPrimary = ${c}.primaryContent,`,
-      `    secondary = ${c}.secondary,`,
-      `    onSecondary = ${c}.secondaryContent,`,
-      `    tertiary = ${c}.accent,`,
-      `    onTertiary = ${c}.accentContent,`,
-      `    background = ${c}.base100,`,
-      `    onBackground = ${c}.baseContent,`,
-      `    surface = ${c}.base100,`,
-      `    onSurface = ${c}.baseContent,`,
-      `    surfaceVariant = ${c}.base200,`,
-      `    onSurfaceVariant = ${c}.baseContent,`,
-      `    outline = ${c}.base300,`,
-      `    error = ${c}.error,`,
-      `    onError = ${c}.errorContent,`,
-      ')',
-    ]
-  }
-  const size = ([key, value]) => {
-    const unit = key.startsWith('text-') ? 'sp' : 'dp'
-    return `    val ${camel(key)} = ${kotlinNumber(remToPx(value))}.${unit}`
-  }
+  const dp = (value) => `${kotlinNumber(remToPx(value))}.dp`
+  const size = ([key, value]) =>
+    `        val ${camel(key)} = ${kotlinNumber(remToPx(value))}.${key.startsWith('text-') ? 'sp' : 'dp'}`
   const density = (mode) => {
     const d = tokens.density[mode]
-    return `    val ${pascal(mode)} = FmaDensity(rowPaddingVertical = ${kotlinNumber(remToPx(d['row-py']))}.dp, rowPaddingHorizontal = ${kotlinNumber(remToPx(d['row-px']))}.dp, folderPaddingVertical = ${kotlinNumber(remToPx(d['folder-py']))}.dp, showSnippet = ${d.snippet})`
+    return `        val ${pascal(mode)} = Density(rowPaddingVertical = ${dp(d['row-py'])}, rowPaddingHorizontal = ${dp(d['row-px'])}, folderPaddingVertical = ${dp(d['folder-py'])}, showSnippet = ${d.snippet})`
   }
   return [
     `// ${HEADER}`,
-    '// Compose Multiplatform theme for apps/mobile (ADR-0015); 1rem = 16dp/sp.',
-    'package fma.design',
+    '// Compose theme constants for apps/mobile (ADR-0015); 1rem = 16dp/sp.',
+    'package net.fma.mail.ui.theme',
     '',
-    'import androidx.compose.material3.darkColorScheme',
-    'import androidx.compose.material3.lightColorScheme',
     'import androidx.compose.ui.graphics.Color',
     'import androidx.compose.ui.unit.Dp',
     'import androidx.compose.ui.unit.dp',
     'import androidx.compose.ui.unit.sp',
     '',
-    '/** daisyUI theme colors of the web app, by name. */',
-    'object FmaColors {',
+    'object FmaTokens {',
+    '    /** daisyUI theme colors of the PWA ("fma-light"), by name. */',
     '    object Light {',
     ...colors('light'),
     '    }',
     '',
+    '    /** daisyUI theme colors of the PWA ("fma-dark"), by name. */',
     '    object Dark {',
     ...colors('dark'),
     '    }',
-    '}',
     '',
-    ...scheme('light', 'lightColorScheme'),
-    '',
-    ...scheme('dark', 'darkColorScheme'),
-    '',
-    '/** Spacing, radii and type scale. */',
-    'object FmaSizes {',
+    '    /** Corner radii of the daisyUI themes. */',
+    '    object Radius {',
     ...Object.entries(tokens.shape)
       .filter(([key]) => key.startsWith('radius-'))
-      .map(([key, value]) => size([`shape-${key}`, value])),
-    ...Object.entries(tokens.sizes).map(size),
-    '}',
-    '',
-    'data class FmaDensity(val rowPaddingVertical: Dp, val rowPaddingHorizontal: Dp, val folderPaddingVertical: Dp, val showSnippet: Boolean) {',
-    '    companion object {',
-    ...['normal', 'compact'].map((mode) => '    ' + density(mode)),
+      .map(([key, value]) => `        val ${camel(key.slice('radius-'.length))} = ${dp(value)}`),
     '    }',
+    '',
+    '    /** Spacing, radii and type scale of the app. */',
+    '    object Sizes {',
+    ...Object.entries(tokens.sizes).map(size),
+    '    }',
+    '',
+    '    data class Density(val rowPaddingVertical: Dp, val rowPaddingHorizontal: Dp, val folderPaddingVertical: Dp, val showSnippet: Boolean)',
+    '',
+    '    object Densities {',
+    ...['normal', 'compact'].map(density),
+    '    }',
+    '',
+    '    /** Background colors of the account icons (white initials are AA on each). */',
+    '    val AccountColors = listOf(',
+    ...tokens.accountColors.map((c) => `        ${kotlinColor(c.value)}, // ${c.name}`),
+    '    )',
+    '',
+    `    /** Icons of the ${tokens.icons.set} set the app uses (same names as on the web). */`,
+    '    val IconNames = listOf(',
+    ...tokens.icons.names.map((name) => `        "${name}",`),
+    '    )',
     '}',
-    '',
-    '/** Background colors of the account icons (white initials are AA on each). */',
-    'val FmaAccountColors = listOf(',
-    ...tokens.accountColors.map((c) => `    ${kotlinColor(c.value)}, // ${c.name}`),
-    ')',
-    '',
-    `/** Icons of the ${tokens.icons.set} set the app uses (same names as on the web). */`,
-    'val FmaIconNames = listOf(',
-    ...tokens.icons.names.map((name) => `    "${name}",`),
-    ')',
     '',
   ].join('\n')
 }
@@ -211,7 +187,7 @@ const outputs = {
   'apps/web/app/assets/css/tokens.css': css(),
   'packages/shared/src/design-tokens.ts': typescript(),
   'apps/server-php/src/Themes/DesignTokens.php': php(),
-  'packages/design-tokens/generated/FmaTokens.kt': kotlin(),
+  'apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/theme/FmaTokens.kt': kotlin(),
 }
 
 const check = process.argv.includes('--check')

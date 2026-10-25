@@ -35,6 +35,12 @@ Die Regeln (Drosselung, Polling-Fenster, Änderungserkennung, Zusammenführen de
 - **Fallback:** Im Browser-Tab (nicht installiert) steht die Zahl vor dem Seitentitel, z. B. „(3) fastmail-alternative“, ab 1000 als „999+“. Abmelden leert die Kontoliste und damit Badge und Titel.
 - Lokale Änderungen in der Mailansicht (als gelesen markieren) erscheinen mit der nächsten Aktualisierung der Kontoliste im Badge.
 
+## Android-App: FCM (#139, #158)
+
+- **Transport `fcm`:** Die App registriert ihr FCM-Token mit `POST /api/push/subscriptions` `{transport: "fcm", token}` für das Gerät ihres Bearer-Tokens (#138). Ohne `FCM_PROJECT_ID` antwortet die API mit 422; Abmelden und Geräte-Widerruf löschen die Registrierung wie bei Web Push.
+- **Versand:** derselbe `push_notify`-Job wie für Web Push (gleiche Koaleszierung), über die FCM HTTP v1 API mit einem Service-Account aus der Umgebung (`FCM_SERVICE_ACCOUNT_JSON`, nur im Worker). Reine Daten-Nachricht, `priority: high`, TTL 15 min, Inhalt **nur** `{event: "new_mail", installationId, badge}`; den generischen Text „Neue E-Mail“ erzeugt die App. `UNREGISTERED`/404 → Registrierung gelöscht, andere Fehler wie bei Web Push (`failure_count`). Web Push und FCM sind unabhängig voneinander konfigurierbar.
+- **Fallback ohne FCM** (App ohne Firebase gebaut oder Server ohne FCM): WorkManager fragt alle 15 Minuten die Ungelesen-Zahlen ab und zeigt bei einer Zunahme dieselbe Benachrichtigung – Notlösung, Android kann die Abfrage verzögern.
+
 ## Optionales Hosted Push Relay (Phase 8)
 
 - Kostenpflichtige Komfortfunktion, z. B. für Instanzen ohne öffentliche Erreichbarkeit oder für einen späteren nativen iOS-Client mit APNs.

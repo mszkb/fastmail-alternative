@@ -19,11 +19,15 @@ use Fma\Mail\Ssrf;
  * - p256dh/auth are encrypted with the user DEK under
  *   Envelope::pushKeysAad(endpoint); the DEK is created on first use;
  * - upsert by endpoint: the same browser after a new login moves to the
- *   new device; an endpoint of another user is refused.
+ *   new device; an endpoint of another user is refused;
+ * - transport 'fcm' (#139): `{transport: "fcm", token}` from the Android
+ *   app; the registration token is stored in `endpoint` (it is only usable
+ *   with the instance's own FCM service account), keys_enc stays empty.
  */
 final class Subscriptions
 {
     public const MAX_ENDPOINT_LENGTH = 2048;
+    public const FCM_TOKEN_RE = '/^[A-Za-z0-9_:\-]{20,1024}$/';
     /** MySQL: duplicate key, deadlock (a concurrent first upsert of the same endpoint). */
     private const RETRY_ERRORS = [1062, 1213];
 
@@ -39,10 +43,21 @@ final class Subscriptions
      *
      * @param array<mixed> $body
      *
-     * @return array{endpoint: string, keys: array{p256dh: string, auth: string}}
+     * @return array{transport: 'webpush'|'fcm', endpoint: string, keys: array{p256dh: string, auth: string}|null}
      */
     public function validate(array $body): array
     {
+        if (($body['transport'] ?? 'webpush') === 'fcm') {
+            $token = isset($body['token']) && \is_string($body['token']) ? $body['token'] : '';
+            if (preg_match(self::FCM_TOKEN_RE, $token) !== 1) {
+                throw new InvalidSubscriptionException('Ungültiges FCM-Token.');
+            }
+
+            return ['transport' => 'fcm', 'endpoint' => $token, 'keys' => null];
+        }
+        if (($body['transport'] ?? 'webpush') !== 'webpush') {
+            throw new InvalidSubscriptionException('Unbekannter Push-Transport.');
+        }
         $endpoint = isset($body['endpoint']) && \is_string($body['endpoint']) ? $body['endpoint'] : '';
         if ($endpoint === '' || \strlen($endpoint) > self::MAX_ENDPOINT_LENGTH) {
             throw new InvalidSubscriptionException('Ungültiger Push-Endpoint.');
@@ -73,7 +88,7 @@ final class Subscriptions
             throw new InvalidSubscriptionException('Ungültige Schlüssel der Push-Subscription.');
         }
 
-        return ['endpoint' => $endpoint, 'keys' => ['p256dh' => $p256dh, 'auth' => $auth]];
+        return ['transport' => 'webpush', 'endpoint' => $endpoint, 'keys' => ['p256dh' => $p256dh, 'auth' => $auth]];
     }
 
     /**
@@ -103,13 +118,17 @@ final class Subscriptions
      * failure_count and disabled_at. Returns null when the endpoint belongs
      * to another user.
      *
-     * @param array{endpoint: string, keys: array{p256dh: string, auth: string}} $subscription
+     * @param array{transport?: 'webpush'|'fcm', endpoint: string, keys: array{p256dh: string, auth: string}|null} $subscription
      */
     public function save(string $userId, string $deviceId, array $subscription): ?string
     {
-        $dek = $this->ensureUserKey($userId);
         $endpoint = $subscription['endpoint'];
-        $keysEnc = Envelope::encryptField($dek, json_encode($subscription['keys'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), Envelope::pushKeysAad($endpoint));
+        $transport = $subscription['transport'] ?? 'webpush';
+        $keysEnc = '';
+        if ($subscription['keys'] !== null) {
+            $dek = $this->ensureUserKey($userId);
+            $keysEnc = Envelope::encryptField($dek, json_encode($subscription['keys'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), Envelope::pushKeysAad($endpoint));
+        }
         $pdo = $this->db->pdo();
         for ($attempt = 1; ; ++$attempt) {
             $pdo->beginTransaction();
@@ -125,8 +144,8 @@ final class Subscriptions
                     $id = Uuid::v4();
                     Database::run(
                         $pdo,
-                        "INSERT INTO push_subscription (id, device_id, transport, endpoint, keys_enc) VALUES (?, ?, 'webpush', ?, ?)",
-                        [$id, $deviceId, $endpoint, $keysEnc],
+                        'INSERT INTO push_subscription (id, device_id, transport, endpoint, keys_enc) VALUES (?, ?, ?, ?, ?)',
+                        [$id, $deviceId, $transport, $endpoint, $keysEnc],
                     );
                 } elseif ($existing['user_id'] !== $userId) {
                     $id = null;
@@ -167,7 +186,7 @@ final class Subscriptions
     {
         $rows = Database::run(
             $this->db->pdo(),
-            'SELECT ps.id, ps.device_id, d.name AS device_name, d.platform, ps.endpoint, ps.created_at, ps.last_success_at
+            'SELECT ps.id, ps.device_id, d.name AS device_name, d.platform, ps.transport, ps.endpoint, ps.created_at, ps.last_success_at
              FROM push_subscription ps
              JOIN device d ON d.id = ps.device_id
              WHERE d.user_id = ? AND d.revoked_at IS NULL AND ps.disabled_at IS NULL
@@ -176,14 +195,14 @@ final class Subscriptions
         )->fetchAll();
         $result = [];
         foreach ($rows as $row) {
-            /** @var array{id: string, device_id: string, device_name: string, platform: string, endpoint: string, created_at: string, last_success_at: ?string} $row */
+            /** @var array{id: string, device_id: string, device_name: string, platform: string, transport: string, endpoint: string, created_at: string, last_success_at: ?string} $row */
             $result[] = [
                 'id' => $row['id'],
                 'deviceId' => $row['device_id'],
                 'deviceName' => $row['device_name'],
                 'platform' => $row['platform'],
                 'isCurrentDevice' => $row['device_id'] === $currentDeviceId,
-                'pushService' => Endpoint::host($row['endpoint']),
+                'pushService' => $row['transport'] === 'fcm' ? 'fcm.googleapis.com' : Endpoint::host($row['endpoint']),
                 'createdAt' => Sessions::iso($row['created_at']),
                 'lastSuccessAt' => Sessions::iso($row['last_success_at']),
             ];

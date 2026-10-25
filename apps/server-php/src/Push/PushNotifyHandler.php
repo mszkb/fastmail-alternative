@@ -25,7 +25,11 @@ use Fma\Log\Logger;
  *   failure_count up, after MAX_FAILURES in a row it is disabled; a
  *   success resets the count. The job itself is not retried for single
  *   delivery failures (healthy subscriptions would be notified again);
- * - logs show only the push service host and a short hash of the endpoint.
+ * - logs show only the push service host and a short hash of the endpoint;
+ * - transport 'fcm' (#139, Android app): the endpoint column holds the FCM
+ *   registration token; sent through the FCM HTTP v1 API (Fcm) with the
+ *   same content-free data and the same failure handling. Web Push and FCM
+ *   are configured independently; a missing one only skips its transport.
  */
 final class PushNotifyHandler implements JobHandler
 {
@@ -40,11 +44,19 @@ final class PushNotifyHandler implements JobHandler
         private readonly Logger $logger,
         private readonly PushSender $sender,
         private readonly ?Vapid $vapid,
+        private readonly ?Fcm $fcm = null,
     ) {}
 
     public static function fromConfig(Database $db, Config $config, Logger $logger): self
     {
-        return new self($db, $config, $logger, new StreamPushSender($config->bool('MAIL_INSECURE_TRANSPORT')), Vapid::fromConfig($config));
+        $fcm = null;
+        try {
+            $fcm = Fcm::fromConfig($config);
+        } catch (\Throwable $e) {
+            $logger->warn('FCM not usable, check FCM_SERVICE_ACCOUNT_JSON', ['errName' => $e::class]);
+        }
+
+        return new self($db, $config, $logger, new StreamPushSender($config->bool('MAIL_INSECURE_TRANSPORT')), Vapid::fromConfig($config), $fcm);
     }
 
     public function run(Job $job, Deadline $deadline): bool
@@ -67,42 +79,46 @@ final class PushNotifyHandler implements JobHandler
         if ($userId === null) {
             throw new \InvalidArgumentException('push_notify job without userId');
         }
-        if ($this->vapid === null) {
-            // Nothing to retry: the instance has no VAPID keys (scripts/setup-env.sh).
-            $this->logger->warn('push_notify skipped: VAPID keys not configured');
+        $transports = array_keys(array_filter(['webpush' => $this->vapid !== null, 'fcm' => $this->fcm !== null]));
+        if ($transports === []) {
+            // Nothing to retry: neither VAPID keys (scripts/setup-env.sh) nor FCM are configured.
+            $this->logger->warn('push_notify skipped: no push transport configured');
 
             return 'not_configured';
         }
 
         $pdo = $this->db->pdo();
         // Only devices that are still logged in (active session, not revoked).
+        $placeholders = implode(', ', array_fill(0, \count($transports), '?'));
         $rows = Database::run(
             $pdo,
-            "SELECT ps.id, ps.endpoint, ps.keys_enc, d.installation_id, u.wrapped_dek
+            "SELECT ps.id, ps.transport, ps.endpoint, ps.keys_enc, d.installation_id, u.wrapped_dek
              FROM push_subscription ps
              JOIN device d ON d.id = ps.device_id
              JOIN `user` u ON u.id = d.user_id
-             WHERE d.user_id = ? AND ps.transport = 'webpush' AND ps.disabled_at IS NULL
+             WHERE d.user_id = ? AND ps.transport IN ({$placeholders}) AND ps.disabled_at IS NULL
                AND d.revoked_at IS NULL
                AND EXISTS (SELECT 1 FROM session s WHERE s.device_id = d.id AND s.expires_at > UTC_TIMESTAMP(6))",
-            [$userId],
+            [$userId, ...$transports],
         )->fetchAll();
         $outcome = ['sent' => 0, 'removed' => 0, 'failed' => 0];
         if ($rows === []) {
             return $outcome;
         }
-        /** @var list<array{id: string, endpoint: string, keys_enc: string, installation_id: string, wrapped_dek: ?string}> $rows */
-        $wrapped = $rows[0]['wrapped_dek'];
-        if ($wrapped === null || $wrapped === '') {
-            throw new \RuntimeException('user key missing');
-        }
-        $dek = Envelope::unwrapAccountKey($this->config->get('MASTER_KEY'), $wrapped);
+        /** @var list<array{id: string, transport: string, endpoint: string, keys_enc: string, installation_id: string, wrapped_dek: ?string}> $rows */
+        $dek = null;
         $badge = $this->badgeCount($userId);
 
         foreach ($rows as $row) {
-            $ref = Endpoint::ref($row['endpoint']);
+            $ref = $row['transport'] === 'fcm' ? ['pushHost' => 'fcm.googleapis.com', 'endpointHash' => substr(hash('sha256', $row['endpoint']), 0, 12)] : Endpoint::ref($row['endpoint']);
             try {
-                $status = $this->deliver($dek, $row['endpoint'], $row['keys_enc'], PushPayload::json($row['installation_id'], $badge));
+                if ($row['transport'] === 'fcm') {
+                    \assert($this->fcm !== null);
+                    $status = $this->fcm->send($row['endpoint'], $row['installation_id'], $badge);
+                } else {
+                    $dek ??= $this->userKey($row['wrapped_dek']);
+                    $status = $this->deliver($dek, $row['endpoint'], $row['keys_enc'], PushPayload::json($row['installation_id'], $badge));
+                }
             } catch (\Throwable $e) {
                 $status = 0;
                 $this->logger->warn('push delivery error', ['subscriptionId' => $row['id']] + $ref + ['errName' => $e::class]);
@@ -138,6 +154,15 @@ final class PushNotifyHandler implements JobHandler
         }
 
         return $outcome;
+    }
+
+    private function userKey(?string $wrapped): string
+    {
+        if ($wrapped === null || $wrapped === '') {
+            throw new \RuntimeException('user key missing');
+        }
+
+        return Envelope::unwrapAccountKey($this->config->get('MASTER_KEY'), $wrapped);
     }
 
     /**

@@ -340,6 +340,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '422':
+          description: '`transport: fcm`, but FCM is not configured on this instance'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
     delete:
       operationId: deletePushSubscriptionByEndpoint
       tags: [push]
@@ -356,6 +361,30 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/push/test:
+    post:
+      operationId: sendTestPush
+      tags: [push]
+      summary: Queue a test notification
+      description: |
+        Queues the same content-free push_notify job as new mail does, for
+        all active subscriptions of the user (Web Push and FCM), with the
+        same coalescing (at most one queued job, at least 30 s apart).
+        `queued: false` when there is no active subscription or a job is
+        already waiting.
+      responses:
+        '202':
+          description: Request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued]
+                properties:
+                  queued:
+                    type: boolean
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/push/subscriptions/{id}:
     parameters:
       - $ref: '#/components/parameters/Id'
@@ -680,10 +709,31 @@ components:
           description: Base64url VAPID public key; null when not configured.
 
     PushSubscriptionRequest:
+      oneOf:
+        - $ref: '#/components/schemas/WebPushSubscriptionRequest'
+        - $ref: '#/components/schemas/FcmSubscriptionRequest'
+
+    FcmSubscriptionRequest:
+      type: object
+      description: Android app (#139). Needs FCM on the instance (`FCM_PROJECT_ID`), otherwise 422.
+      required: [transport, token]
+      properties:
+        transport:
+          type: string
+          const: fcm
+        token:
+          type: string
+          pattern: '^[A-Za-z0-9_:\-]{20,1024}$'
+          description: FCM registration token; to unsubscribe, send it as `endpoint` to DELETE.
+
+    WebPushSubscriptionRequest:
       type: object
       description: The browser's PushSubscription JSON.
       required: [endpoint, keys]
       properties:
+        transport:
+          type: string
+          const: webpush
         endpoint:
           type: string
           format: uri
@@ -716,7 +766,7 @@ components:
       properties:
         endpoint:
           type: string
-          description: Endpoint of the subscription to remove.
+          description: Endpoint of the subscription to remove (for `fcm` the registration token).
 
     PushSubscriptionInfo:
       type: object

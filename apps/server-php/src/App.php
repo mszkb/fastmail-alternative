@@ -93,7 +93,7 @@ final class App
         $autoconfig ??= new Mail\Autoconfig(new Mail\StreamHttpsGetter(), $config->get('AUTOCONFIG_ISPDB', '1') !== '0');
         (new Routes\AutoconfigRoutes($autoconfig))->register($app, $requireAuth);
         (new IdentityRoutes($db))->register($app, $requireAuth);
-        (new PushRoutes($config, new Subscriptions($db, $config)))->register($app, $requireAuth);
+        (new PushRoutes($config, new Subscriptions($db, $config), new Push\PushNotifyQueue($db)))->register($app, $requireAuth);
         (new Routes\ConfigTransferRoutes($db, $config, $logger))->register($app, $requireAuth);
         (new Routes\SettingsRoutes($db))->register($app, $requireAuth);
         (new Routes\StorageRoutes($db))->register($app, $requireAuth);

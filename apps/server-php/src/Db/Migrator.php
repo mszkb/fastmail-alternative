@@ -24,6 +24,14 @@ final class Migrator
     /** The migrations shipped with this version. */
     public const DEFAULT_DIR = __DIR__ . '/../../migrations';
 
+    /**
+     * Migrations that only shipped on a preview branch (#161) and were
+     * replaced: native tokens use session.kind (0009_session_kind) instead
+     * of session.client. A database that recorded them is accepted;
+     * migrate() drops the record, the unused column stays (it has a default).
+     */
+    private const RETIRED = ['0006_native_client', '0008_native_client'];
+
     public function __construct(private readonly \PDO $pdo, private readonly string $dir = self::DEFAULT_DIR) {}
 
     /**
@@ -40,10 +48,10 @@ final class Migrator
         if ($exists === false) {
             return;
         }
-        $this->assertKnown(array_map(
+        $this->assertKnown(array_values(array_diff(array_map(
             static fn(mixed $name): string => (string) $name,
             Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
-        ));
+        ), self::RETIRED)));
     }
 
     /** @return list<string> names applied in this run */
@@ -60,6 +68,9 @@ final class Migrator
                    applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                  ) ENGINE=InnoDB',
             );
+            foreach (self::RETIRED as $name) {
+                Database::run($this->pdo, 'DELETE FROM schema_migrations WHERE name = ?', [$name]);
+            }
             $done = array_map(
                 static fn(mixed $name): string => (string) $name,
                 Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
