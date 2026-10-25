@@ -18,7 +18,7 @@ servers:
   - url: /
 security:
   - session: []
-  - deviceToken: []
+  - bearer: []
 tags:
   - name: system
   - name: auth
@@ -37,10 +37,15 @@ components:
       type: apiKey
       in: cookie
       name: fma_session
-    deviceToken:
+    bearer:
       type: http
       scheme: bearer
-      description: 'Device-bound token of a native app (`POST /api/auth/login` with `client: native`). Never rotated, valid 365 days, revoked by logout, device revocation or password change.'
+      description: |
+        Device-bound token of a native client (`POST /api/auth/login` with
+        `client: native`). Accepted only in the `Authorization` header, never
+        as cookie; with it the cookie is ignored and the origin check does not
+        apply. Not rotated; expires after 90 days without use and on revoking
+        the device.
     metricsToken:
       type: http
       scheme: bearer
@@ -79,6 +84,18 @@ components:
       in: query
       required: false
       description: Also search Spam and Trash (left out by default). Gmail's "All Mail" is never searched.
+      schema:
+        type: string
+        enum: ['1', 'true', '0', 'false']
+    SearchFulltext:
+      name: fulltext
+      in: query
+      required: false
+      description: >-
+        Free text `q` also in the body (IMAP TEXT). Opt-in: providers without
+        a search index scan every message, which can take minutes. In
+        `GET /api/search` the account may then use the whole search deadline
+        instead of its own. Not a criterion on its own.
       schema:
         type: string
         enum: ['1', 'true', '0', 'false']

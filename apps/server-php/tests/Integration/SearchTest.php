@@ -223,7 +223,9 @@ final class SearchTest extends DatabaseTestCase
     {
         self::assertSame(['Projekttreffen'], self::column($this->body(['from' => "anna.{$this->tag}@example.org"]), 'subject'));
 
-        $body = $this->body(['q' => "{$this->tag}body"]);
+        // Free text leaves the body out unless `fulltext` is set (slow at providers without an index).
+        self::assertSame(0, $this->body(['q' => "{$this->tag}body"])['providerMatches']);
+        $body = $this->body(['q' => "{$this->tag}body", 'fulltext' => '1']);
         self::assertSame(['Urlaub'], self::column($body, 'subject'));
         self::assertSame(2, $body['providerMatches']);
         self::assertSame(1, $body['notSynced']);
@@ -231,7 +233,7 @@ final class SearchTest extends DatabaseTestCase
 
     public function testFiltersByDateRange(): void
     {
-        $subjects = self::column($this->body(['q' => $this->tag, 'since' => '2026-02-01', 'before' => '2026-03-01']), 'subject');
+        $subjects = self::column($this->body(['q' => $this->tag, 'fulltext' => '1', 'since' => '2026-02-01', 'before' => '2026-03-01']), 'subject');
         sort($subjects);
         self::assertSame(['Projekttreffen', "Rechnung {$this->tag} Februar"], $subjects);
     }
@@ -285,8 +287,8 @@ final class SearchTest extends DatabaseTestCase
         self::assertSame(['q' => 'a b', 'folderId' => 'abcdef01-2345-4789-8abc-def012345678'], SearchRoutes::parseQuery(['q' => " a\x01b ", 'folderId' => 'ABCDEF01-2345-4789-8ABC-DEF012345678', 'since' => '']));
         self::assertSame('Ungültiger Suchbegriff.', SearchRoutes::parseQuery(['q' => ['x']]));
         self::assertSame('Bitte einen Suchbegriff oder Zeitraum angeben.', SearchRoutes::parseQuery(['subject' => '']));
-        self::assertSame(['parts' => ['TEXT "a\"b" SINCE 1-Feb-2026'], 'utf8' => false], ImapActions::searchCriteria(['q' => 'a"b', 'since' => '2026-02-01']));
-        self::assertSame(['parts' => ['TEXT ', 'ä', ' FROM ', 'x', ' BEFORE 3-Mar-2026'], 'utf8' => true], ImapActions::searchCriteria(['q' => 'ä', 'from' => 'x', 'before' => '2026-03-03']));
+        self::assertSame(['parts' => ['TEXT "a\"b" SINCE 1-Feb-2026'], 'utf8' => false], ImapActions::searchCriteria(['q' => 'a"b', 'fulltext' => true, 'since' => '2026-02-01']));
+        self::assertSame(['parts' => ['TEXT ', 'ä', ' FROM ', 'x', ' BEFORE 3-Mar-2026'], 'utf8' => true], ImapActions::searchCriteria(['q' => 'ä', 'fulltext' => true, 'from' => 'x', 'before' => '2026-03-03']));
         self::assertSame('1:3,7,9:10', ImapActions::uidSet([9, 1, 2, 3, 7, 10, 2]));
         self::assertSame(['uidValidity' => '5', 'map' => [1 => 11, 2 => 12, 3 => 13]], ImapActions::copyUid(['* OK [COPYUID 5 1:2,3 11:13] Moved']));
     }

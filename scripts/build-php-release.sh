@@ -114,7 +114,7 @@ AddType application/manifest+json .webmanifest
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  # PHP-FPM/CGI drops the Authorization header (web cron, /api/metrics).
+  # PHP-FPM/CGI drops the Authorization header (web cron, /api/metrics, native app tokens).
   RewriteCond %{HTTP:Authorization} .
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
   # API: everything below /api/ goes to the front controller.

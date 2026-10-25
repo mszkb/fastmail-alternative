@@ -28,6 +28,7 @@ Ein Issue/PR gilt als erledigt, wenn alle zutreffenden Punkte erfüllt sind.
 - [ ] Nutzer- bzw. Betreiber-Doku aktualisiert, falls Verhalten oder Konfiguration sich ändert
 - [ ] ADR angelegt/aktualisiert, falls eine Architekturentscheidung getroffen wurde
 - [ ] Status in `ROADMAP.md` aktualisiert
+- [ ] Neue oder geänderte Funktion in [`features.yaml`](../product/features.yaml) für Web und App nachgezogen (`pnpm features` erzeugt die [Feature-Matrix](../product/feature-matrix.md)); fehlt sie in den Apps, ist ein Mobile-Folge-Issue angelegt und verlinkt
 - [ ] `CHANGELOG.md` unter `[Unreleased]` ergänzt, falls nutzer- oder betreiberrelevant; Migrationen, neue/umbenannte/entfernte `.env`-Variablen, geänderte Standardwerte und Breaking Changes als **Betreiber:** markiert ([Changelog-Prozess](changelog.md))
 
 ## Deployment

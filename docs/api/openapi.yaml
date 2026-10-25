@@ -19,7 +19,7 @@ servers:
   - url: /
 security:
   - session: []
-  - deviceToken: []
+  - bearer: []
 tags:
   - name: system
   - name: auth
@@ -38,10 +38,15 @@ components:
       type: apiKey
       in: cookie
       name: fma_session
-    deviceToken:
+    bearer:
       type: http
       scheme: bearer
-      description: "Device-bound token of a native app (`POST /api/auth/login` with `client: native`). Never rotated, valid 365 days, revoked by logout, device revocation or password change."
+      description: |
+        Device-bound token of a native client (`POST /api/auth/login` with
+        `client: native`). Accepted only in the `Authorization` header, never
+        as cookie; with it the cookie is ignored and the origin check does not
+        apply. Not rotated; expires after 90 days without use and on revoking
+        the device.
     metricsToken:
       type: http
       scheme: bearer
@@ -78,6 +83,8 @@ components:
         - JOB_TIMEOUT
         - CREDENTIALS_REQUIRED
         - RATE_LIMITED
+        - OAUTH_EXPIRED
+        - OAUTH_NOT_CONFIGURED
     HostPort:
       type: object
       required:
@@ -108,6 +115,8 @@ components:
         - syncSince
         - unreadCount
         - syncing
+        - credentialKind
+        - oauthProvider
       properties:
         id:
           type: string
@@ -159,6 +168,17 @@ components:
         syncing:
           type: boolean
           description: A sync is queued or running (false in create/update responses).
+        credentialKind:
+          type: string
+          enum:
+            - password
+            - oauth2
+          description: "`oauth2`: sign-in with Google/Microsoft; new sign-in via POST /api/oauth/{provider}/start with `accountId`."
+        oauthProvider:
+          description: Provider of an `oauth2` account; null for password accounts.
+          oneOf:
+            - $ref: "#/components/schemas/OAuthProvider"
+            - type: "null"
     AccountListResponse:
       type: object
       required:
@@ -948,6 +968,12 @@ components:
           type: string
           format: email
           description: Present only when authenticated.
+        masterKeyGenerated:
+          type: boolean
+          description: |
+            Present (true) only while setup is pending and the MASTER_KEY was
+            generated on the first start (#164) instead of being set by the
+            operator: the setup page asks to back it up.
     LoginRequest:
       type: object
       required:
@@ -966,24 +992,28 @@ components:
           type: string
           maxLength: 100
           default: Browser
-          description: Longer values are truncated; empty becomes `Browser`.
+          description: Longer values are truncated; empty becomes `Browser` (`App` for native clients).
         platform:
           type: string
           enum:
             - ios_pwa
             - android_pwa
             - desktop
-            - android
             - ios
+            - android
           default: desktop
-          description: Unknown values are treated as `desktop`.
+          description: |
+            Unknown values are treated as `desktop`. `ios` and `android` only
+            with `client: native`, where one of them is required (else 400).
         client:
           type: string
           enum:
-            - web
+            - browser
             - native
-          default: web
-          description: Login only. `native` returns a Bearer device token instead of setting the cookie.
+          default: browser
+          description: |
+            Login only. `native` returns a device-bound bearer token in the
+            body instead of setting the session cookie.
     SetupRequest:
       allOf:
         - $ref: "#/components/schemas/LoginRequest"
@@ -1003,18 +1033,10 @@ components:
         email:
           type: string
           format: email
-    LoginResponse:
-      type: object
-      required:
-        - email
-      properties:
-        email:
-          type: string
-          format: email
         token:
           type: string
           pattern: ^[A-Za-z0-9_-]{43}$
-          description: "Only for `client: native` - the device token for `Authorization: Bearer`."
+          description: "Only for `client: native`: the bearer token. Shown once, only its hash is stored."
     PasswordChangeRequest:
       type: object
       required:
@@ -1049,8 +1071,8 @@ components:
             - ios_pwa
             - android_pwa
             - desktop
-            - android
             - ios
+            - android
         lastSeenAt:
           type:
             - string
@@ -1175,8 +1197,8 @@ components:
             - ios_pwa
             - android_pwa
             - desktop
-            - android
             - ios
+            - android
         isCurrentDevice:
           type: boolean
         pushService:
@@ -1348,6 +1370,11 @@ components:
           enum:
             - password
             - oauth2
+        oauthProvider:
+          description: Provider of an `oauth2` account (the export always sets it). An imported `oauth2` account without a known provider becomes a password account; with one it waits for a new sign-in (`OAUTH_EXPIRED`).
+          oneOf:
+            - $ref: "#/components/schemas/OAuthProvider"
+            - type: "null"
         syncSince:
           type:
             - string
@@ -1545,6 +1572,50 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRequestResult"
+    AutoconfigServer:
+      type: object
+      additionalProperties: false
+      required:
+        - host
+        - port
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+    AutoconfigResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - found
+      properties:
+        found:
+          type: boolean
+        source:
+          type: string
+          enum:
+            - autoconfig
+            - well-known
+            - ispdb
+            - srv
+            - mx
+        imap:
+          $ref: "#/components/schemas/AutoconfigServer"
+        smtp:
+          oneOf:
+            - $ref: "#/components/schemas/AutoconfigServer"
+            - type: "null"
+        username:
+          type: string
+          enum:
+            - address
+            - localpart
+          description: User name the provider expects - the full address or the part before the `@`.
+        mxDomain:
+          type: string
+          description: Base domain of the preferred MX host (e.g. `google.com`), when the MX step ran.
     SendRecipient:
       description: A recipient of `POST /api/outbox`, either a plain address or `{ name, address }`.
       oneOf:
@@ -1965,6 +2036,59 @@ components:
           type: integer
           minimum: 0
           description: Attachments not copied (size, count or pending limits).
+    OAuthProvider:
+      type: string
+      enum:
+        - google
+        - microsoft
+    OAuthProvidersResponse:
+      type: object
+      required:
+        - providers
+        - redirectUri
+      properties:
+        providers:
+          type: object
+          required:
+            - google
+            - microsoft
+          properties:
+            google:
+              type: boolean
+            microsoft:
+              type: boolean
+        redirectUri:
+          type:
+            - string
+            - "null"
+    OAuthStartRequest:
+      type: object
+      properties:
+        accountId:
+          type: string
+          format: uuid
+          description: Sign in again for this existing account.
+    OAuthStartResponse:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+    OAuthStartConflict:
+      type: object
+      required:
+        - message
+        - code
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          enum:
+            - NOT_CONFIGURED
+            - NO_PUBLIC_URL
     GlobalSearchItem:
       type: object
       description: |
@@ -2052,7 +2176,9 @@ components:
             contacted) or the provider rejected the credentials;
             `rate_limited`: more than 10 provider searches of this account in
             the last minute; `error`: provider unreachable, blocked or the
-            account is disabled (see `code`).
+            account is disabled (see `code`); `timeout`: the deadline ended
+            the search, the hits of the folders searched until then
+            (`foldersSearched`) are still included.
         code:
           type: string
           description: Stable error code when `status` is not `ok`.
@@ -2346,6 +2472,18 @@ components:
       in: query
       required: false
       description: Also search Spam and Trash (left out by default). Gmail's "All Mail" is never searched.
+      schema:
+        type: string
+        enum:
+          - "1"
+          - "true"
+          - "0"
+          - "false"
+    SearchFulltext:
+      name: fulltext
+      in: query
+      required: false
+      description: "Free text `q` also in the body (IMAP TEXT). Opt-in: providers without a search index scan every message, which can take minutes. In `GET /api/search` the account may then use the whole search deadline instead of its own. Not a criterion on its own."
       schema:
         type: string
         enum:
@@ -2688,7 +2826,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema:
             type: string
             maxLength: 200
@@ -2708,6 +2846,7 @@ paths:
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
         - $ref: "#/components/parameters/SearchIncludeJunk"
+        - $ref: "#/components/parameters/SearchFulltext"
         - name: since
           in: query
           required: false
@@ -3019,10 +3158,9 @@ paths:
       description: |
         Creates a new device and session. A still valid session of this
         browser is ended. After 5 failed attempts within 15 minutes the
-        client IP is locked out for 15 minutes (429).
-        With `client: native` (apps, #138) no cookie is set; the response
-        carries a device token for `Authorization: Bearer`. The server
-        stores only its SHA-256.
+        client IP is locked out for 15 minutes (429). With `client: native`
+        the response carries a device-bound bearer token instead of the
+        cookie (#138).
       security: []
       requestBody:
         required: true
@@ -3035,13 +3173,19 @@ paths:
           description: Logged in
           headers:
             Set-Cookie:
-              description: "`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP); not for `client: native`"
+              description: "`fma_session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000` (plus `Secure` unless plain HTTP); not set for `client: native`"
               schema:
                 type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LoginResponse"
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "400":
+          description: "`client: native` without platform `ios` or `android` (does not count as a failed login)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
         "401":
           description: Invalid email or password (also for malformed input)
           content:
@@ -3070,7 +3214,7 @@ paths:
       description: |
         Requires the current password (same lockout as login). Revokes all
         other devices (their sessions and push subscriptions) and rotates
-        the current session token.
+        the current session token (a bearer token stays valid, no cookie).
       requestBody:
         required: true
         content:
@@ -3124,7 +3268,7 @@ paths:
           description: Logged out; the session cookie is cleared
           headers:
             Set-Cookie:
-              description: Clears `fma_session` (expired cookie).
+              description: Clears `fma_session` (expired cookie); not sent when logged out with a bearer token.
               schema:
                 type: string
         "401":
@@ -3196,6 +3340,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthStatus"
+  /api/autoconfig:
+    get:
+      operationId: detectMailSettings
+      tags:
+        - accounts
+      summary: Detect IMAP/SMTP settings of an address domain
+      description: |
+        Pre-fill for the account form when no provider preset matches. The
+        server tries, in this order (first result wins): the provider's
+        autoconfig (`https://autoconfig.<domain>/mail/config-v1.1.xml`,
+        then `https://<domain>/.well-known/autoconfig/mail/config-v1.1.xml`),
+        the Thunderbird ISPDB (off with `AUTOCONFIG_ISPDB=0`), DNS SRV
+        records (RFC 6186/8314) and the ISPDB entry of the MX host's base
+        domain (`source` names the one that answered). When the MX step ran,
+        `mxDomain` names that base domain (also with the ISPDB off and
+        `found` false), so the client can pick its provider preset, e.g.
+        Gmail for Google Workspace on an own domain. Only the domain is
+        sent - never the address or a password; https only, public hosts
+        only (SSRF protection), at most ~8 s. Servers without TLS are never
+        returned; implicit TLS is preferred over STARTTLS. Nothing found is
+        no error (`found: false`). The connection test of
+        `POST /api/accounts` confirms the values.
+      parameters:
+        - name: domain
+          in: query
+          required: true
+          description: Domain part of the address, e.g. `example.org`
+          schema:
+            type: string
+            maxLength: 253
+      responses:
+        "200":
+          description: Detected settings, or `found` false
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoconfigResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /api/drafts/{id}:
     get:
       operationId: getDraft
@@ -3645,8 +3832,8 @@ paths:
         - messages
       summary: Download one attachment
       description: |
-        Streams the decoded attachment. Only raster images
-        (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
+        Streams the decoded attachment (decoded while sent, not buffered).
+        Only raster images (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
         own content type and may be shown inline (`inline=1`); every other
         type is sent as `application/octet-stream` with
         `Content-Disposition: attachment`. Always sandboxed by CSP.
@@ -3709,6 +3896,14 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: Message or attachment not found (also for an invalid index or unsynced raw mail)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "503":
+          description: |
+            The raw mail does not fit into the server's PHP `memory_limit`
+            (it is decrypted in one piece, about twice its size is needed).
           content:
             application/json:
               schema:
@@ -3932,6 +4127,116 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorMessage"
+  /api/oauth/{provider}/start:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: startOAuth
+      tags:
+        - accounts
+      summary: Start the sign-in with an OAuth provider
+      description: |
+        Returns the authorization URL (code flow with PKCE); the PWA
+        navigates there. The state is single use and valid for 10 minutes.
+        With `accountId` an existing `oauth2` account of this provider signs
+        in again (expired or revoked grant); the provider must then return
+        the same mailbox. The result comes back via GET /api/oauth/callback.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OAuthStartRequest"
+      responses:
+        "200":
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthStartResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Unknown provider, or `accountId` is not an `oauth2` account of this provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorMessage"
+        "409":
+          description: Provider not configured (`NOT_CONFIGURED`) or no public address (`NO_PUBLIC_URL`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthStartConflict"
+  /api/oauth/callback:
+    get:
+      operationId: oauthCallback
+      tags:
+        - accounts
+      summary: Redirect target of the OAuth provider
+      security: []
+      description: |
+        Called by the browser coming back from the provider, without the
+        session cookie (SameSite=Strict); the state identifies the sign-in.
+        Exchanges the code, tests IMAP and SMTP with XOAUTH2, then creates
+        the account or stores new tokens for the existing one, and queues a
+        folder sync. Always answers with a redirect to the PWA:
+        `/?oauth=connected&account={id}` or
+        `/?oauth=error&reason={reason}[&code={AccountErrorCode}]` with reason
+        one of `state`, `denied`, `not_configured`, `invalid_client`, `provider`, `network`,
+        `no_refresh_token`, `no_email`, `invalid_grant`, `imap`, `smtp`,
+        `wrong_account`, `limit`.
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect to the PWA with the result
+          headers:
+            Location:
+              schema:
+                type: string
+  /api/oauth/providers:
+    get:
+      operationId: listOAuthProviders
+      tags:
+        - accounts
+      summary: OAuth providers configured on this instance
+      description: |
+        Sign-in with Google or Microsoft (ADR-0011) is offered only for
+        providers whose client id and secret are configured
+        (`OAUTH_GOOGLE_*`, `OAUTH_MICROSOFT_*`). `redirectUri` is the address
+        to register at the provider; null without `PUBLIC_URL`/`DOMAIN`.
+      responses:
+        "200":
+          description: Configured providers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthProvidersResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /api/outbox:
     post:
       operationId: sendMessage
@@ -4210,7 +4515,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema:
             type: string
             maxLength: 200
@@ -4230,6 +4535,7 @@ paths:
         - $ref: "#/components/parameters/SearchUnread"
         - $ref: "#/components/parameters/SearchAttachment"
         - $ref: "#/components/parameters/SearchIncludeJunk"
+        - $ref: "#/components/parameters/SearchFulltext"
         - name: since
           in: query
           required: false

@@ -1,6 +1,6 @@
 # ADR-0015: Mobile-Clients mit Kotlin Multiplatform + Compose Multiplatform
 
-- **Status:** Accepted
+- **Status:** Accepted (Owner-Entscheidung 2026-10-09, Epic #136)
 - **Datum:** 2026-10-09
 - **Roadmap:** Phase 9 (Epic #136, #137)
 
@@ -38,10 +38,10 @@ ADR-0010 sieht native Clients pro Plattform „in der jeweils besten Technologie
 - **Mit der PWA teilt die App keinen Laufzeitcode.** Gleiche Logik und gleiches Design entstehen über diese Wege:
   - die Logik auf dem Server (ADR-0010);
   - den API-Vertrag `docs/api/openapi.yaml`. Der Kotlin-Client ist vorerst handgeschrieben, weil der Generator die OpenAPI-3.1-Spec nicht sauber umsetzt (#143). Ein Smoke-Test gegen die echte PHP-API in CI prüft ihn;
-  - Design-Tokens in `packages/design-tokens`, aus denen das Compose-Theme erzeugt wird. Ein Test prüft, dass sie zu den daisyUI-Themes passen (#141);
+  - Design-Tokens in `packages/design-tokens/tokens.json`. `pnpm tokens` erzeugt daraus das CSS der PWA-Themes, die Paletten für `@fma/shared` und die PHP-Theme-Prüfung sowie das Compose-Theme der App (#141);
   - später gemeinsame Test-Fixtures für Domänenlogik (#144).
 - **Anmeldung:** gerätegebundenes Bearer-Token (ADR-0004, #138).
-- **Push:** Transporte `fcm` (umgesetzt, #139), `apns` und `relay` (geplant) zusätzlich zu `webpush` (ergänzt ADR-0005). Der Payload enthält weiterhin nur Ereignistyp, Installations-ID und Badge.
+- **Push:** Transporte `fcm` (umgesetzt, #139), `apns` (direkt mit eigenen Keys aus `.env`) und `relay` (optionales Hosted Push Relay für Store-Apps, #66, #140), beide geplant, zusätzlich zu `webpush` (ergänzt ADR-0005). Der Payload enthält weiterhin nur Ereignistyp, Installations-ID und Badge.
 - **Vertrieb:** App Store und Google Play. Bis dahin gibt es Sideload-APKs aus CI (`mobile-android`).
 
 ## Konsequenzen

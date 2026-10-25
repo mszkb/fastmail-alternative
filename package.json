@@ -14,16 +14,16 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "build": "pnpm -r build",
-    "tokens": "node packages/design-tokens/generate.mjs",
     "features": "node packages/feature-matrix/generate.mjs",
     "dev:web": "pnpm --filter @fma/web dev",
     "dev:api": "php apps/server-php/bin/migrate.php && php -S 127.0.0.1:3001 -t apps/server-php/public apps/server-php/public/index.php",
-    "dev:worker": "php apps/server-php/bin/worker.php"
+    "dev:worker": "php apps/server-php/bin/worker.php",
+    "tokens": "node packages/design-tokens/scripts/build.mjs"
   },
   "devDependencies": {
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.9.0",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.11.1",
     "prettier": "^3.9.9"

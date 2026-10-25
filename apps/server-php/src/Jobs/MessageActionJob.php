@@ -82,7 +82,7 @@ final class MessageActionJob implements JobHandler
             return 'folder_missing';
         }
 
-        $account = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+        $account = AccountContext::load($pdo, $accountId, $this->config);
         try {
             $client = ImapClient::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $account->imap);
         } catch (MailException $e) {

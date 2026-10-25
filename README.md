@@ -8,12 +8,12 @@ wip: self hosted fastmail-alternative
 
 ```sh
 git clone https://github.com/mszkb/fastmail-alternative.git && cd fastmail-alternative
-./scripts/setup-env.sh       # erzeugt .env mit MASTER_KEY – separat sichern!
-# DOMAIN in .env auf die eigene Domain setzen
+cp -n .env.example .env     # DOMAIN eintragen; leere Secrets erzeugt der erste Start
 docker compose up -d --build --wait
+docker compose exec php php bin/secrets.php export   # MASTER_KEY separat sichern!
 ```
 
-Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md).
+Ohne Docker läuft das Backend auch auf Shared Hosting mit PHP 8.2+ und MySQL/MariaDB: [Installation auf Webspace](docs/operations/installation-php.md). Ob dein Hoster passt, zeigt vorab [`scripts/hosting-check.php`](scripts/hosting-check.php) (eine Datei hochladen und im Browser öffnen).
 
 Ausführlich (Voraussetzungen, Ersteinrichtung, Push, Backup, Upgrade, Troubleshooting): [Betreiber-Doku](docs/operations/README.md)
 

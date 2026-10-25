@@ -17,25 +17,27 @@ Erlaubte Ports: IMAP 143/993, SMTP 25/465/587/2525; weitere nur mit `MAIL_EXTRA_
 
 ## Anbieter
 
-**Stand der Matrix:** Die Erweiterungs-Spalten geben den öffentlich dokumentierten bzw. allgemein bekannten Stand wieder und sind **noch nicht gegen echte Konten geprüft** (Spalte „Geprüft“). ✓ = vorhanden, ✗ = fehlt, ? = unklar. Die App erkennt die Fähigkeiten zur Laufzeit selbst und hängt nicht von dieser Tabelle ab.
+**Stand der Matrix:** Die Erweiterungs-Spalten geben den öffentlich dokumentierten bzw. allgemein bekannten Stand wieder und sind – außer bei Einträgen mit Datum in der Spalte „Geprüft“ – **noch nicht gegen echte Konten geprüft**. ✓ = vorhanden, ✗ = fehlt, ? = unklar. Die App erkennt die Fähigkeiten zur Laufzeit selbst und hängt nicht von dieser Tabelle ab.
 
-| Anbieter                    | IMAP / SMTP                                                                   | Anmeldung                                      | IDLE | CONDSTORE | QRESYNC | MOVE | SPECIAL-USE | Geprüft | Hinweise                                                                                 |
-| --------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------- | ---- | --------- | ------- | ---- | ----------- | ------- | ---------------------------------------------------------------------------------------- |
-| Dovecot (eigener Server)    | eigener Host, 993 / 465 oder 587                                              | Passwort                                       | ✓    | ✓         | ✓       | ✓    | ✓           | –       | Referenz; SPECIAL-USE nur, wenn in der Konfiguration gesetzt                             |
-| Cyrus (eigener Server)      | eigener Host, 993 / 465 oder 587                                              | Passwort                                       | ✓    | ✓         | ✓       | ✓    | ✓           | –       |                                                                                          |
-| Fastmail                    | `imap.fastmail.com` 993 / `smtp.fastmail.com` 465                             | App-Passwort                                   | ✓    | ✓         | ✓       | ✓    | ✓           | –       | Cyrus-basiert                                                                            |
-| Posteo                      | `posteo.de` 993 / `posteo.de` 465 oder 587                                    | Passwort                                       | ✓    | ✓         | ✓       | ✓    | ✓           | –       | Dovecot-basiert                                                                          |
-| mailbox.org                 | `imap.mailbox.org` 993 / `smtp.mailbox.org` 465 oder 587                      | Passwort                                       | ✓    | ✓         | ✓       | ✓    | ✓           | –       | Dovecot-basiert                                                                          |
-| Gmail / Google Workspace    | `imap.gmail.com` 993 / `smtp.gmail.com` 465 oder 587                          | App-Passwort (nur mit 2-Faktor), später OAuth2 | ✓    | ✓         | ✗       | ✓    | ✓           | –       | Labels erscheinen als Ordner; „Alle Nachrichten“ enthält Duplikate; OAuth2 kommt mit #36 |
-| iCloud Mail                 | `imap.mail.me.com` 993 / `smtp.mail.me.com` 587                               | App-spezifisches Passwort                      | ✓    | ?         | ?       | ?    | ?           | –       |                                                                                          |
-| Yahoo Mail                  | `imap.mail.yahoo.com` 993 / `smtp.mail.yahoo.com` 465 oder 587                | App-Passwort                                   | ✓    | ?         | ?       | ✓    | ?           | –       |                                                                                          |
-| GMX / Web.de                | `imap.gmx.net` bzw. `imap.web.de` 993 / `mail.gmx.net` bzw. `smtp.web.de` 587 | Passwort                                       | ?    | ?         | ?       | ?    | ?           | –       | IMAP-Zugriff muss im Webmail erst eingeschaltet werden                                   |
-| Microsoft 365 / Outlook.com | `outlook.office365.com` 993 / `smtp.office365.com` 587                        | **nur OAuth2** (Basic Auth abgeschaltet)       | ✓    | ✗         | ✗       | ✓    | ✓           | –       | Ohne OAuth2 (#36) **nicht nutzbar**                                                      |
-| GreenMail (nur Tests)       | lokal, 3143 / 3025                                                            | Passwort                                       | ✓    | ?         | ?       | ?    | ?           | CI      | Nur mit `MAIL_INSECURE_TRANSPORT=1`; Grundlage der Integrations- und E2E-Tests           |
+| Anbieter                    | IMAP / SMTP                                                                   | Anmeldung                                   | IDLE | CONDSTORE | QRESYNC | MOVE | SPECIAL-USE | Geprüft                    | Hinweise                                                                                                                                                                        |
+| --------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------- | ---- | --------- | ------- | ---- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dovecot (eigener Server)    | eigener Host, 993 / 465 oder 587                                              | Passwort                                    | ✓    | ✓         | ✓       | ✓    | ✓           | –                          | Referenz; SPECIAL-USE nur, wenn in der Konfiguration gesetzt                                                                                                                    |
+| Cyrus (eigener Server)      | eigener Host, 993 / 465 oder 587                                              | Passwort                                    | ✓    | ✓         | ✓       | ✓    | ✓           | –                          |                                                                                                                                                                                 |
+| Fastmail                    | `imap.fastmail.com` 993 / `smtp.fastmail.com` 465                             | App-Passwort                                | ✓    | ✓         | ✓       | ✓    | ✓           | –                          | Cyrus-basiert                                                                                                                                                                   |
+| Posteo                      | `posteo.de` 993 / `posteo.de` 465 oder 587                                    | Passwort                                    | ✓    | ✓         | ✓       | ✓    | ✓           | –                          | Dovecot-basiert                                                                                                                                                                 |
+| mailbox.org                 | `imap.mailbox.org` 993 / `smtp.mailbox.org` 465 oder 587                      | Passwort                                    | ✓    | ✓         | ✓       | ✓    | ✓           | –                          | Dovecot-basiert                                                                                                                                                                 |
+| Gmail / Google Workspace    | `imap.gmail.com` 993 / `smtp.gmail.com` 465 oder 587                          | OAuth2 oder App-Passwort (nur mit 2-Faktor) | ✓    | ✓         | ✗       | ✓    | ✓           | –                          | Labels erscheinen als Ordner; „Alle Nachrichten“ enthält Duplikate; OAuth2 seit #36                                                                                             |
+| iCloud Mail                 | `imap.mail.me.com` 993 / `smtp.mail.me.com` 587                               | App-spezifisches Passwort                   | ✓    | ?         | ?       | ?    | ?           | –                          |                                                                                                                                                                                 |
+| Yahoo Mail                  | `imap.mail.yahoo.com` 993 / `smtp.mail.yahoo.com` 465 oder 587                | App-Passwort                                | ✓    | ?         | ?       | ✓    | ?           | –                          |                                                                                                                                                                                 |
+| GMX / Web.de                | `imap.gmx.net` bzw. `imap.web.de` 993 / `mail.gmx.net` bzw. `smtp.web.de` 587 | Passwort                                    | ✓    | ✗         | ✗       | ✓    | ✓           | GMX 2026-10-16 (Live-Test) | IMAP-Zugriff muss im Webmail erst eingeschaltet werden; UIDPLUS vorhanden; ohne CONDSTORE vollständiger Flag-Abgleich je Lauf; Web.de (gleiche Plattform) nicht einzeln geprüft |
+| Microsoft 365 / Outlook.com | `outlook.office365.com` 993 / `smtp.office365.com` 587                        | **nur OAuth2** (Basic Auth abgeschaltet)    | ✓    | ✗         | ✗       | ✓    | ✓           | –                          | Nur mit eingerichteter OAuth-App ([oauth.md](../operations/oauth.md))                                                                                                           |
+| GreenMail (nur Tests)       | lokal, 3143 / 3025                                                            | Passwort                                    | ✓    | ?         | ?       | ?    | ?           | CI                         | Nur mit `MAIL_INSECURE_TRANSPORT=1`; Grundlage der Integrations- und E2E-Tests                                                                                                  |
 
 ## Vorlagen in der Kontoeinrichtung
 
-„Konto hinzufügen“ bietet für die Anbieter oben eine Vorlage (#117, `PROVIDER_PRESETS` in `packages/shared/src/provider-presets.ts`): Auswahl unter „Anbieter“ oder automatisch nach der Domain der Adresse. Die Vorlage füllt IMAP-/SMTP-Server und Ports (993 bzw. 465/587, TLS), setzt die Adresse als Benutzer und erklärt, welches Passwort der Anbieter erwartet (App-Passwort bei Fastmail, Gmail, iCloud, Yahoo; Hinweis auf den IMAP-Schalter bei GMX/Web.de; Microsoft ohne OAuth2 nicht nutzbar). Ändern sich Serverdaten eines Anbieters, hier und in der Vorlage nachziehen. Der Verbindungstest beim Speichern prüft die Daten wie bei manueller Eingabe.
+„Konto hinzufügen“ bietet für die Anbieter oben eine Vorlage (#117, `PROVIDER_PRESETS` in `packages/shared/src/provider-presets.ts`): Auswahl unter „Anbieter“ oder automatisch nach der Domain der Adresse. Die Vorlage füllt IMAP-/SMTP-Server und Ports (993 bzw. 465/587, TLS), setzt die Adresse als Benutzer und erklärt, welches Passwort der Anbieter erwartet (App-Passwort bei Fastmail, Gmail, iCloud, Yahoo; Hinweis auf den IMAP-Schalter bei GMX/Web.de). Bei Gmail und Microsoft bietet sie „Mit Google/Microsoft anmelden“, wenn der Betreiber die OAuth-App eingerichtet hat ([Anleitung](../operations/oauth.md), #36); Microsoft geht nur so. Ändern sich Serverdaten eines Anbieters, hier und in der Vorlage nachziehen. Der Verbindungstest beim Speichern prüft die Daten wie bei manueller Eingabe.
+
+Für Domains ohne Vorlage (eigene Domains, kleinere Anbieter) ermittelt der Server die Einstellungen automatisch (#165, `GET /api/autoconfig`), erstes Ergebnis gewinnt: Autoconfig des Anbieters (`autoconfig.<domain>`, dann `<domain>/.well-known/autoconfig/`), Thunderbird-Anbieterdatenbank (ISPDB), DNS-SRV-Einträge (RFC 6186/8314: `_imaps`, `_imap`, `_submissions`, `_submission`) und zuletzt der MX-Server der Domain: Liegt er bei einem Anbieter mit Vorlage (`mxDomains` in der Vorlage, z. B. `google.com` für Google Workspace, `outlook.com` für Microsoft 365 auf eigener Domain), wählt das Formular diese Vorlage samt Hinweis und „Mit … anmelden“; sonst fragt der Server die ISPDB für die Domain des MX-Servers. Der MX-Schritt ist reines DNS und läuft auch mit abgeschalteter ISPDB. Server ohne TLS werden nie vorgeschlagen, TLS-Ports (993/465) vor STARTTLS. Das Formular füllt nur leere bzw. selbst erkannte Felder, zeigt die Quelle an, und alles bleibt änderbar; ohne Treffer bleibt es bei der manuellen Eingabe. Die ISPDB lässt sich mit `AUTOCONFIG_ISPDB=0` abschalten ([Konfiguration](../operations/configuration.md)).
 
 **Stand der Prüfung gegen echte Konten:** Die Felder sind per Unit- und Playwright-Test abgedeckt; ein Verbindungstest mit einem echten Fastmail-Konto (App-Passwort) steht noch aus und wird hier mit Datum eingetragen.
 
@@ -59,3 +61,43 @@ docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$MARIADB_PASSWOR
 ```
 
 Ein geprüfter Anbieter bekommt in der Spalte „Geprüft“ das Datum; abweichende Werte in der Tabelle korrigieren.
+
+## Live-Tests gegen ein echtes Konto
+
+`apps/server-php/tests/Live/ProviderLiveTest.php` prüft einen echten Anbieter mit der Transport-Policy des Betriebs (nur öffentliche Hosts, Zertifikate werden geprüft):
+
+- Verbindungstest IMAP und SMTP, ohne Zugangsdaten im Log; die gemeldeten Erweiterungen (IDLE, CONDSTORE, QRESYNC, MOVE, SPECIAL-USE, UIDPLUS, LITERAL+) stehen in der Testausgabe – Grundlage für die Spalten der Tabelle oben
+- falsches Passwort ergibt `AUTH_FAILED`
+- Ordnerrollen Posteingang, Gesendet, Entwürfe, Papierkorb und Spam werden erkannt
+- eine Mail an sich selbst kommt per SMTP im Posteingang an (nicht im Spam), wird per IMAP-Suche nach Betreff gefunden und danach gelöscht
+
+Nur mit einem **eigenen Testkonto** verwenden: Jeder Lauf sendet eine Mail und löscht alle Mails mit dem Betreff-Präfix `fma-live-` in Posteingang, Spam und Gesendet (auch Reste abgebrochener Läufe). Ohne Zugangsdaten werden die Tests übersprungen.
+
+Lokal: `.env.live.example` nach `.env.live` kopieren (nie committen), Zugangsdaten eintragen, `make test-live`. Beim Testkonto bei GMX/Web.de vorher im Webmail _Einstellungen → POP3/IMAP Abruf_ einschalten.
+
+Im Gitea-Nightly (`msz/gitea-workflows`) als eigener Schritt, die Zugangsdaten als Secrets `LIVE_MAIL_USER` und `LIVE_MAIL_PASSWORD`:
+
+```yaml
+- name: Live provider tests (GMX)
+  working-directory: apps/server-php
+  env:
+    LIVE_MAIL_USER: ${{ secrets.LIVE_MAIL_USER }}
+    LIVE_MAIL_PASSWORD: ${{ secrets.LIVE_MAIL_PASSWORD }}
+    LIVE_IMAP_HOST: imap.gmx.net
+    LIVE_SMTP_HOST: mail.gmx.net
+  run: composer test:live
+```
+
+Nicht im GitHub-CI: Pull Requests aus Forks dürfen keine Zugangsdaten sehen, und Anbieter sperren Logins aus fremden Rechenzentren gern.
+
+### Testkonto in einer Instanz einrichten (nur für Entwickler)
+
+Dasselbe Konto lässt sich bei Bedarf in eine laufende Instanz eintragen, z. B. um die Oberfläche mit echten Mails zu testen. Es gehört nicht zur Installation: ohne `.env.live` passiert nichts, in der Oberfläche gibt es dafür keinen Eintrag.
+
+```sh
+make test-account   # im Projektverzeichnis neben der .env.live, Stack läuft
+```
+
+Der Befehl (`apps/server-php/bin/test-account.php`) nimmt denselben Weg wie „Konto hinzufügen“: erst der Verbindungstest, dann wird das Konto „Testkonto (live)“ verschlüsselt gespeichert und der erste Sync eingereiht. Ist die Adresse schon eingerichtet, ändert er nichts. Voraussetzung ist ein eingerichteter Benutzer. Die Zugangsdaten gehen nur als Umgebungsvariablen in den php-Container, nicht als Befehlsargument. Entfernen über die Oberfläche (Konto löschen).
+
+Ohne Docker (`pnpm dev:api`): `set -a; . ./.env.live; set +a; cd apps/server-php && php bin/test-account.php` mit derselben Datenbank-Konfiguration wie die API.

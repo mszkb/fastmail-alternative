@@ -31,6 +31,8 @@ final class RateLimitRule
             // Creating/updating an account tests the credentials at the provider.
             new self('account-test', 10, 'POST', ['/api/accounts']),
             new self('account-test', 10, 'PATCH', ['/api/accounts/{id}']),
+            // Settings detection fetches documents from the address domain and the ISPDB (#165).
+            new self('autoconfig', 30, 'GET', ['/api/autoconfig']),
             // Sending mail (an offline queue may replay several at once) and uploads.
             new self('send', 60, 'POST', ['/api/outbox', '/api/outbox/{id}/retry']),
             new self('upload', 60, 'POST', ['/api/accounts/{id}/uploads']),

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Fma\Http\Middleware;
 
-use Fma\Auth\BearerToken;
+use Fma\Auth\Authenticator;
 use Fma\Http\Json;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -18,9 +18,10 @@ use Psr\Http\Server\RequestHandlerInterface;
  * - `Sec-Fetch-Site` present: only `same-origin` is accepted.
  * - otherwise `Origin` present: its host must equal the `Host` header.
  * - neither header: not a browser request (curl, native client), allowed.
- * The session cookie is SameSite=Strict on top. Requests with
- * `Authorization: Bearer` (native clients) are authenticated by that
- * header only, never by the cookie, and skip the check.
+ * - `Authorization: Bearer` (native clients, #138): allowed, the cookie is
+ *   then ignored and a foreign page cannot set that header without a CORS
+ *   preflight, which the API never grants.
+ * The session cookie is SameSite=Strict on top.
  */
 final class CsrfProtection implements MiddlewareInterface
 {
@@ -30,7 +31,7 @@ final class CsrfProtection implements MiddlewareInterface
 
     public static function isCrossOrigin(ServerRequestInterface $request): bool
     {
-        if (\in_array($request->getMethod(), self::SAFE_METHODS, true) || BearerToken::present($request)) {
+        if (\in_array($request->getMethod(), self::SAFE_METHODS, true) || Authenticator::hasBearer($request)) {
             return false;
         }
         $fetchSite = $request->getHeaderLine('Sec-Fetch-Site');

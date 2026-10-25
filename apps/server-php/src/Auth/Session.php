@@ -13,7 +13,12 @@ final class Session
         public readonly string $userId,
         public readonly string $email,
         public readonly \DateTimeImmutable $tokenIssuedAt,
-        /** A native app token (Authorization: Bearer) instead of a browser cookie. */
-        public readonly bool $native = false,
+        /** Sessions::COOKIE or Sessions::BEARER */
+        public readonly string $kind = Sessions::COOKIE,
     ) {}
+
+    public function isBearer(): bool
+    {
+        return $this->kind === Sessions::BEARER;
+    }
 }

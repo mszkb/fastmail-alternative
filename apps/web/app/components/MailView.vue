@@ -137,7 +137,13 @@ type AccountOption = Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>
   Partial<
     Pick<
       AccountSummary,
-      'unreadCount' | 'status' | 'lastErrorCode' | 'nextRetryAt' | 'lastSyncAt' | 'syncing'
+      | 'unreadCount'
+      | 'status'
+      | 'lastErrorCode'
+      | 'nextRetryAt'
+      | 'lastSyncAt'
+      | 'syncing'
+      | 'credentialKind'
     >
   >
 
@@ -300,6 +306,7 @@ function statusInfo(account: AccountOption) {
   return accountStatusInfo({
     status: account.status ?? 'ok',
     lastErrorCode: account.lastErrorCode ?? null,
+    credentialKind: account.credentialKind,
   })
 }
 
@@ -1445,8 +1452,20 @@ function searchFor(query: string): void {
   void runSearch()
 }
 
+// Swipe forward (4.9): the parent remembers the message closed by a swipe
+// back and reopens it; any change of this location clears that step
+// (empty while the account or folder is still loading).
+const location = computed(() =>
+  accountId.value && folderId.value
+    ? `${accountId.value}|${folderId.value}|${selectedId.value}`
+    : '',
+)
+
 defineExpose({
   goBack,
+  openedMessage: () => selectedId.value,
+  openMessage,
+  location,
   openFromUnified,
   switchAccount,
   searchFor,

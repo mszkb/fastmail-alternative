@@ -34,6 +34,7 @@
 // is saved as the accounts' sort order.
 import {
   ForegroundSyncPolicy,
+  ForwardHistory,
   SwipeBack,
   sortOrderUpdates,
   UNDO_SEND_CHOICES,
@@ -49,11 +50,14 @@ import {
   onlyQueuedSyncs,
   syncStatusFromAccounts,
   unreadBadgeCount,
+  oauthResultFromQuery,
+  withoutOAuthResult,
 } from '@fma/shared'
 import type {
   AccountListResponse,
   AccountSummary,
   AccountSyncStatus,
+  OAuthResult,
   ReadingPane,
   SyncStatusResponse,
   ThemeLayout,
@@ -67,6 +71,7 @@ import {
   enableOfflineData,
 } from '~/utils/offline-store'
 import {
+  addNotice,
   dismissNotice,
   isOffline,
   loadQueue,
@@ -85,6 +90,8 @@ interface AuthStatus {
   needsSetup: boolean
   authenticated: boolean
   email?: string
+  /** Setup pending and the MASTER_KEY was generated on the first start (#164). */
+  masterKeyGenerated?: boolean
 }
 
 interface DeviceInfo {
@@ -130,20 +137,38 @@ let statusEpoch = 0
 let onlyQueuedSince: number | null = null
 
 // Swipe navigation (4.9): a swipe to the right goes one step back
-// (message -> list, account form -> settings, settings -> mail). The
+// (message -> list, account form -> settings, settings -> mail), a swipe to
+// the left redoes the last step back (otherwise a small rubber band). The
 // gesture logic lives in SwipeBack (@fma/shared); listeners are passive,
 // so scrolling is never delayed.
 const mailView = ref<{
   goBack: () => boolean
+  openedMessage: () => string
+  openMessage: (id: string) => Promise<void>
+  location: string
   openFromUnified: (accountId: string, messageId: string, folderId?: string) => Promise<void>
   switchAccount: (id: string) => boolean
   searchFor: (query: string) => void
   currentFolder: () => string
   setReadingPane: (pane: ReadingPane) => void
 } | null>(null)
-const swipe = new SwipeBack()
+const swipe = new SwipeBack({ forward: true, rubberBandPx: 40 })
 const swipeDistance = ref(0)
 const swipeArmed = ref(false)
+// A swipe to the left may go forward (otherwise it is a rubber band).
+const swipeCanForward = ref(false)
+// Slide-in of the view reached by a swipe ('' = none).
+const swipeSlide = ref<'' | 'back' | 'forward'>('')
+let slideTimer: ReturnType<typeof setTimeout> | undefined
+
+/** How to redo a step back with a swipe to the left. */
+type ForwardStep =
+  | { kind: 'settings' }
+  | { kind: 'edit'; id: string }
+  | { kind: 'search' }
+  | { kind: 'unified' }
+  | { kind: 'message'; id: string }
+const forwardHistory = new ForwardHistory<ForwardStep>()
 
 /** Elements whose own horizontal gestures must win over the swipe. */
 function swipeAllowedFrom(target: EventTarget | null): boolean {
@@ -172,7 +197,11 @@ function onSwipeStart(event: TouchEvent): void {
     swipeDistance.value = 0
     return
   }
-  swipe.start(touch.clientX, touch.clientY, event.timeStamp)
+  swipeCanForward.value = forwardHistory.canForward
+  swipe.start(touch.clientX, touch.clientY, event.timeStamp, {
+    canForward: swipeCanForward.value,
+    width: window.innerWidth,
+  })
 }
 
 function onSwipeMove(event: TouchEvent): void {
@@ -183,10 +212,27 @@ function onSwipeMove(event: TouchEvent): void {
 }
 
 function onSwipeEnd(event: TouchEvent): void {
-  const trigger = swipe.end(event.timeStamp)
+  const action = swipe.release(event.timeStamp)
   swipeDistance.value = 0
   swipeArmed.value = false
-  if (trigger) goBack()
+  if (action === 'back') {
+    const step = goBack()
+    if (step) forwardHistory.push(step)
+    swiped(step ? 'back' : '')
+  } else if (action === 'forward') {
+    const step = forwardHistory.pop()
+    if (step) goForward(step)
+    swiped(step ? 'forward' : '')
+  }
+}
+
+/** After a swipe step: keep the forward steps and slide the new view in. */
+function swiped(direction: '' | 'back' | 'forward'): void {
+  if (!direction) return
+  swipeLocation = navLocation.value
+  swipeSlide.value = direction
+  clearTimeout(slideTimer)
+  slideTimer = setTimeout(() => (swipeSlide.value = ''), 300)
 }
 
 /** A cancelled touch (e.g. system gesture) never navigates. */
@@ -213,8 +259,11 @@ function recordFieldBaseline(event: Event): void {
   }
 }
 
-/** One navigation step back; does nothing on the top-level mail list. */
-function goBack(): void {
+/**
+ * One navigation step back; does nothing on the top-level mail list.
+ * Returns how to go forward again, or null when nothing changed.
+ */
+function goBack(): ForwardStep | null {
   if (section.value === 'settings') {
     // Leaving the settings unmounts any open form; never drop unsaved input.
     const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
@@ -231,20 +280,46 @@ function goBack(): void {
         defaultChecked: base ? base.checked : checked,
       }
     })
-    if (hasUnsavedInput(states)) return
-    if (editAccountId.value) editAccountId.value = ''
-    else section.value = 'mail'
-    return
+    if (hasUnsavedInput(states)) return null
+    const id = editAccountId.value
+    if (id) {
+      editAccountId.value = ''
+      return { kind: 'edit', id }
+    }
+    section.value = 'mail'
+    return { kind: 'settings' }
   }
   if (globalSearchOpen.value) {
     globalSearchOpen.value = false
-    return
+    return { kind: 'search' }
   }
   if (unifiedOpen.value) {
     unifiedOpen.value = false
-    return
+    return { kind: 'unified' }
   }
-  mailView.value?.goBack()
+  const id = mailView.value?.openedMessage() ?? ''
+  return mailView.value?.goBack() && id ? { kind: 'message', id } : null
+}
+
+/** Redoes a step back recorded by goBack (swipe to the left). */
+function goForward(step: ForwardStep): void {
+  switch (step.kind) {
+    case 'settings':
+      section.value = 'settings'
+      break
+    case 'edit':
+      editAccountId.value = step.id
+      break
+    case 'search':
+      globalSearchOpen.value = true
+      break
+    case 'unified':
+      unifiedOpen.value = true
+      break
+    case 'message':
+      void mailView.value?.openMessage(step.id)
+      break
+  }
 }
 
 // beforeinstallprompt fires once, early: listen before anything else mounts.
@@ -454,6 +529,32 @@ function onOffline(): void {
 function onWorkerMessage(event: MessageEvent): void {
   const data = event.data as { type?: string } | null
   if (data?.type === 'SYNC_REQUEST') void syncNow(true)
+}
+
+// Sign-in with Google/Microsoft (#36): the server sends the browser back to
+// /?oauth=...; the result is shown once the session is confirmed.
+let pendingOAuth: OAuthResult | null = null
+
+function takeOAuthResult(): void {
+  pendingOAuth = oauthResultFromQuery(location.search)
+  if (!pendingOAuth) return
+  history.replaceState(
+    history.state,
+    '',
+    `${location.pathname}${withoutOAuthResult(location.search)}${location.hash}`,
+  )
+}
+
+function showOAuthResult(): void {
+  const result = pendingOAuth
+  pendingOAuth = null
+  if (!result) return
+  addNotice(result.message)
+  if (result.ok && result.accountId && accounts.value.some((a) => a.id === result.accountId)) {
+    void selectAccount(result.accountId)
+  } else if (!result.ok) {
+    section.value = 'settings'
+  }
 }
 
 /** Opens the edit form of an account in the settings (e.g. new credentials). */
@@ -670,6 +771,8 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await res.json()) as T
 }
 
+const masterKeyGenerated = ref(false)
+
 async function loadStatus(): Promise<void> {
   let status: AuthStatus
   try {
@@ -693,6 +796,7 @@ async function loadStatus(): Promise<void> {
   // No (longer a) session: nothing of a previous one may stay on the device.
   if (view.value === 'app') await handleUnauthorized()
   else await clearOffline()
+  masterKeyGenerated.value = status.masterKeyGenerated === true
   view.value = status.needsSetup ? 'setup' : 'login'
 }
 
@@ -714,6 +818,7 @@ async function enterApp(userEmail: string): Promise<void> {
   await loadDevices()
   await loadSettings()
   await loadAccounts()
+  showOAuthResult()
   void syncNow(true)
 }
 
@@ -789,6 +894,31 @@ async function submit(): Promise<void> {
 // it is on, the mail view offers "Alle Posteingänge" above the accounts.
 const unifiedEnabled = ref(false)
 const unifiedOpen = ref(false)
+
+// Like a browser: any navigation other than a swipe clears the forward
+// steps. `swipeLocation` is where the last swipe led to.
+const navLocation = computed(() =>
+  [
+    view.value,
+    section.value,
+    editAccountId.value,
+    globalSearchOpen.value,
+    unifiedOpen.value,
+    mailView.value?.location ?? '',
+  ].join('|'),
+)
+let swipeLocation = ''
+watch(navLocation, (location, previous) => {
+  // The mail view (re)mounting and loading its folders (empty location,
+  // e.g. after settings -> mail) is no navigation of its own.
+  const mailLoaded =
+    section.value === 'mail' && previous === swipeLocation && previous.endsWith('|')
+  if (location === swipeLocation || mailLoaded) {
+    swipeLocation = location
+    return
+  }
+  forwardHistory.clear()
+})
 const unifiedBusy = ref(false)
 
 async function loadSettings(): Promise<void> {
@@ -869,6 +999,7 @@ async function logout(): Promise<void> {
 
 onMounted(() => {
   onUnauthorized(() => void handleUnauthorized())
+  takeOAuthResult()
   void loadStatus()
   accountTimer = setInterval(refreshAccounts, ACCOUNT_REFRESH_MS)
   window.addEventListener('focus', onForeground)
@@ -888,6 +1019,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearInterval(accountTimer)
+  clearTimeout(slideTimer)
   stopPolling()
   window.removeEventListener('focus', onForeground)
   window.removeEventListener('online', onForeground)
@@ -912,9 +1044,13 @@ onBeforeUnmount(() => {
       ref="appHeader"
       :email="currentEmail"
       :search-placeholder="
-        accounts.length > 0 ? 'In allen Konten suchen …' : 'Kein Konto verbunden'
+        accounts.length === 0
+          ? 'Kein Konto verbunden'
+          : isOffline
+            ? 'Gespeicherte Nachrichten durchsuchen …'
+            : 'In allen Konten suchen …'
       "
-      :search-disabled="accounts.length === 0 || isOffline"
+      :search-disabled="accounts.length === 0"
       :menu-open="menuOpen"
       @search="onHeaderSearch"
       @toggle-menu="menuOpen = !menuOpen"
@@ -950,7 +1086,23 @@ onBeforeUnmount(() => {
         @reorder="reorderAccounts"
       />
 
-      <main class="app-main">
+      <!-- Swipe (4.9): arrow at the left (back) or right (forward) edge
+           follows the finger; no arrow for the rubber band -->
+      <div
+        v-if="swipeDistance > 0 || (swipeDistance < 0 && swipeCanForward)"
+        class="swipe-indicator"
+        :class="{ armed: swipeArmed, forward: swipeDistance < 0 }"
+        :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
+        aria-hidden="true"
+      >
+        {{ swipeDistance < 0 ? '→' : '←' }}
+      </div>
+
+      <main
+        class="app-main"
+        :class="[{ swiping: swipeDistance !== 0 }, swipeSlide ? `slide-in-${swipeSlide}` : '']"
+        :style="swipeDistance ? { transform: `translateX(${swipeDistance / 2}px)` } : undefined"
+      >
         <ul v-if="offlineState.notices.length" class="notices">
           <li v-for="(notice, index) in offlineState.notices" :key="index" class="message info">
             <span>{{ notice }}</span>
@@ -959,17 +1111,6 @@ onBeforeUnmount(() => {
         </ul>
 
         <InstallBanner @guide="showInstallGuide" />
-
-        <!-- Swipe back (4.9): arrow at the left edge follows the finger -->
-        <div
-          v-if="swipeDistance > 0"
-          class="swipe-indicator"
-          :class="{ armed: swipeArmed }"
-          :style="{ transform: `translateX(${swipeDistance / 2}px)` }"
-          aria-hidden="true"
-        >
-          &larr;
-        </div>
 
         <template v-if="section === 'mail'">
           <UnifiedInbox
@@ -1195,8 +1336,13 @@ onBeforeUnmount(() => {
           required
       /></label>
       <p class="hint">
-        Steht im Log der API: <code>docker compose logs api</code> (oder
+        Steht im Log der API: <code>docker compose logs php</code> (oder
         <code>SETUP_TOKEN</code> aus <code>.env</code>).
+      </p>
+      <p v-if="masterKeyGenerated" class="warning" role="note" data-testid="master-key-warning">
+        Der Master-Key wurde beim ersten Start automatisch erzeugt. Bitte jetzt getrennt von den
+        Datenbank-Backups sichern: <code>docker compose exec php php bin/secrets.php export</code>.
+        Ohne ihn sind alle Mails und Zugangsdaten verloren.
       </p>
       <label>E-Mail<input v-model="email" type="email" autocomplete="username" required /></label>
       <label
@@ -1261,10 +1407,49 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
+.swipe-indicator.forward {
+  right: 0;
+  left: auto;
+}
+
+/* The view follows the finger and springs back on release (rubber band);
+   the view reached by a swipe slides in from the side it came from. */
+.app-main {
+  transition: transform 0.2s ease-out;
+}
+
+.app-main.swiping {
+  transition: none;
+}
+
+.app-main.slide-in-back {
+  animation: slide-in-back 0.22s ease-out;
+}
+
+.app-main.slide-in-forward {
+  animation: slide-in-forward 0.22s ease-out;
+}
+
+@keyframes slide-in-back {
+  from {
+    opacity: 0.6;
+    transform: translateX(-30%);
+  }
+}
+
+@keyframes slide-in-forward {
+  from {
+    opacity: 0.6;
+    transform: translateX(30%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .swipe-indicator {
+  .swipe-indicator,
+  .app-main {
     transform: none !important;
     transition: none;
+    animation: none;
   }
 }
 
@@ -1467,6 +1652,15 @@ h2 {
   margin: 0 0 var(--fma-space-3);
   font-size: var(--fma-text-sm);
   color: var(--fma-muted);
+}
+
+.warning {
+  margin: 0 0 var(--fma-space-3);
+  padding: var(--fma-space-2) var(--fma-space-3);
+  border-left: 3px solid var(--color-warning);
+  border-radius: 0.25rem;
+  background: var(--fma-warning-soft);
+  font-size: var(--fma-text-sm);
 }
 
 .form label {

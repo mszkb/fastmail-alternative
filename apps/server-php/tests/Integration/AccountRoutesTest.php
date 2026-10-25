@@ -146,6 +146,8 @@ final class AccountRoutesTest extends DatabaseTestCase
             'syncSince' => '2026-01-15',
             'unreadCount' => 0,
             'syncing' => false,
+            'credentialKind' => 'password',
+            'oauthProvider' => null,
         ], $account);
         self::assertSame(['imap' => ['ok' => true, 'capabilities' => ['IMAP4rev1', 'IDLE']], 'smtp' => ['ok' => true]], $body['test']);
 

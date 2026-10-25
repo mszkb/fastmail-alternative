@@ -14,13 +14,15 @@ final class MailSocket
 {
     /** @var resource */
     private $stream;
+    /** Unix time after which reads fail with ETIMEDOUT (null: only the read timeout). */
+    private ?float $deadline = null;
 
     private const READ_BYTES = 65536;
     /** A `* SEARCH` of 1 million UIDs is ~7 MB. */
     public const MAX_LINE_BYTES = 32 * 1024 * 1024;
 
     /** @param resource $stream */
-    private function __construct($stream)
+    private function __construct($stream, private readonly int $timeout)
     {
         $this->stream = $stream;
     }
@@ -43,7 +45,7 @@ final class MailSocket
         }
         stream_set_timeout($stream, (int) ceil($timeout));
 
-        return new self($stream);
+        return new self($stream, (int) ceil($timeout));
     }
 
     private static function connectErrorCode(int $errno, string $errstr, bool $secure): string
@@ -76,6 +78,7 @@ final class MailSocket
     {
         $line = '';
         do {
+            $this->checkDeadline();
             $part = fgets($this->stream, self::READ_BYTES);
             if ($part === false) {
                 $meta = stream_get_meta_data($this->stream);
@@ -119,6 +122,32 @@ final class MailSocket
     public function close(): void
     {
         @fclose($this->stream);
+    }
+
+    /**
+     * Reads fail with ETIMEDOUT after this unix time, null restores the read
+     * timeout of open(). The read timeout alone is not enough for a slow
+     * command: servers send progress lines (Dovecot `* OK [INPROGRESS ...]`
+     * during SEARCH), and every line starts the timeout anew.
+     */
+    public function setDeadline(?float $deadline): void
+    {
+        $this->deadline = $deadline;
+        if ($deadline === null) {
+            stream_set_timeout($this->stream, $this->timeout);
+        }
+    }
+
+    private function checkDeadline(): void
+    {
+        if ($this->deadline === null) {
+            return;
+        }
+        $left = $this->deadline - microtime(true);
+        if ($left <= 0) {
+            throw new MailException('ETIMEDOUT', 'deadline reached');
+        }
+        stream_set_timeout($this->stream, max(1, (int) ceil($left)));
     }
 
     /** @return resource the underlying stream, for stream_select (IMAP IDLE) */

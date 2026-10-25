@@ -118,11 +118,11 @@ docker compose run --rm --no-deps --user root -v "$BACKUP_DIR:/backups" php \
 docker compose run --rm --no-deps --user root php chown -R www-data:www-data /data/mail
 docker compose up -d --wait caddy web php mariadb   # Worker bleibt gestoppt
 # Nicht gesendete Postausgangs-Einträge anzeigen (nur IDs/Zeiten, keine Inhalte):
-docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$MARIADB_PASSWORD" "$MARIADB_DATABASE" -e "
+docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$(cat "$MARIADB_PASSWORD_FILE")" "$MARIADB_DATABASE" -e "
   SELECT id, account_id, status, created_at FROM outbox_message
   WHERE sent_at IS NULL AND status IN ('"'"'queued'"'"', '"'"'sending'"'"') ORDER BY created_at"'
 # ... mit den Gesendet-Ordnern beim Anbieter abgleichen, bereits gesendete entfernen:
-# docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$MARIADB_PASSWORD" "$MARIADB_DATABASE" -e "
+# docker compose exec mariadb sh -c 'mariadb -u"$MARIADB_USER" -p"$(cat "$MARIADB_PASSWORD_FILE")" "$MARIADB_DATABASE" -e "
 #   DELETE FROM outbox_message WHERE id = '"'"'<id>'"'"'"'
 docker compose up -d --wait worker
 ```

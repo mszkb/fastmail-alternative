@@ -25,11 +25,12 @@ final class Migrator
     public const DEFAULT_DIR = __DIR__ . '/../../migrations';
 
     /**
-     * Migrations renamed after they shipped on a preview branch (old => new).
-     * A database that recorded the old name counts as having the new one;
-     * migrate() rewrites the record.
+     * Migrations that only shipped on a preview branch (#161) and were
+     * replaced: native tokens use session.kind (0009_session_kind) instead
+     * of session.client. A database that recorded them is accepted;
+     * migrate() drops the record, the unused column stays (it has a default).
      */
-    private const RENAMED = ['0006_native_client' => '0008_native_client'];
+    private const RETIRED = ['0006_native_client', '0008_native_client'];
 
     public function __construct(private readonly \PDO $pdo, private readonly string $dir = self::DEFAULT_DIR) {}
 
@@ -47,10 +48,10 @@ final class Migrator
         if ($exists === false) {
             return;
         }
-        $this->assertKnown(self::renamed(array_map(
+        $this->assertKnown(array_values(array_diff(array_map(
             static fn(mixed $name): string => (string) $name,
             Database::run($this->pdo, 'SELECT name FROM schema_migrations')->fetchAll(\PDO::FETCH_COLUMN),
-        )));
+        ), self::RETIRED)));
     }
 
     /** @return list<string> names applied in this run */
@@ -67,9 +68,8 @@ final class Migrator
                    applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
                  ) ENGINE=InnoDB',
             );
-            foreach (self::RENAMED as $old => $new) {
-                Database::run($this->pdo, 'UPDATE IGNORE schema_migrations SET name = ? WHERE name = ?', [$new, $old]);
-                Database::run($this->pdo, 'DELETE FROM schema_migrations WHERE name = ?', [$old]);
+            foreach (self::RETIRED as $name) {
+                Database::run($this->pdo, 'DELETE FROM schema_migrations WHERE name = ?', [$name]);
             }
             $done = array_map(
                 static fn(mixed $name): string => (string) $name,
@@ -89,16 +89,6 @@ final class Migrator
         } finally {
             Database::run($this->pdo, 'SELECT RELEASE_LOCK(?)', [self::LOCK]);
         }
-    }
-
-    /**
-     * @param array<string> $names
-     *
-     * @return list<string>
-     */
-    private static function renamed(array $names): array
-    {
-        return array_values(array_map(static fn(string $name): string => self::RENAMED[$name] ?? $name, $names));
     }
 
     /** @param array<string> $done */

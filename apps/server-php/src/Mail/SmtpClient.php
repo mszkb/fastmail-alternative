@@ -6,7 +6,7 @@ namespace Fma\Mail;
 
 /**
  * Small ESMTP client: EHLO, mandatory STARTTLS on plain ports, AUTH PLAIN
- * or LOGIN, QUIT. Sending (MAIL FROM/RCPT/DATA) follows with #105.
+ * or LOGIN (XOAUTH2 for OAuth accounts), QUIT. Sending (MAIL FROM/RCPT/DATA) follows with #105.
  */
 final class SmtpClient
 {
@@ -29,7 +29,12 @@ final class SmtpClient
                 $client->socket->startTls();
                 $client->ehlo();
             }
-            $client->authenticate($config->user, $config->password);
+            if ($config->oauthToken !== null) {
+                // A rejected token gets a 334 challenge; the connection is closed anyway.
+                $client->send('AUTH XOAUTH2 ' . $config->xoauth2(), 235, 'AUTH_FAILED');
+            } else {
+                $client->authenticate($config->user, $config->password);
+            }
         } catch (\Throwable $e) {
             $client->socket->close();
             throw $e;

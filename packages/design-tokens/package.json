@@ -3,12 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Design tokens for the PWA and the native apps (#141)",
+  "description": "Platform-neutral design tokens (tokens.json); `pnpm tokens` generates CSS, TypeScript, PHP and Kotlin from them",
   "scripts": {
-    "generate": "node generate.mjs",
+    "build:tokens": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "~5.9.3",
     "vitest": "^5.0.3"
   }
 }

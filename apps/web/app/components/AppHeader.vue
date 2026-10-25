@@ -13,7 +13,7 @@ import { isTypingTarget, shortcutsEnabled } from '~/utils/shortcuts-setting'
 const props = defineProps<{
   email: string
   searchPlaceholder: string
-  /** Search disabled (no account, or offline: IMAP SEARCH needs the server). */
+  /** Search disabled (no account); offline it searches the cached messages (#162). */
   searchDisabled?: boolean
   menuOpen?: boolean
 }>()
@@ -188,7 +188,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <IconX :size="22" aria-hidden="true" />
         </button>
       </form>
-      <p class="hint">Durchsucht das aktive Konto beim Anbieter (nur online).</p>
+      <p class="hint">
+        Durchsucht alle Konten beim Anbieter; offline nur die auf dem Gerät gespeicherten
+        Nachrichten.
+      </p>
     </div>
 
     <div v-if="helpOpen" class="help-panel" role="dialog" aria-label="Tastenkürzel">

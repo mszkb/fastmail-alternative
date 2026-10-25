@@ -16,6 +16,7 @@ use Fma\Mail\AttachmentNames;
 use Fma\Mail\HtmlSanitizer;
 use Fma\Mail\MimeMail;
 use Fma\Mail\RawStorage;
+use Fma\Mail\RawTooLargeException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\App;
@@ -102,17 +103,26 @@ final class MessageContentRoutes
         return Json::write($response, ['attachments' => $attachments]);
     }
 
-    /** @param array<string, string> $args */
+    /**
+     * Streams the decoded attachment: the raw mail is decrypted once into a
+     * temp stream, the part is decoded while the response is sent (#175).
+     *
+     * @param array<string, string> $args
+     */
     private function attachment(Request $request, Response $response, array $args): Response
     {
         $response = $response->withHeader('Cache-Control', 'no-store');
         $messageId = strtolower($args['id'] ?? '');
         $indexParam = $args['index'] ?? '';
-        $raw = preg_match('/^\d{1,9}$/', $indexParam) === 1 ? $this->loadOwnedRaw($request, $messageId) : false;
+        try {
+            $raw = preg_match('/^\d{1,9}$/', $indexParam) === 1 ? $this->loadOwnedRaw($request, $messageId, stream: true) : false;
+        } catch (RawTooLargeException) {
+            return Json::write($response, ['message' => 'Die Nachricht ist zu groß für das Speicherlimit des Servers (PHP memory_limit).'], 503);
+        }
         $opened = null;
-        if (\is_string($raw)) {
+        if (\is_resource($raw)) {
             try {
-                $opened = MimeMail::parse($raw)->attachment((int) $indexParam);
+                $opened = MimeMail::parseStream($raw)->attachmentStream((int) $indexParam);
             } catch (\Throwable) {
                 $this->logger->warn('raw message could not be parsed', ['messageId' => $messageId]);
             }
@@ -120,14 +130,15 @@ final class MessageContentRoutes
         if ($opened === null) {
             return Json::write($response, ['message' => 'Anhang nicht gefunden.'], 404);
         }
-        $meta = $opened['meta'];
-        $safe = AttachmentNames::isInlineSafeType($meta['contentType']);
+        $safe = AttachmentNames::isInlineSafeType($opened['contentType']);
         $inline = $safe && ($request->getQueryParams()['inline'] ?? null) === '1';
-        $response->getBody()->write($opened['content']);
+        if ($opened['stream'] !== null) {
+            $response = $response->withBody($opened['stream']);
+        }
 
         return $response
-            ->withHeader('Content-Type', $safe ? $meta['contentType'] : 'application/octet-stream')
-            ->withHeader('Content-Disposition', AttachmentNames::contentDisposition($inline ? 'inline' : 'attachment', $meta['filename']))
+            ->withHeader('Content-Type', $safe ? $opened['contentType'] : 'application/octet-stream')
+            ->withHeader('Content-Disposition', AttachmentNames::contentDisposition($inline ? 'inline' : 'attachment', $opened['filename']))
             ->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('Content-Security-Policy', self::ATTACHMENT_CSP)
             ->withHeader('Cross-Origin-Resource-Policy', 'same-origin')
@@ -135,10 +146,13 @@ final class MessageContentRoutes
     }
 
     /**
-     * Decrypted raw mail of a message of the user; false = no such message
-     * (or foreign), null = raw mail not stored (yet) or unreadable.
+     * Decrypted raw mail of a message of the user (as a stream with
+     * `$stream`); false = no such message (or foreign), null = raw mail not
+     * stored (yet) or unreadable.
+     *
+     * @return ($stream is true ? resource|false|null : string|false|null)
      */
-    private function loadOwnedRaw(Request $request, string $messageId): string|false|null
+    private function loadOwnedRaw(Request $request, string $messageId, bool $stream = false): mixed
     {
         if (!Uuid::isValid($messageId)) {
             return false;
@@ -165,6 +179,6 @@ final class MessageContentRoutes
         }
         $dek = Envelope::unwrapAccountKey($this->config->get('MASTER_KEY'), $row['wrapped_dek']);
 
-        return $this->storage->read($dek, $messageId, $row['storage_ref']);
+        return $stream ? $this->storage->readStream($dek, $messageId, $row['storage_ref']) : $this->storage->read($dek, $messageId, $row['storage_ref']);
     }
 }

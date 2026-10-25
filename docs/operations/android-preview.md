@@ -13,7 +13,7 @@ cd ~/fastmail-alternative
 
 ### 1.1 Branch auschecken, Images bauen, starten
 
-Das Upgrade-Skript macht vorher ein Backup, wechselt auf den Branch, baut die Images und startet alles. Die neue Migration `0008_native_client` läuft beim Start des `php`-Containers automatisch. Wer die Vorschau schon vor dem Merge von `main` installiert hatte, hat sie noch unter dem alten Namen `0006_native_client`; der Server erkennt das und benennt den Eintrag selbst um.
+Das Upgrade-Skript macht vorher ein Backup, wechselt auf den Branch, baut die Images und startet alles. Die Migration `0009_session_kind` (Geräte-Tokens) läuft beim Start des `php`-Containers automatisch. Wer eine frühere Vorschau installiert hatte, hat noch einen Eintrag `0006_native_client` oder `0008_native_client`; der Server akzeptiert ihn und entfernt ihn selbst. Mit der Vorschau angemeldete Apps müssen sich einmal neu anmelden.
 
 ```sh
 ./scripts/upgrade.sh claude/affectionate-cray-xyojni

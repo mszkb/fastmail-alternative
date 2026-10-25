@@ -242,7 +242,7 @@ final class IdleManager
     {
         $client = null;
         try {
-            $account = AccountContext::load($this->db->pdo(), $connection->accountId, $this->config->get('MASTER_KEY'));
+            $account = AccountContext::load($this->db->pdo(), $connection->accountId, $this->config);
             // SSRF check and mandatory STARTTLS happen inside connect().
             $client = ImapClient::connect($this->policy, $account->imap, self::CONNECT_TIMEOUT_SECONDS);
             if (!\in_array('IDLE', $client->capabilities(), true)) {
@@ -264,7 +264,9 @@ final class IdleManager
             $connection->state = IdleConnection::WAITING;
             ++$connection->failures;
             $code = self::errorCode($e);
-            $delay = \in_array($code, ['AUTH_FAILED', 'CREDENTIALS_REQUIRED', 'IDLE_UNSUPPORTED'], true)
+            // Sign-in problems (incl. revoked OAuth grants) and servers without IDLE won't heal soon.
+            $permanent = ($e instanceof AccountErrorException && $e->kind() === 'auth') || \in_array($code, ['AUTH_FAILED', 'IDLE_UNSUPPORTED'], true);
+            $delay = $permanent
                 ? (float) self::BACKOFF_MAX_SECONDS
                 : self::backoffSeconds($connection->failures);
             $connection->retryAt = microtime(true) + $delay;

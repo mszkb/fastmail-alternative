@@ -7,7 +7,8 @@
 # bin/console holds the runner lock while it reads (jobs pause, running ones
 # are awaited), so database and mail-data match; the worker is stopped as
 # well and started again in any case. The MASTER_KEY is never part of the
-# backup - keep a copy of .env somewhere else!
+# backup - keep a copy of .env (or of `docker compose exec php php
+# bin/secrets.php export` when it was generated, #164) somewhere else!
 set -eu
 
 cd "$(dirname "$0")/.."

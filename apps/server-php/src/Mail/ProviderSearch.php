@@ -68,39 +68,48 @@ final class ProviderSearch
     }
 
     /**
-     * UID SEARCH in each folder until the deadline (unix time). A folder
-     * the provider refuses (e.g. removed meanwhile) is counted in
-     * `foldersFailed`; a lost connection or the deadline end the search.
+     * UID SEARCH in each folder until the deadline (unix time); a slow
+     * SEARCH may read until the deadline, not just the connect timeout, but
+     * never longer (also not while the server sends progress lines). A
+     * folder the provider refuses (e.g. removed meanwhile) is counted in
+     * `foldersFailed`. A lost connection ends the
+     * search with UNREACHABLE; at the deadline the folders searched so far
+     * are returned with `timedOut` (the connection may be mid-command then
+     * and must not be reused).
      *
      * @param list<array{id: string, path: string, special_use: ?string}> $folders
      * @param array{parts: list<string>, utf8: bool} $criteria see ImapActions::searchCriteria()
      *
-     * @return array{folders: list<array{folderId: string, uidvalidity: string, uids: list<int>}>, foldersFailed: int}
+     * @return array{folders: list<array{folderId: string, uidvalidity: string, uids: list<int>}>, foldersFailed: int, timedOut: bool}
      */
     public static function search(ImapClient $client, array $folders, array $criteria, float $deadline): array
     {
         $actions = new ImapActions($client);
-        $result = ['folders' => [], 'foldersFailed' => 0];
+        $result = ['folders' => [], 'foldersFailed' => 0, 'timedOut' => false];
+        $client->setDeadline($deadline);
         foreach ($folders as $folder) {
             if (microtime(true) >= $deadline) {
-                throw new SearchFailure(...self::TIMEOUT);
+                $result['timedOut'] = true;
+                break;
             }
             try {
                 $selected = $actions->select($folder['path'], true);
                 $uids = $actions->search($criteria['parts'], $criteria['utf8']);
             } catch (MailException $e) {
+                if ($e->errorCode === 'ETIMEDOUT') {
+                    $result['timedOut'] = true;
+                    break;
+                }
                 if ($e->errorCode !== 'PROTOCOL') {
-                    // Connection lost or timed out: no further folders.
-                    throw $e->errorCode === 'ETIMEDOUT' ? new SearchFailure(...self::TIMEOUT) : new SearchFailure(...self::UNREACHABLE);
+                    // Connection lost: no further folders.
+                    throw new SearchFailure(...self::UNREACHABLE);
                 }
                 ++$result['foldersFailed'];
                 continue;
             }
             $result['folders'][] = ['folderId' => $folder['id'], 'uidvalidity' => $selected['uidValidity'] ?? '', 'uids' => $uids];
         }
-        if (microtime(true) >= $deadline) {
-            throw new SearchFailure(...self::TIMEOUT);
-        }
+        $client->setDeadline(null);
 
         return $result;
     }

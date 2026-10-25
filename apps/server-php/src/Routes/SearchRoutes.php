@@ -100,7 +100,7 @@ final class SearchRoutes
         }
 
         try {
-            $context = AccountContext::load($pdo, $accountId, $this->config->get('MASTER_KEY'));
+            $context = AccountContext::load($pdo, $accountId, $this->config);
             $provider = $this->searchProvider($context, $folders, $query);
         } catch (SearchFailure $e) {
             // Code only: provider responses may echo the query.
@@ -125,10 +125,11 @@ final class SearchRoutes
      * @param array<mixed> $input
      *
      * Text criteria: q, from, to, subject; dates: since, before; flags
-     * (`1`/`true`): unread, attachment; scope: includeJunk (also search
-     * Spam and Trash), folderId.
+     * (`1`/`true`): unread, attachment; fulltext (free text also in the
+     * body, IMAP TEXT); scope: includeJunk (also search Spam and Trash),
+     * folderId.
      *
-     * @return array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, includeJunk?: true, folderId?: string}|string
+     * @return array{q?: string, from?: string, to?: string, subject?: string, since?: string, before?: string, unread?: true, attachment?: true, fulltext?: true, includeJunk?: true, folderId?: string}|string
      */
     public static function parseQuery(array $input): array|string
     {
@@ -163,7 +164,7 @@ final class SearchRoutes
         if (isset($query['since'], $query['before']) && $query['since'] >= $query['before']) {
             return 'Der Zeitraum ist leer.';
         }
-        foreach (['unread', 'attachment', 'includeJunk'] as $key) {
+        foreach (['unread', 'attachment', 'fulltext', 'includeJunk'] as $key) {
             $raw = $input[$key] ?? null;
             if ($raw === null || $raw === '' || $raw === '0' || $raw === 'false') {
                 continue;
@@ -180,7 +181,7 @@ final class SearchRoutes
             }
             $query['folderId'] = strtolower($folderId);
         }
-        if (array_diff_key($query, ['folderId' => true, 'includeJunk' => true]) === []) {
+        if (array_diff_key($query, ['folderId' => true, 'includeJunk' => true, 'fulltext' => true]) === []) {
             return 'Bitte einen Suchbegriff oder Zeitraum angeben.';
         }
 
@@ -208,10 +209,21 @@ final class SearchRoutes
         $deadline = microtime(true) + self::SEARCH_DEADLINE_SECONDS;
         $client = ProviderSearch::connect($this->policy ?? TransportPolicy::fromConfig($this->config), $context, self::CONNECT_TIMEOUT_SECONDS);
         try {
-            return ProviderSearch::search($client, $folders, ImapActions::searchCriteria($query), $deadline);
-        } finally {
+            $found = ProviderSearch::search($client, $folders, ImapActions::searchCriteria($query), $deadline);
+        } catch (\Throwable $e) {
             $client->logout();
+
+            throw $e;
         }
+        if ($found['timedOut']) {
+            // Possibly mid-command: a LOGOUT would wait for the SEARCH.
+            $client->disconnect();
+
+            throw new SearchFailure(...ProviderSearch::TIMEOUT);
+        }
+        $client->logout();
+
+        return $found;
     }
 
     /**

@@ -61,7 +61,7 @@ Diese Regeln gelten für jeden Code- und Doku-Beitrag:
 - Suche: IMAP `SEARCH` beim Provider (ADR-0006)
 - Auth: Single-User, Passwort, serverseitige Sessions (ADR-0004); Mailanbieter per Passwort oder OAuth2 (ADR-0011)
 - Worker: IMAP-Sync, SMTP-Versand, Push, Cleanup
-- Mobile: Kotlin Multiplatform + Compose Multiplatform in `apps/mobile`, Bearer-Geräte-Token, Push über FCM (ADR-0015)
+- Native Apps (Phase 9): Kotlin Multiplatform + Compose Multiplatform in `apps/mobile`, gerätegebundenes Bearer-Token, Push über FCM; Android-Vorschau zuerst, iOS folgt (ADR-0015)
 - Deployment: Docker Compose mit Caddy (TLS), Konfiguration über `.env` (ADR-0007); alternativ Shared Hosting mit PHP + MySQL und Cron (ADR-0013)
 
 Das frühere Node-Backend (Fastify, PostgreSQL) ist mit #110 entfernt; eine Datenübernahme daraus gibt es nicht.
@@ -90,10 +90,10 @@ Voraussetzung: Node ≥ 24.11 und pnpm ≥ 12 (PWA, Tests; `npm i -g pnpm` oder 
 | `composer test:integration`                              | PHPUnit gegen MySQL/MariaDB (`DATABASE_URL`) und GreenMail               |
 | `make check`                                             | alles wie in CI, plus PHP-Integrationstests                              |
 | `pnpm features`                                          | Feature-Verzeichnis (`docs/product/features.yaml`) → `feature-matrix.md` |
-| `pnpm tokens`                                            | Design-Tokens (`packages/design-tokens`) → Compose-Theme der App         |
+| `pnpm tokens`                                            | Design-Tokens (`tokens.json`) → CSS, `@fma/shared`, PHP, Compose-Theme   |
 | `./gradlew :shared:jvmTest` (in `apps/mobile`)           | Tests der geteilten KMP-Logik (JDK 17+)                                  |
 | `./gradlew :androidApp:assembleDebug` (in `apps/mobile`) | Android-Debug-APK (braucht Android-SDK; CI: `mobile-android`)            |
 
-Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright), `apps/mobile` (Kotlin Multiplatform: `shared`, `composeApp`, `androidApp`; Epic #136) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
+Struktur: `apps/web` (Nuxt-PWA), `apps/server-php` (Slim-API, Worker, Migrationen, Konsole), `packages/shared` (geteilte Typen/Domänenlogik der PWA), `packages/design-tokens` (Farben, Größen, Icons für Web und App), `packages/feature-matrix` (Feature-Verzeichnis Web ↔ App), `packages/contract-tests` (OpenAPI-Contract-Tests über HTTP), `e2e` (Playwright), `apps/mobile` (Kotlin Multiplatform: `shared`, `composeApp`, `androidApp`; Epic #136) – JS-Scope `@fma/*`, wird als TS-Quelle ohne Build-Schritt konsumiert.
 
-Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `./scripts/setup-env.sh` (erzeugt `.env` mit `MASTER_KEY`, VAPID, DB-Passwort – `.env` nie committen, Key separat backupen!). Installationen mit dem früheren Node-Backend werden neu aufgesetzt (`docs/operations/upgrade.md`). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.
+Deployment (ADR-0007, ADR-0013): `docker compose` mit caddy/web/php/worker/mariadb. Erstes Setup: `docker compose up` erzeugt fehlende Secrets (`MASTER_KEY`, VAPID, DB-Passwort) im Volume `app-secrets` (Dienst `secrets`, ADR-0016; sichern mit `bin/secrets.php export`), alternativ `./scripts/setup-env.sh` für eine `.env` – `.env` nie committen, Key separat backupen! Installationen mit dem früheren Node-Backend werden neu aufgesetzt (`docs/operations/upgrade.md`). Ziel-Host: Raspberry Pi (Debian 13, rootless Docker, arm64) via `ssh raspberrypi` in `~/fastmail-alternative`.

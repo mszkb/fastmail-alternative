@@ -8,7 +8,7 @@ TEST_ENV   := DATABASE_URL=mysql://mail:mail@127.0.0.1:33306/mail_test \
               GREENMAIL_HOST=127.0.0.1 GREENMAIL_IMAP_PORT=3143 GREENMAIL_SMTP_PORT=3025 \
               GREENMAIL_USER=testuser@example.com GREENMAIL_PASSWORD=secret123
 
-.PHONY: help env up down ps logs setup-code backup upgrade test-services test-services-down check e2e
+.PHONY: help env up down ps logs setup-code backup upgrade test-services test-services-down check test-live test-account e2e
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -40,7 +40,7 @@ upgrade: ## Upgrade to origin/main (see docs/operations/upgrade.md)
 test-services: ## Start MariaDB (33306) and GreenMail (3143/3025, TLS 3993/3465) for tests; after changes: make test-services-down
 	docker start $(TEST_DB) 2>/dev/null || docker run -d --name $(TEST_DB) \
 	  -e MARIADB_USER=mail -e MARIADB_PASSWORD=mail -e MARIADB_DATABASE=mail_test \
-	  -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:33306:3306 mariadb:11 \
+	  -e MARIADB_ROOT_PASSWORD=root -p 127.0.0.1:33306:3306 mariadb:12.3 \
 	  --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 	docker start $(TEST_MAIL) 2>/dev/null || docker run -d --name $(TEST_MAIL) \
 	  -e GREENMAIL_OPTS='-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled -Dgreenmail.users=testuser@example.com:secret123' \
@@ -54,6 +54,13 @@ test-services-down: ## Remove the test containers
 check: test-services ## Lint, format, typecheck, tests and build (as in CI), plus PHP integration tests
 	pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build
 	cd apps/server-php && composer cs && composer analyse && composer test && $(TEST_ENV) composer test:integration
+
+test-live: ## PHP tests against a real provider account (LIVE_MAIL_* from the environment or .env.live)
+	set -a && { [ ! -f .env.live ] || . ./.env.live; } && set +a && cd apps/server-php && composer test:live
+
+test-account: ## Add the provider test account from .env.live to the running stack (developers only)
+	set -a && . ./.env.live && set +a && docker compose exec -T -e LIVE_MAIL_USER -e LIVE_MAIL_PASSWORD \
+	  -e LIVE_IMAP_HOST -e LIVE_IMAP_PORT -e LIVE_SMTP_HOST -e LIVE_SMTP_PORT php php bin/test-account.php
 
 e2e: test-services ## Browser tests against a local stack (pnpm build first)
 	cd e2e && $(TEST_ENV) E2E_DATABASE_URL=mysql://mail:mail@127.0.0.1:33306/mail_e2e pnpm e2e

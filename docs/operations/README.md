@@ -13,6 +13,7 @@ Doku für alle, die eine eigene Instanz betreiben. In dieser Reihenfolge lesen:
 Außerdem:
 
 - [Installation auf Shared Hosting](installation-php.md) – Webspace mit PHP und MySQL/MariaDB per FTP + Cron, ohne Docker ([ADR-0013](../adr/0013-php-backend.md))
+- [Anmeldung mit Google und Microsoft](oauth.md) – eigene OAuth-App für Gmail und Outlook/Microsoft 365 einrichten (#36)
 - [Systemanforderungen](system-requirements.md) – gemessener Ressourcenverbrauch, Hardware-Empfehlung
 - [Lasttest](load-test.md) – viele Konten, große Postfächer: historische Messwerte des früheren Node-Backends
 - [Umzug auf einen neuen Server](migration.md) – vollständig per Backup oder per Konfigurations-Export

@@ -459,8 +459,8 @@ paths:
       tags: [messages]
       summary: Download one attachment
       description: |
-        Streams the decoded attachment. Only raster images
-        (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
+        Streams the decoded attachment (decoded while sent, not buffered).
+        Only raster images (png/jpeg/gif/webp/avif/bmp) and `text/plain` are served with their
         own content type and may be shown inline (`inline=1`); every other
         type is sent as `application/octet-stream` with
         `Content-Disposition: attachment`. Always sandboxed by CSP.
@@ -506,6 +506,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorMessage' }
+        '503':
+          description: |
+            The raw mail does not fit into the server's PHP `memory_limit`
+            (it is decrypted in one piece, about twice its size is needed).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorMessage' }
 
   /api/accounts/{id}/search:
     parameters:
@@ -526,7 +533,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Any text in headers and body (IMAP TEXT); trimmed, max 200 characters.
+          description: Free text in subject, sender or recipient (`OR SUBJECT OR FROM TO`); with `fulltext` anywhere in headers and body (IMAP TEXT). Trimmed, max 200 characters.
           schema: { type: string, maxLength: 200 }
         - name: from
           in: query
@@ -540,6 +547,7 @@ paths:
         - $ref: '#/components/parameters/SearchUnread'
         - $ref: '#/components/parameters/SearchAttachment'
         - $ref: '#/components/parameters/SearchIncludeJunk'
+        - $ref: '#/components/parameters/SearchFulltext'
         - name: since
           in: query
           required: false
@@ -664,6 +672,8 @@ components:
         - JOB_TIMEOUT
         - CREDENTIALS_REQUIRED
         - RATE_LIMITED
+        - OAUTH_EXPIRED
+        - OAUTH_NOT_CONFIGURED
     HostPort:
       type: object
       required: [host, port]
@@ -688,6 +698,8 @@ components:
         - syncSince
         - unreadCount
         - syncing
+        - credentialKind
+        - oauthProvider
       properties:
         id: { type: string, format: uuid }
         displayName: { type: string }
@@ -721,6 +733,15 @@ components:
         syncing:
           type: boolean
           description: A sync is queued or running (false in create/update responses).
+        credentialKind:
+          type: string
+          enum: [password, oauth2]
+          description: '`oauth2`: sign-in with Google/Microsoft; new sign-in via POST /api/oauth/{provider}/start with `accountId`.'
+        oauthProvider:
+          description: Provider of an `oauth2` account; null for password accounts.
+          oneOf:
+            - $ref: '#/components/schemas/OAuthProvider'
+            - type: 'null'
     AccountListResponse:
       type: object
       required: [accounts]

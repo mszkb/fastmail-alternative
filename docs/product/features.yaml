@@ -43,7 +43,7 @@ features:
         - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/ConnectScreen.kt
         - apps/mobile/composeApp/src/commonMain/kotlin/net/fma/mail/ui/AppViewModel.kt
         - apps/mobile/androidApp/src/main/kotlin/net/fma/mail/android/SecureSessionStore.kt
-    server: [apps/server-php/src/Routes/AuthRoutes.php, apps/server-php/src/Auth/BearerToken.php]
+    server: [apps/server-php/src/Routes/AuthRoutes.php, apps/server-php/src/Auth/Authenticator.php]
 
   - id: auth.password
     area: Anmeldung und Geräte
@@ -484,6 +484,7 @@ features:
       files:
         [
           apps/web/app/assets/css/main.css,
+          apps/web/app/assets/css/tokens.css,
           apps/web/app/utils/appearance.ts,
           packages/shared/src/appearance.ts,
         ]

@@ -211,7 +211,7 @@ erDiagram
 
 - **`user`**: Anmeldung an der Instanz, nicht an den Mailkonten. Im MVP gibt es genau einen Benutzer, angelegt beim ersten Start. Passwort-Hash (Argon2id); `totp_secret_enc` bleibt bis zu späterer 2FA leer. `unified_inbox_enabled` schaltet die optionale Sammelansicht ein (Default aus).
 - **`device`**: gemeinsame Basis für Sessions und Push (ADR-0004). `installation_id` ist die einzige gerätebezogene Kennung im Push-Payload ([push.md](push.md)). Widerruf eines Geräts (`revoked_at`) beendet alle Sessions und deaktiviert alle Subscriptions.
-- **`session`**: nur der **Hash** des Tokens wird gespeichert. Ein späterer nativer Client nutzt dieselbe Tabelle mit einem gerätegebundenen Token.
+- **`session`**: nur der **Hash** des Tokens wird gespeichert. `kind` unterscheidet Browser-Sessions (`cookie`) von gerätegebundenen Tokens nativer Apps (`bearer`, #138, Migration 0009); ein Token gilt nur auf dem Weg, für den es ausgestellt wurde.
 - **`push_subscription`**: `transport` von Anfang an (`webpush`, später `apns`, `relay`). `endpoint` ist eindeutig (Upsert, wenn derselbe Browser sich neu anmeldet); `keys_enc` ist mit dem DEK des Benutzers verschlüsselt (`user.wrapped_dek`, beim ersten Bedarf angelegt). Bei HTTP 404/410 vom Push-Service wird die Zeile direkt gelöscht; `disabled_at` bleibt für spätere Transporte reserviert. Details: [push.md](push.md).
 
 ### Konten
@@ -334,6 +334,8 @@ Das Backend `apps/server-php` ([ADR-0013](../adr/0013-php-backend.md)) speichert
 | `SELECT … FOR UPDATE SKIP LOCKED`                                               | identisch (MySQL 8.0.1+, MariaDB 10.6+)                                                                                                                                               | Job-Queue                                                                                       |
 
 Weil PHP zwischen Requests keinen Prozessspeicher behält, liegt auch Laufzeitzustand in Tabellen (`0002_runtime_state.sql`): `rate_limit`, `login_lockout`, `metric_counter`. Installierte Themes (#126) liegen in `user_theme` (`0007_user_theme.sql`, je Benutzer und Theme-ID das validierte JSON; keine Mailinhalte, daher unverschlüsselt). Dazu kommt `search_result` (`0006_search_result.sql`, #121): die UID-Listen einer globalen Suche für 5 Minuten – nur Konto-/Ordner-IDs, UIDVALIDITY und UIDs, nie Suchbegriffe oder Inhalte ([ADR-0006](../adr/0006-search-index.md#nachtrag-globale-suche-über-alle-konten-121-2026-10-09)). Laufzeittabellen sind nicht im Backup.
+
+Laufende OAuth-Anmeldungen (#36, ADR-0011) stehen in `oauth_state` (`0008_oauth_state.sql`): SHA-256 des `state` als Schlüssel, Benutzer, Anbieter, optional das Konto bei „Neu anmelden“, Erstellzeit. Ein Eintrag gilt 10 Minuten und wird beim Rücksprung gelöscht; er ist nicht im Backup. Tokens eines OAuth-Kontos liegen wie Passwörter in `credential_enc` (`{imapUser, oauth: {provider, refreshToken, accessToken, expiresAt}}`).
 
 Ordnerpfade (`folder.path`) sind `VARCHAR(700)` `utf8mb4_bin` (Unique mit `account_id` passt in den Index-Schlüssel). Sortierungen nach Ids, Zeitstempeln und UIDs ändern sich nicht (ASCII bzw. Zahlen).
 

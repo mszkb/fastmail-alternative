@@ -14,6 +14,10 @@
     <testsuite name="integration">
       <directory>tests/Integration</directory>
     </testsuite>
+    <!-- Needs a real provider account (LIVE_MAIL_*, make test-live); skipped without it. Runs in the nightly. -->
+    <testsuite name="live">
+      <directory>tests/Live</directory>
+    </testsuite>
   </testsuites>
   <source>
     <include>

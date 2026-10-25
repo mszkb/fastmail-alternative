@@ -11,7 +11,8 @@ namespace Fma\Jobs;
  */
 final class AccountErrorException extends \RuntimeException
 {
-    private const AUTH_CODES = ['AUTH_FAILED', 'CREDENTIALS_REQUIRED'];
+    /** OAUTH_EXPIRED: the grant was revoked or expired, the user has to sign in again. */
+    private const AUTH_CODES = ['AUTH_FAILED', 'CREDENTIALS_REQUIRED', 'OAUTH_EXPIRED', 'OAUTH_NOT_CONFIGURED'];
 
     public function __construct(public readonly string $errorCode, ?\Throwable $previous = null)
     {

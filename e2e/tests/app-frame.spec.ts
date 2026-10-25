@@ -58,7 +58,9 @@ test('account bar on a wide screen: initials, switch, choice kept after reload',
   await expect(bar.getByText(ACCOUNT_A, { exact: true })).toBeHidden()
 
   // Header search searches all accounts (#121, global-search.spec.ts).
-  await page.getByRole('banner').getByLabel('Suchbegriff').fill('Hallo 2')
+  // subject: because GreenMail refuses FROM/TO values with spaces, which
+  // free text sends since the header search.
+  await page.getByRole('banner').getByLabel('Suchbegriff').fill('subject:"Hallo 2"')
   await page.keyboard.press('Enter')
   const results = page.getByRole('region', { name: 'Suche in allen Konten' })
   await expect(results.getByText(/\d+ Treffer/)).toBeVisible({ timeout: 20_000 })

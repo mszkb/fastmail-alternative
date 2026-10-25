@@ -1,3 +1,5 @@
+import type { OAuthProviderId } from './oauth'
+
 /**
  * Provider presets for the account form (#117): server, ports and TLS of
  * common providers, taken from docs/product/mail-providers.md, plus a short
@@ -19,6 +21,13 @@ export interface ProviderPreset {
   hint: string
   /** Address domains that select this preset automatically. */
   domains: string[]
+  /**
+   * Base domains of the provider's MX hosts (#165): an own domain whose mail
+   * goes there (e.g. Google Workspace) gets this preset after detection.
+   */
+  mxDomains?: string[]
+  /** Sign-in with this OAuth provider when the server has it configured (#36). */
+  oauth?: OAuthProviderId
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -41,6 +50,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'fastmail.to',
       'messagingengine.com',
     ],
+    mxDomains: ['messagingengine.com'],
   },
   {
     id: 'posteo',
@@ -59,6 +69,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     auth: 'password',
     hint: 'mailbox.org: das normale Passwort des Postfachs verwenden.',
     domains: ['mailbox.org'],
+    mxDomains: ['mailbox.org'],
   },
   {
     id: 'gmail',
@@ -70,6 +81,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'Google verlangt ein App-Passwort (nur mit aktivierter Bestätigung in zwei Schritten): im ' +
       'Google-Konto unter „Sicherheit“ → „App-Passwörter“ anlegen. Labels erscheinen als Ordner.',
     domains: ['gmail.com', 'googlemail.com'],
+    mxDomains: ['google.com', 'googlemail.com'],
+    oauth: 'google',
   },
   {
     id: 'icloud',
@@ -81,6 +94,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'iCloud verlangt ein app-spezifisches Passwort: unter account.apple.com → „Anmelden und ' +
       'Sicherheit“ → „App-spezifische Passwörter“ anlegen. Benutzer ist die iCloud-Adresse.',
     domains: ['icloud.com', 'me.com', 'mac.com'],
+    mxDomains: ['icloud.com'],
   },
   {
     id: 'yahoo',
@@ -116,8 +130,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     smtp: { host: 'smtp.office365.com', port: 587 },
     auth: 'oauth-only',
     hint:
-      'Microsoft erlaubt nur noch OAuth2-Anmeldung; mit Passwort ist das Konto derzeit nicht ' +
-      'nutzbar (OAuth2 folgt mit #36).',
+      'Microsoft erlaubt nur noch die Anmeldung über Microsoft (OAuth2), nicht mit Passwort. ' +
+      'Dafür muss der Betreiber dieses Servers die Anmeldung einrichten ' +
+      '(docs/operations/oauth.md).',
     domains: [
       'outlook.com',
       'outlook.de',
@@ -127,6 +142,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'live.de',
       'msn.com',
     ],
+    mxDomains: ['outlook.com'],
+    oauth: 'microsoft',
   },
 ]
 
@@ -141,6 +158,12 @@ export function presetForAddress(address: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((p) => p.domains.includes(domain))
 }
 
+/** The preset whose MX hosts sit under this base domain (`mxDomain` of `GET /api/autoconfig`). */
+export function presetForMxDomain(mxDomain: string): ProviderPreset | undefined {
+  const domain = mxDomain.trim().toLowerCase()
+  return PROVIDER_PRESETS.find((p) => p.mxDomains?.includes(domain))
+}
+
 /** Form values a preset fills in; the user name is the full address. */
 export function presetFields(
   preset: ProviderPreset,
@@ -152,5 +175,73 @@ export function presetFields(
     smtpHost: preset.smtp.host,
     smtpPort: preset.smtp.port,
     user: address.trim(),
+  }
+}
+
+/** A server found by `GET /api/autoconfig` (#165). */
+export interface AutoconfigServer {
+  host: string
+  port: number
+}
+
+export type AutoconfigSource = 'autoconfig' | 'well-known' | 'ispdb' | 'srv' | 'mx'
+
+/** Response of `GET /api/autoconfig?domain=` (#165). */
+export interface AutoconfigResponse {
+  found: boolean
+  source?: AutoconfigSource
+  imap?: AutoconfigServer
+  smtp?: AutoconfigServer | null
+  /** User name the provider expects: the full address or its local part. */
+  username?: 'address' | 'localpart'
+  /** Base domain of the MX host, when that step ran (e.g. `google.com`). */
+  mxDomain?: string
+}
+
+/** German names of the sources, for the hint under the detected values. */
+export const AUTOCONFIG_SOURCE_LABELS: Record<AutoconfigSource, string> = {
+  autoconfig: 'Autoconfig des Anbieters',
+  'well-known': 'Autoconfig des Anbieters',
+  ispdb: 'Thunderbird-Anbieterdatenbank',
+  srv: 'DNS-Einträge der Domain',
+  mx: 'Mailserver der Domain (MX) und Thunderbird-Anbieterdatenbank',
+}
+
+const DOMAIN_RE =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+/**
+ * The domain to detect settings for: only for a complete address whose
+ * domain has no preset (presets win and need no request).
+ */
+export function autoconfigDomain(address: string): string | undefined {
+  const parts = address.trim().toLowerCase().split('@')
+  if (parts.length !== 2 || !parts[0]) return undefined
+  const domain = parts[1]!.replace(/\.$/, '')
+  if (!DOMAIN_RE.test(domain) || presetForAddress(address)) return undefined
+  return domain
+}
+
+/** Form values from a detection result; SMTP stays undefined when none was found. */
+export function autoconfigFields(
+  result: AutoconfigResponse,
+  address: string,
+):
+  | {
+      imapHost: string
+      imapPort: number
+      smtpHost?: string
+      smtpPort?: number
+      user: string
+    }
+  | undefined {
+  if (!result.found || !result.imap) return undefined
+  const trimmed = address.trim()
+  const user = result.username === 'localpart' ? trimmed.split('@')[0]! : trimmed
+  return {
+    imapHost: result.imap.host,
+    imapPort: result.imap.port,
+    ...(result.smtp ? { smtpHost: result.smtp.host, smtpPort: result.smtp.port } : {}),
+    user,
   }
 }

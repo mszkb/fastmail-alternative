@@ -49,6 +49,11 @@ final class EnvelopeTest extends TestCase
             base64_decode($v['legacyBytes']['plaintext'], true),
             Envelope::decryptBytes($dataKey, $v['legacyBytes']['envelope'], $v['legacyBytes']['aad']),
         );
+        self::assertSame($raw, self::decryptFromStream($dataKey, (string) base64_decode($v['bytes']['envelope'], true), $v['bytes']['aad']));
+        self::assertSame(
+            base64_decode($v['legacyBytes']['plaintext'], true),
+            self::decryptFromStream($dataKey, $v['legacyBytes']['envelope'], $v['legacyBytes']['aad']),
+        );
 
         self::assertSame(
             $v['hmac']['expected'],
@@ -159,6 +164,42 @@ final class EnvelopeTest extends TestCase
         $env[\strlen($env) - 1] = \chr(\ord($env[\strlen($env) - 1]) ^ 0x80);
         $this->expectException(CryptoException::class);
         Envelope::decryptBytes($dataKey, $env, $v['bytes']['aad']);
+    }
+
+    private static function decryptFromStream(string $dataKey, string $envelope, string $aad): string
+    {
+        $handle = fopen('php://memory', 'r+b');
+        self::assertIsResource($handle);
+        fwrite($handle, $envelope);
+        rewind($handle);
+        try {
+            return Envelope::decryptBytesFromStream($dataKey, $handle, \strlen($envelope), $aad);
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    public function testStreamDecryptionRejectsTamperedAndTruncatedBytes(): void
+    {
+        $dataKey = Envelope::generateDataKey();
+        $env = Envelope::encryptBytes($dataKey, random_bytes(100_000), 'message.body:x');
+        $tampered = $env;
+        $tampered[5000] = \chr(\ord($tampered[5000]) ^ 0x01);
+        foreach (['tampered' => $tampered, 'truncated' => substr($env, 0, -1), 'too short' => substr($env, 0, 20)] as $case => $broken) {
+            try {
+                self::decryptFromStream($dataKey, $broken, 'message.body:x');
+                self::fail("{$case}: expected CryptoException");
+            } catch (CryptoException) {
+                self::addToAssertionCount(1);
+            }
+        }
+        // The size has to match the file: a shorter size cuts off the tag.
+        $handle = fopen('php://memory', 'r+b');
+        self::assertIsResource($handle);
+        fwrite($handle, $env);
+        rewind($handle);
+        $this->expectException(CryptoException::class);
+        Envelope::decryptBytesFromStream($dataKey, $handle, \strlen($env) - 16, 'message.body:x');
     }
 
     public function testRejectsInvalidMasterKey(): void

@@ -2,7 +2,9 @@
 // Global search (#121): the search field in the header searches all
 // accounts at their providers (GET /api/search, IMAP SEARCH, online only).
 // The text may carry operators (from:, to:, subject:, before:, after:,
-// has:attachment, is:unread; parseSearchInput from @fma/shared). Hits of all
+// has:attachment, is:unread; parseSearchInput from @fma/shared). Free text
+// matches subject, sender and recipient; the mail text only when chosen
+// (slow at providers without a search index, ADR-0006). Hits of all
 // accounts come merged by date, each with its account icon and folder, the
 // terms highlighted in the subject (text parts, no HTML). More hits load
 // while scrolling (IntersectionObserver on the end of the list, a button as
@@ -12,6 +14,10 @@
 // (AbortController), late answers are dropped. Opening a hit hands it to the
 // mail view of its account, in the folder it was found in, so actions and
 // replies use that account; hits without a local copy yet cannot be opened.
+// Offline (#162): without a connection, or when /api/search is unreachable,
+// the same criteria filter the messages cached on this device (in memory,
+// nothing stored); a notice says so, and "Online erneut suchen" appears once
+// the connection is back.
 import {
   FOLDER_ROLE_LABELS,
   isFolderRole,
@@ -36,6 +42,7 @@ import type {
   SearchQuery,
 } from '@fma/shared'
 import { isOffline } from '~/utils/offline-queue'
+import { cachedFolders, searchCachedMessages } from '~/utils/offline-search'
 
 const props = defineProps<{
   accounts: Pick<AccountSummary, 'id' | 'displayName' | 'emailAddress'>[]
@@ -53,6 +60,8 @@ const emit = defineEmits<{
 const scope = ref<GlobalSearchScope>('all')
 /** Spam and Trash are left out unless chosen; their hits are marked. */
 const includeJunk = ref(false)
+/** Free text also in the mail text (IMAP TEXT); off by default because it is slow. */
+const fulltext = ref(false)
 // Thousands of hits: rows are prepared once when a page arrives (labels,
 // highlighted subject) and kept shallow.
 interface Row {
@@ -69,6 +78,8 @@ const nextCursor = ref<string | null>(null)
 const loading = ref(false)
 const error = ref('')
 const query = ref<SearchQuery | null>(null)
+/** The hits come from the device's cache (server unreachable). */
+const offlineResults = ref(false)
 let request = 0
 let controller: AbortController | null = null
 
@@ -94,6 +105,7 @@ const problems = computed(() =>
 
 const rangeText = computed(() => {
   if (messages.value.length === 0) return ''
+  if (offlineResults.value) return `${messages.value.length} gespeicherte Treffer`
   const shown = messages.value.length
   // `total` counts per folder; never show fewer than what is listed.
   const all = Math.max(total.value, shown)
@@ -154,6 +166,7 @@ async function search(): Promise<void> {
   total.value = 0
   nextCursor.value = null
   error.value = ''
+  offlineResults.value = false
   const parsed = parseSearchQuery(parseSearchInput(props.text) as Record<string, unknown>)
   if (typeof parsed === 'string') {
     query.value = null
@@ -161,7 +174,11 @@ async function search(): Promise<void> {
     error.value = parsed
     return
   }
-  query.value = includeJunk.value ? { ...parsed, includeJunk: true } : parsed
+  query.value = {
+    ...parsed,
+    ...(includeJunk.value ? { includeJunk: true } : {}),
+    ...(fulltext.value ? { fulltext: true } : {}),
+  }
   // The aborted request no longer clears `loading` (its number is stale).
   loading.value = false
   await load(current, null)
@@ -175,7 +192,7 @@ async function more(): Promise<void> {
 async function load(current: number, cursor: string | null): Promise<void> {
   if (!query.value) return
   if (isOffline.value) {
-    error.value = 'Die Suche braucht eine Verbindung zum Server.'
+    if (!cursor) await searchOffline(current)
     return
   }
   controller = new AbortController()
@@ -191,6 +208,11 @@ async function load(current: number, cursor: string | null): Promise<void> {
       }),
       { signal },
     )
+    if (!cursor && [502, 503, 504].includes(res.status)) {
+      // The proxy answers, the backend does not: search the cache instead.
+      if (current === request) await searchOffline(current)
+      return
+    }
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { message?: string } | null
       throw new Error(body?.message ?? `Fehler ${res.status}`)
@@ -210,11 +232,45 @@ async function load(current: number, cursor: string | null): Promise<void> {
     })
   } catch (err) {
     if (current !== request || signal.aborted) return
-    error.value = isOffline.value
-      ? 'Die Suche braucht eine Verbindung zum Server.'
-      : err instanceof Error
-        ? err.message
-        : 'Die Suche ist fehlgeschlagen.'
+    // fetch() rejects with a TypeError when the server is unreachable.
+    if (!cursor && (isOffline.value || err instanceof TypeError)) {
+      await searchOffline(current)
+      return
+    }
+    error.value = err instanceof Error ? err.message : 'Die Suche ist fehlgeschlagen.'
+  } finally {
+    if (current === request) loading.value = false
+  }
+}
+
+/** Searches the messages cached on this device (#162). */
+async function searchOffline(current: number): Promise<void> {
+  if (!query.value) return
+  loading.value = true
+  try {
+    const folders = await cachedFolders()
+    const searched: SearchQuery =
+      scope.value === 'folder' && props.activeFolderId
+        ? { ...query.value, folderId: props.activeFolderId }
+        : query.value
+    const hits = await searchCachedMessages(searched, {
+      folders,
+      accountIds: scope.value === 'all' ? undefined : [props.activeAccountId],
+    })
+    if (current !== request) return
+    for (const [id, cached] of folders) {
+      let names = folderNames.get(cached.accountId)
+      if (!names) {
+        names = new Map()
+        folderNames.set(cached.accountId, names)
+      }
+      names.set(id, { name: folderName(cached.folder), role: cached.role })
+    }
+    offlineResults.value = true
+    messages.value = hits.map((message) => toRow(message))
+    total.value = hits.length
+    nextCursor.value = null
+    accountResults.value = []
   } finally {
     if (current === request) loading.value = false
   }
@@ -228,7 +284,7 @@ function close(): void {
 
 function toRow(message: GlobalSearchItem): Row {
   return {
-    key: `${message.folderId}:${message.uid}`,
+    key: `${message.folderId}:${message.synced && message.id ? message.id : message.uid}`,
     message,
     from: personLabel(message.from),
     date: shortDate(message.date),
@@ -333,7 +389,7 @@ watch(
   () => props.text,
   () => void search(),
 )
-watch([scope, includeJunk], () => void search())
+watch([scope, includeJunk, fulltext], () => void search())
 
 defineExpose({ search })
 </script>
@@ -369,6 +425,9 @@ defineExpose({ search })
         <label
           ><input v-model="includeJunk" type="checkbox" /> Spam und Papierkorb einbeziehen</label
         >
+        <label
+          ><input v-model="fulltext" type="checkbox" /> Auch im Mailtext suchen (langsam)</label
+        >
       </fieldset>
       <button type="button" class="secondary" @click="close">Suche beenden</button>
     </header>
@@ -388,6 +447,13 @@ defineExpose({ search })
         </button>
       </li>
     </ul>
+
+    <p v-if="offlineResults" class="message offline" role="note">
+      <span>Offline – nur gespeicherte Nachrichten durchsucht.</span>
+      <button v-if="!isOffline" type="button" class="link" :disabled="loading" @click="search()">
+        Online erneut suchen
+      </button>
+    </p>
 
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-else-if="!loading && query && messages.length === 0" class="hint">Keine Treffer.</p>
@@ -514,6 +580,16 @@ defineExpose({ search })
   display: flex;
   justify-content: space-between;
   gap: var(--fma-space-2);
+}
+
+.message.offline {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--fma-space-2);
+  margin: 0;
+  padding: var(--fma-space-2) var(--fma-space-4);
+  background: var(--fma-warning-soft);
+  font-size: var(--fma-text-sm);
 }
 
 .messages {
