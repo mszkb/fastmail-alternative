@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Build the Nuxt PWA as static files (SPA, no SSR runtime).
 # Build context: repository root.
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /repo
 
 RUN corepack enable
